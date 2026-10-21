@@ -1,0 +1,980 @@
+import { ListView, ScrollView, TextEdit, Switch, ComboBox, Button } from "std-widgets.slint";
+import { Theme, Icons } from "theme.slint";
+import { Icon, IconButton, PillButton, Art, Slider, Spinner } from "widgets.slint";
+import { PageRow, Layout } from "rows.slint";
+import { Api, TrackItem, CardItem, RowItem, RowKind, QueueItem } from "types.slint";
+
+export { Api, TrackItem, CardItem, RowItem, RowKind, QueueItem }
+
+component NavItem inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <bool> active;
+    callback clicked();
+    height: 48px;
+    border-radius: 8px;
+    background: root.active ? Theme.hover : touch.has-hover ? #ffffff0d : transparent;
+    HorizontalLayout {
+        padding-left: 16px;
+        spacing: 20px;
+        Icon {
+            y: (parent.height - self.height) / 2;
+            path: root.icon;
+            color: root.active ? Theme.text : Theme.text-secondary;
+        }
+        Text {
+            text: root.label;
+            vertical-alignment: center;
+            font-size: 15px;
+            font-weight: root.active ? 600 : 400;
+            color: Theme.text;
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component SearchBox inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <[string]> suggestions;
+    out property <bool> focused: input.has-focus;
+    callback accepted(string);
+    callback edited(string);
+    public function focus-input() { input.focus(); input.select-all(); }
+
+    height: 40px;
+    border-radius: 8px;
+    background: input.has-focus ? #212121 : #ffffff1a;
+    border-width: input.has-focus ? 1px : 0;
+    border-color: #ffffff33;
+
+    HorizontalLayout {
+        padding-left: 12px;
+        padding-right: 8px;
+        spacing: 12px;
+        Icon {
+            y: (parent.height - self.height) / 2;
+            path: Icons.search;
+            color: Theme.text-secondary;
+        }
+        Rectangle {
+            input := TextInput {
+                y: (parent.height - self.height) / 2;
+                width: 100%;
+                single-line: true;
+                font-size: 15px;
+                color: Theme.text;
+                selection-background-color: #3e6ae1;
+                accepted => {
+                    root.accepted(self.text);
+                    self.clear-focus();
+                }
+                edited => { root.edited(self.text); }
+                key-pressed(ev) => {
+                    if ev.text == Key.Escape {
+                        self.clear-focus();
+                        return accept;
+                    }
+                    reject
+                }
+            }
+            if input.text == "": Text {
+                text: "Search songs, albums, artists, playlists";
+                color: Theme.text-dim;
+                font-size: 15px;
+                vertical-alignment: center;
+            }
+        }
+        if input.text != "": IconButton {
+            y: (parent.height - self.height) / 2;
+            icon: Icons.close;
+            size: 28px;
+            icon-size: 18px;
+            clicked => {
+                input.text = "";
+                root.edited("");
+                input.focus();
+            }
+        }
+    }
+
+    if input.has-focus && root.suggestions.length > 0: Rectangle {
+        y: root.height + 4px;
+        height: root.suggestions.length * 40px + 8px;
+        border-radius: 8px;
+        background: #212121;
+        drop-shadow-blur: 16px;
+        drop-shadow-color: #00000080;
+        for suggestion[i] in root.suggestions: Rectangle {
+            y: 4px + i * 40px;
+            height: 40px;
+            background: s-touch.has-hover ? Theme.hover : transparent;
+            HorizontalLayout {
+                padding-left: 12px;
+                spacing: 12px;
+                Icon {
+                    y: (parent.height - self.height) / 2;
+                    path: Icons.search;
+                    size: 20px;
+                    color: Theme.text-secondary;
+                }
+                Text {
+                    text: suggestion;
+                    vertical-alignment: center;
+                    font-size: 14px;
+                    color: Theme.text;
+                    overflow: elide;
+                }
+            }
+            s-touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    input.text = suggestion;
+                    root.accepted(suggestion);
+                    input.clear-focus();
+                }
+            }
+        }
+    }
+}
+
+component PanelTab inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    callback clicked();
+    Text {
+        text: root.label;
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        color: root.active ? Theme.text : Theme.text-secondary;
+    }
+    Rectangle {
+        y: parent.height - 2px;
+        height: 2px;
+        background: root.active ? Theme.text : transparent;
+    }
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+component QueueRow inherits Rectangle {
+    in property <QueueItem> item;
+    callback clicked();
+    callback remove();
+    height: 56px;
+    border-radius: 4px;
+    background: root.item.current ? #ffffff14 : touch.has-hover ? Theme.hover : transparent;
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    HorizontalLayout {
+        padding-left: 8px;
+        padding-right: 8px;
+        spacing: 12px;
+        Rectangle {
+            width: 40px;
+            Art {
+                y: (parent.height - self.height) / 2;
+                width: 40px;
+                height: 40px;
+                source: root.item.art;
+            }
+            if root.item.current: Rectangle {
+                y: (parent.height - 40px) / 2;
+                width: 40px;
+                height: 40px;
+                border-radius: 4px;
+                background: #00000099;
+                Icon {
+                    path: Icons.queue;
+                    size: 20px;
+                }
+            }
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            horizontal-stretch: 1;
+            Text {
+                text: root.item.title;
+                overflow: elide;
+                font-size: 14px;
+                font-weight: 500;
+                color: Theme.text;
+            }
+            Text {
+                text: root.item.artists;
+                overflow: elide;
+                font-size: 13px;
+                color: Theme.text-secondary;
+            }
+        }
+        if touch.has-hover && !root.item.current: IconButton {
+            y: (parent.height - self.height) / 2;
+            icon: Icons.close;
+            size: 32px;
+            icon-size: 18px;
+            clicked => { root.remove(); }
+        }
+        if !touch.has-hover || root.item.current: Text {
+            width: 40px;
+            text: root.item.duration;
+            color: Theme.text-secondary;
+            font-size: 13px;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+}
+
+component Dialog inherits Rectangle {
+    in property <string> title;
+    in property <length> dialog-width: 520px;
+    callback close();
+    background: #000000a0;
+    TouchArea {
+        clicked => { root.close(); }
+    }
+    Rectangle {
+        width: root.dialog-width;
+        height: body.preferred-height;
+        border-radius: 12px;
+        background: #212121;
+        drop-shadow-blur: 24px;
+        drop-shadow-color: #000000a0;
+        TouchArea { }
+        body := VerticalLayout {
+            padding: 24px;
+            spacing: 16px;
+            HorizontalLayout {
+                Text {
+                    text: root.title;
+                    font-size: 20px;
+                    font-weight: 700;
+                    color: Theme.text;
+                    vertical-alignment: center;
+                }
+                IconButton {
+                    icon: Icons.close;
+                    size: 32px;
+                    icon-size: 20px;
+                    clicked => { root.close(); }
+                }
+            }
+            @children
+        }
+    }
+}
+
+component SettingRow inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> detail;
+    spacing: 16px;
+    VerticalLayout {
+        alignment: center;
+        horizontal-stretch: 1;
+        Text {
+            text: root.label;
+            font-size: 14px;
+            color: Theme.text;
+        }
+        if root.detail != "": Text {
+            text: root.detail;
+            font-size: 12px;
+            color: Theme.text-secondary;
+            wrap: word-wrap;
+        }
+    }
+    @children
+}
+
+export component AppWindow inherits Window {
+    title: "YouTube Music";
+    icon: @image-url("../app-icon.png");
+    background: Theme.background;
+    preferred-width: 1280px;
+    preferred-height: 820px;
+    min-width: 900px;
+    min-height: 600px;
+    default-font-family: "Segoe UI Variable Text";
+
+    // Navigation and page
+    in property <[RowItem]> rows;
+    in property <bool> page-loading;
+    in property <string> page-error;
+    in property <string> nav-current: "home";
+    in property <bool> can-back;
+    in property <bool> can-forward;
+    in property <[string]> suggestions;
+    in-out property <string> search-text;
+    in-out property <length> page-scroll;
+
+    // Now playing
+    in property <bool> has-track;
+    in property <string> np-title;
+    in property <string> np-artists;
+    in property <string> np-album;
+    in property <image> np-art;
+    in property <float> np-duration;
+    in property <float> np-position;
+    in property <float> np-buffered;
+    in property <bool> np-playing;
+    in property <bool> np-loading;
+    in property <string> np-quality;
+    in property <bool> np-has-artist;
+    in property <bool> np-has-album;
+    in-out property <float> volume: 0.8;
+    in property <bool> muted;
+    in property <bool> shuffle;
+    in property <int> repeat-mode;
+
+    // Side panel
+    in-out property <bool> panel-open;
+    in-out property <int> panel-tab;
+    in property <[QueueItem]> queue;
+    in property <int> queue-current;
+    in property <string> lyrics;
+    in property <bool> lyrics-loading;
+
+    // Account and settings
+    in property <bool> signed-in;
+    in property <bool> signing-in;
+    in property <string> sign-in-error;
+    in-out property <bool> settings-open;
+    in-out property <bool> sign-in-open;
+    in property <bool> prefer-aac;
+    in property <bool> normalise;
+    in property <bool> discord;
+    in property <bool> autoplay;
+    in property <string> engine-status;
+
+    in property <string> toast;
+
+    callback go(nav: string);
+    callback back();
+    callback forward();
+    callback search(query: string);
+    callback search-edited(query: string);
+    callback toggle-play();
+    callback next();
+    callback previous();
+    callback seek(fraction: float);
+    callback set-volume(value: float);
+    callback toggle-mute();
+    callback toggle-shuffle();
+    callback cycle-repeat();
+    callback queue-play(index: int);
+    callback queue-remove(index: int);
+    callback queue-clear();
+    callback panel-tab-changed(tab: int);
+    callback np-go-artist();
+    callback np-go-album();
+    callback sign-in(cookie: string);
+    callback sign-out();
+    callback set-prefer-aac(value: bool);
+    callback set-normalise(value: bool);
+    callback set-discord(value: bool);
+    callback set-autoplay(value: bool);
+    // Delivered from background threads through the event loop.
+    callback player-event(kind: string, message: string);
+    callback media-action(action: string, value: float);
+
+    function fmt(secs: float) -> string {
+        if secs < 0 { return "0:00"; }
+        let total = floor(secs);
+        let h = floor(total / 3600);
+        let m = mod(floor(total / 60), 60);
+        let s = mod(total, 60);
+        let ss = s < 10 ? "0" + s : "" + s;
+        if h > 0 {
+            return h + ":" + (m < 10 ? "0" + m : "" + m) + ":" + ss;
+        }
+        return m + ":" + ss;
+    }
+
+    public function focus-search() { search-box.focus-input(); }
+
+    Rectangle {
+        background: Theme.background;
+    }
+
+    forward-focus: keys;
+    keys := FocusScope {
+        key-pressed(ev) => {
+            if ev.text == Key.Escape && (root.settings-open || root.sign-in-open) {
+                root.settings-open = false;
+                root.sign-in-open = false;
+                return accept;
+            }
+            if ev.text == " " && !search-box.focused {
+                root.toggle-play();
+                return accept;
+            }
+            if ev.modifiers.control && (ev.text == "f" || ev.text == "l") {
+                search-box.focus-input();
+                return accept;
+            }
+            if ev.modifiers.control && ev.text == Key.RightArrow {
+                root.next();
+                return accept;
+            }
+            if ev.modifiers.control && ev.text == Key.LeftArrow {
+                root.previous();
+                return accept;
+            }
+            if ev.modifiers.alt && ev.text == Key.LeftArrow {
+                root.back();
+                return accept;
+            }
+            reject
+        }
+
+        VerticalLayout {
+            HorizontalLayout {
+                vertical-stretch: 1;
+
+                // Sidebar
+                Rectangle {
+                    width: Theme.sidebar-width;
+                    background: Theme.background;
+                    Rectangle {
+                        x: parent.width - 1px;
+                        width: 1px;
+                        background: Theme.divider;
+                    }
+                    VerticalLayout {
+                        padding: 8px;
+                        padding-top: 16px;
+                        spacing: 4px;
+                        HorizontalLayout {
+                            padding-left: 16px;
+                            padding-bottom: 20px;
+                            spacing: 8px;
+                            Rectangle {
+                                width: 28px;
+                                height: 28px;
+                                border-radius: 14px;
+                                background: #ff0000;
+                                Path {
+                                    width: 14px;
+                                    height: 14px;
+                                    x: 9px;
+                                    commands: Icons.play;
+                                    fill: white;
+                                    viewbox-width: 24;
+                                    viewbox-height: 24;
+                                }
+                            }
+                            Text {
+                                text: "Music";
+                                font-size: 20px;
+                                font-weight: 700;
+                                color: Theme.text;
+                                vertical-alignment: center;
+                            }
+                        }
+                        NavItem {
+                            icon: Icons.home;
+                            label: "Home";
+                            active: root.nav-current == "home";
+                            clicked => { root.go("home"); }
+                        }
+                        NavItem {
+                            icon: Icons.explore;
+                            label: "Explore";
+                            active: root.nav-current == "explore";
+                            clicked => { root.go("explore"); }
+                        }
+                        NavItem {
+                            icon: Icons.library;
+                            label: "Library";
+                            active: root.nav-current == "library";
+                            clicked => { root.go("library"); }
+                        }
+                        Rectangle {
+                            height: 1px;
+                            background: Theme.divider;
+                        }
+                        Rectangle { vertical-stretch: 1; }
+                        NavItem {
+                            icon: Icons.account;
+                            label: root.signed-in ? "Signed in" : "Sign in";
+                            clicked => {
+                                if root.signed-in {
+                                    root.settings-open = true;
+                                } else {
+                                    root.sign-in-open = true;
+                                }
+                            }
+                        }
+                        NavItem {
+                            icon: Icons.settings;
+                            label: "Settings";
+                            clicked => { root.settings-open = true; }
+                        }
+                    }
+                }
+
+                // Content
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    Rectangle {
+                        height: 64px;
+                        z: 10;
+                        HorizontalLayout {
+                            padding-left: 24px;
+                            padding-right: 24px;
+                            spacing: 8px;
+                            IconButton {
+                                y: (parent.height - self.height) / 2;
+                                icon: Icons.back;
+                                enabled: root.can-back;
+                                clicked => { root.back(); }
+                            }
+                            IconButton {
+                                y: (parent.height - self.height) / 2;
+                                icon: Icons.forward;
+                                enabled: root.can-forward;
+                                clicked => { root.forward(); }
+                            }
+                            Rectangle { width: 8px; }
+                            search-box := SearchBox {
+                                y: (parent.height - self.height) / 2;
+                                max-width: 560px;
+                                horizontal-stretch: 1;
+                                text <=> root.search-text;
+                                suggestions: root.suggestions;
+                                accepted(q) => { root.search(q); }
+                                edited(q) => { root.search-edited(q); }
+                            }
+                            Rectangle { horizontal-stretch: 0.0001; }
+                        }
+                    }
+
+                    Rectangle {
+                        vertical-stretch: 1;
+                        list := ListView {
+                            width: 100%;
+                            height: 100%;
+                            visible: !root.page-loading && root.page-error == "";
+                            content-y <=> root.page-scroll;
+                            for row in root.rows: PageRow {
+                                data: row;
+                                content-width: list.visible-width;
+                            }
+                        }
+                        if root.page-loading: Spinner {
+                            size: 40px;
+                        }
+                        if !root.page-loading && root.page-error != "": VerticalLayout {
+                            alignment: center;
+                            spacing: 16px;
+                            Text {
+                                text: root.page-error;
+                                horizontal-alignment: center;
+                                font-size: 16px;
+                                color: Theme.text-secondary;
+                                wrap: word-wrap;
+                            }
+                            HorizontalLayout {
+                                alignment: center;
+                                PillButton {
+                                    text: "Try again";
+                                    clicked => { root.go("reload"); }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Queue and lyrics
+                if root.panel-open: Rectangle {
+                    width: Theme.panel-width;
+                    background: Theme.surface;
+                    Rectangle {
+                        x: 0;
+                        width: 1px;
+                        background: Theme.divider;
+                    }
+                    VerticalLayout {
+                        padding-top: 8px;
+                        HorizontalLayout {
+                            height: 48px;
+                            padding-left: 16px;
+                            padding-right: 16px;
+                            PanelTab {
+                                label: "UP NEXT";
+                                active: root.panel-tab == 0;
+                                clicked => { root.panel-tab = 0; root.panel-tab-changed(0); }
+                            }
+                            PanelTab {
+                                label: "LYRICS";
+                                active: root.panel-tab == 1;
+                                clicked => { root.panel-tab = 1; root.panel-tab-changed(1); }
+                            }
+                        }
+                        if root.panel-tab == 0: VerticalLayout {
+                            vertical-stretch: 1;
+                            if root.queue.length > 1: HorizontalLayout {
+                                padding-left: 16px;
+                                padding-right: 8px;
+                                height: 40px;
+                                Text {
+                                    text: root.queue.length + " songs";
+                                    vertical-alignment: center;
+                                    font-size: 13px;
+                                    color: Theme.text-secondary;
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                                Text {
+                                    text: "Clear up next";
+                                    vertical-alignment: center;
+                                    font-size: 13px;
+                                    color: clear-touch.has-hover ? Theme.text : Theme.text-secondary;
+                                    clear-touch := TouchArea {
+                                        mouse-cursor: pointer;
+                                        clicked => { root.queue-clear(); }
+                                    }
+                                }
+                            }
+                            queue-list := ListView {
+                                vertical-stretch: 1;
+                                for item[i] in root.queue: QueueRow {
+                                    x: 8px;
+                                    width: queue-list.visible-width - 16px;
+                                    item: item;
+                                    clicked => { root.queue-play(i); }
+                                    remove => { root.queue-remove(i); }
+                                }
+                            }
+                            if root.queue.length == 0: Text {
+                                vertical-stretch: 1;
+                                text: "Nothing queued";
+                                horizontal-alignment: center;
+                                vertical-alignment: center;
+                                color: Theme.text-secondary;
+                            }
+                        }
+                        if root.panel-tab == 1: Rectangle {
+                            vertical-stretch: 1;
+                            if root.lyrics-loading: Spinner { size: 32px; }
+                            if !root.lyrics-loading: ScrollView {
+                                width: 100%;
+                                height: 100%;
+                                content-height: lyrics-text.preferred-height + 48px;
+                                lyrics-text := Text {
+                                    x: 24px;
+                                    y: 24px;
+                                    width: parent.width - 48px;
+                                    text: root.lyrics;
+                                    wrap: word-wrap;
+                                    font-size: 16px;
+                                    color: Theme.text;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Player bar
+            Rectangle {
+                height: root.has-track ? Theme.player-height : 0;
+                background: Theme.raised;
+                visible: root.has-track;
+                clip: !root.has-track;
+
+                Slider {
+                    y: -8px;
+                    height: 16px;
+                    width: 100%;
+                    thin: true;
+                    value: root.np-duration > 0 ? root.np-position / root.np-duration : 0;
+                    buffered: root.np-buffered;
+                    seek(f) => { root.seek(f); }
+                }
+
+                HorizontalLayout {
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    spacing: 8px;
+
+                    // Transport
+                    HorizontalLayout {
+                        spacing: 4px;
+                        alignment: start;
+                        width: 260px;
+                        IconButton {
+                            y: (parent.height - self.height) / 2;
+                            icon: Icons.previous;
+                            color: Theme.text;
+                            clicked => { root.previous(); }
+                        }
+                        Rectangle {
+                            width: 48px;
+                            if root.np-loading: Spinner {
+                                size: 28px;
+                            }
+                            if !root.np-loading: IconButton {
+                                y: (parent.height - self.height) / 2;
+                                icon: root.np-playing ? Icons.pause : Icons.play;
+                                size: 48px;
+                                icon-size: 36px;
+                                color: Theme.text;
+                                clicked => { root.toggle-play(); }
+                            }
+                        }
+                        IconButton {
+                            y: (parent.height - self.height) / 2;
+                            icon: Icons.next;
+                            color: Theme.text;
+                            clicked => { root.next(); }
+                        }
+                        Text {
+                            text: root.fmt(root.np-position) + " / " + root.fmt(root.np-duration);
+                            vertical-alignment: center;
+                            font-size: 12px;
+                            color: Theme.text-secondary;
+                        }
+                    }
+
+                    // Track info
+                    HorizontalLayout {
+                        horizontal-stretch: 1;
+                        alignment: center;
+                        spacing: 16px;
+                        Art {
+                            y: (parent.height - self.height) / 2;
+                            width: 40px;
+                            height: 40px;
+                            source: root.np-art;
+                        }
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: 2px;
+                            max-width: 420px;
+                            Text {
+                                text: root.np-title;
+                                overflow: elide;
+                                font-size: 14px;
+                                font-weight: 600;
+                                color: Theme.text;
+                            }
+                            HorizontalLayout {
+                                Text {
+                                    text: root.np-artists;
+                                    overflow: elide;
+                                    font-size: 13px;
+                                    color: a-touch.has-hover && root.np-has-artist ? Theme.text : Theme.text-secondary;
+                                    a-touch := TouchArea {
+                                        mouse-cursor: root.np-has-artist ? pointer : default;
+                                        clicked => { root.np-go-artist(); }
+                                    }
+                                }
+                                if root.np-album != "": Text {
+                                    text: "  •  " + root.np-album;
+                                    overflow: elide;
+                                    font-size: 13px;
+                                    color: al-touch.has-hover && root.np-has-album ? Theme.text : Theme.text-secondary;
+                                    al-touch := TouchArea {
+                                        mouse-cursor: root.np-has-album ? pointer : default;
+                                        clicked => { root.np-go-album(); }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    // Options
+                    HorizontalLayout {
+                        width: 400px;
+                        alignment: end;
+                        spacing: 4px;
+                        if root.np-quality != "": Text {
+                            text: root.np-quality;
+                            vertical-alignment: center;
+                            font-size: 11px;
+                            color: Theme.text-dim;
+                        }
+                        IconButton {
+                            y: (parent.height - self.height) / 2;
+                            icon: root.muted || root.volume == 0 ? Icons.volume-off : Icons.volume;
+                            clicked => { root.toggle-mute(); }
+                        }
+                        Slider {
+                            y: (parent.height - self.height) / 2;
+                            width: 96px;
+                            fill: Theme.text;
+                            value: root.muted ? 0 : root.volume;
+                            changed(v) => { root.set-volume(v); }
+                            seek(v) => { root.set-volume(v); }
+                        }
+                        IconButton {
+                            y: (parent.height - self.height) / 2;
+                            icon: root.repeat-mode == 2 ? Icons.repeat-one : Icons.repeat;
+                            active: root.repeat-mode != 0;
+                            clicked => { root.cycle-repeat(); }
+                        }
+                        IconButton {
+                            y: (parent.height - self.height) / 2;
+                            icon: Icons.shuffle;
+                            active: root.shuffle;
+                            clicked => { root.toggle-shuffle(); }
+                        }
+                        IconButton {
+                            y: (parent.height - self.height) / 2;
+                            icon: Icons.lyrics;
+                            active: root.panel-open && root.panel-tab == 1;
+                            clicked => {
+                                if root.panel-open && root.panel-tab == 1 {
+                                    root.panel-open = false;
+                                } else {
+                                    root.panel-open = true;
+                                    root.panel-tab = 1;
+                                    root.panel-tab-changed(1);
+                                }
+                            }
+                        }
+                        IconButton {
+                            y: (parent.height - self.height) / 2;
+                            icon: Icons.queue;
+                            active: root.panel-open && root.panel-tab == 0;
+                            clicked => {
+                                if root.panel-open && root.panel-tab == 0 {
+                                    root.panel-open = false;
+                                } else {
+                                    root.panel-open = true;
+                                    root.panel-tab = 0;
+                                    root.panel-tab-changed(0);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if root.toast != "": Rectangle {
+            x: (root.width - self.width) / 2;
+            y: root.height - Theme.player-height - self.height - 24px;
+            width: min(toast-text.preferred-width + 48px, root.width - 64px);
+            height: toast-text.preferred-height + 24px;
+            border-radius: 8px;
+            background: #323232;
+            drop-shadow-blur: 12px;
+            drop-shadow-color: #00000080;
+            toast-text := Text {
+                width: parent.width - 48px;
+                text: root.toast;
+                wrap: word-wrap;
+                horizontal-alignment: center;
+                font-size: 14px;
+                color: Theme.text;
+            }
+        }
+
+        if root.settings-open: Dialog {
+            title: "Settings";
+            close => { root.settings-open = false; }
+            SettingRow {
+                label: "Prefer AAC audio";
+                detail: "AAC uses about a tenth of the CPU. Turn off for Opus, YouTube's best-quality format.";
+                Switch {
+                    checked: root.prefer-aac;
+                    toggled => { root.set-prefer-aac(self.checked); }
+                }
+            }
+            SettingRow {
+                label: "Normalise volume";
+                detail: "Plays every track at a similar loudness, as YouTube Music does.";
+                Switch {
+                    checked: root.normalise;
+                    toggled => { root.set-normalise(self.checked); }
+                }
+            }
+            SettingRow {
+                label: "Autoplay";
+                detail: "Keeps playing similar music when the queue ends.";
+                Switch {
+                    checked: root.autoplay;
+                    toggled => { root.set-autoplay(self.checked); }
+                }
+            }
+            SettingRow {
+                label: "Discord Rich Presence";
+                detail: "Shows what you are listening to on Discord.";
+                Switch {
+                    checked: root.discord;
+                    toggled => { root.set-discord(self.checked); }
+                }
+            }
+            Rectangle {
+                height: 1px;
+                background: Theme.divider;
+            }
+            SettingRow {
+                label: root.signed-in ? "Signed in" : "Not signed in";
+                detail: root.signed-in ? "Your library and history come from your YouTube account." : "Sign in to see your library and history.";
+                PillButton {
+                    text: root.signed-in ? "Sign out" : "Sign in";
+                    clicked => {
+                        if root.signed-in {
+                            root.sign-out();
+                        } else {
+                            root.settings-open = false;
+                            root.sign-in-open = true;
+                        }
+                    }
+                }
+            }
+            Text {
+                text: root.engine-status;
+                font-size: 12px;
+                color: Theme.text-dim;
+            }
+        }
+
+        if root.sign-in-open: Dialog {
+            title: "Sign in";
+            dialog-width: 600px;
+            close => { root.sign-in-open = false; }
+            Text {
+                text: "Paste the cookies of a signed-in music.youtube.com session: either a cookies.txt export or the Cookie request header from the browser's developer tools (Network tab). Use a private window and close it afterwards, as YouTube rotates cookies of open sessions.";
+                wrap: word-wrap;
+                font-size: 13px;
+                color: Theme.text-secondary;
+            }
+            cookie-input := TextEdit {
+                height: 160px;
+                font-size: 12px;
+                wrap: char-wrap;
+            }
+            if root.sign-in-error != "": Text {
+                text: root.sign-in-error;
+                wrap: word-wrap;
+                font-size: 13px;
+                color: #ff6b6b;
+            }
+            HorizontalLayout {
+                alignment: end;
+                spacing: 12px;
+                if root.signing-in: Spinner { size: 24px; }
+                PillButton {
+                    text: "Cancel";
+                    clicked => { root.sign-in-open = false; }
+                }
+                PillButton {
+                    text: "Sign in";
+                    primary: true;
+                    clicked => { root.sign-in(cookie-input.text); }
+                }
+            }
+        }
+    }
+}

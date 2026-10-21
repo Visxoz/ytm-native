@@ -1,0 +1,65 @@
+export struct TrackItem {
+    id: string,
+    title: string,
+    artists: string,
+    album: string,
+    duration: string,
+    art: image,
+    number: string,
+    has-artist: bool,
+    has-album: bool,
+}
+
+export struct CardItem {
+    kind: string,
+    id: string,
+    title: string,
+    subtitle: string,
+    art: image,
+    round: bool,
+    tint: color,
+}
+
+export enum RowKind { header, title, track, carousel, grid, chips }
+
+/// One row of the virtualised page list.
+export struct RowItem {
+    kind: RowKind,
+    // header and title
+    title: string,
+    subtitle: string,
+    meta: string,
+    description: string,
+    art: image,
+    round: bool,
+    can-play: bool,
+    can-shuffle: bool,
+    can-radio: bool,
+    // track rows
+    track: TrackItem,
+    numbered: bool,
+    // card rows
+    cards: [CardItem],
+    // where the row's items live in the page, for callbacks
+    section: int,
+    index: int,
+}
+
+export struct QueueItem {
+    title: string,
+    artists: string,
+    duration: string,
+    art: image,
+    current: bool,
+}
+
+/// Calls from anywhere in the UI into Rust.
+export global Api {
+    callback navigate(kind: string, id: string, title: string);
+    callback play-track(section: int, index: int);
+    callback track-action(action: string, section: int, index: int);
+    callback play-card(kind: string, id: string);
+    callback card-radio(kind: string, id: string);
+    callback header-action(action: string);
+    in-out property <string> playing-id;
+}

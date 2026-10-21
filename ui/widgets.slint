@@ -1,0 +1,187 @@
+import { Theme, Icons } from "theme.slint";
+
+export component Icon {
+    in property <string> path;
+    in property <color> color: Theme.text;
+    in property <length> size: 24px;
+    width: root.size;
+    height: root.size;
+    Path {
+        width: 100%;
+        height: 100%;
+        commands: root.path;
+        fill: root.color;
+        viewbox-width: 24;
+        viewbox-height: 24;
+    }
+}
+
+export component IconButton {
+    in property <string> icon;
+    in property <length> size: 40px;
+    in property <length> icon-size: 24px;
+    in property <bool> active;
+    in property <bool> enabled: true;
+    in property <color> color: root.active ? Theme.text : Theme.text-secondary;
+    in property <string> tooltip;
+    in property <color> background: transparent;
+    callback clicked();
+    width: root.size;
+    height: root.size;
+    Rectangle {
+        border-radius: self.height / 2;
+        background: touch.pressed ? Theme.pressed : touch.has-hover && root.enabled ? Theme.hover : root.background;
+        animate background { duration: 100ms; }
+    }
+    Icon {
+        path: root.icon;
+        size: root.icon-size;
+        color: !root.enabled ? Theme.text-dim : touch.has-hover ? Theme.text : root.color;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+    if root.active && root.tooltip == "": Rectangle {
+        y: root.height - 6px;
+        width: 4px;
+        height: 4px;
+        border-radius: 2px;
+        background: Theme.text;
+    }
+}
+
+export component PillButton {
+    in property <string> text;
+    in property <string> icon;
+    in property <bool> primary;
+    callback clicked();
+    height: 36px;
+    min-width: layout.preferred-width;
+    Rectangle {
+        border-radius: self.height / 2;
+        background: root.primary ? (touch.has-hover ? #e0e0e0 : #ffffff) : (touch.has-hover ? Theme.hover : transparent);
+        border-width: root.primary ? 0 : 1px;
+        border-color: #ffffff33;
+        animate background { duration: 100ms; }
+    }
+    layout := HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 18px;
+        spacing: 8px;
+        alignment: center;
+        if root.icon != "": Icon {
+            y: (parent.height - self.height) / 2;
+            path: root.icon;
+            size: 20px;
+            color: root.primary ? #030303 : Theme.text;
+        }
+        Text {
+            text: root.text;
+            vertical-alignment: center;
+            font-size: 14px;
+            font-weight: 600;
+            color: root.primary ? #030303 : Theme.text;
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+/// Artwork with rounded corners and a music-note placeholder while loading.
+export component Art inherits Rectangle {
+    in property <image> source;
+    in property <bool> round;
+    border-radius: root.round ? self.width / 2 : 4px;
+    clip: true;
+    background: Theme.raised;
+    if root.source.width == 0: Icon {
+        path: Icons.note;
+        size: min(root.width, root.height) * 0.4;
+        color: Theme.text-dim;
+    }
+    Image {
+        width: 100%;
+        height: 100%;
+        source: root.source;
+        image-fit: cover;
+    }
+}
+
+/// A horizontal slider. `seek` fires on release; `changed` while dragging.
+export component Slider {
+    in property <float> value;
+    in property <float> buffered;
+    in property <color> fill: Theme.accent;
+    in property <bool> thin;
+    callback changed(float);
+    callback seek(float);
+    property <bool> dragging;
+    property <float> drag-value;
+    property <float> shown: root.dragging ? root.drag-value : clamp(root.value, 0, 1);
+    property <bool> hot: touch.has-hover || root.dragging;
+    height: 16px;
+    Rectangle {
+        y: (parent.height - self.height) / 2;
+        height: root.hot ? 4px : (root.thin ? 2px : 3px);
+        border-radius: self.height / 2;
+        background: #ffffff33;
+        clip: true;
+        Rectangle {
+            x: 0;
+            width: parent.width * clamp(root.buffered, 0, 1);
+            background: #ffffff40;
+        }
+        Rectangle {
+            x: 0;
+            width: parent.width * root.shown;
+            background: root.fill;
+        }
+    }
+    if root.hot: Rectangle {
+        x: root.width * root.shown - self.width / 2;
+        y: (parent.height - self.height) / 2;
+        width: 12px;
+        height: 12px;
+        border-radius: 6px;
+        background: root.fill;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        pointer-event(ev) => {
+            if ev.button == PointerEventButton.left && ev.kind == PointerEventKind.down {
+                root.dragging = true;
+                root.drag-value = clamp(self.mouse-x / self.width, 0, 1);
+                root.changed(root.drag-value);
+            } else if ev.button == PointerEventButton.left && ev.kind == PointerEventKind.up && root.dragging {
+                root.dragging = false;
+                root.seek(root.drag-value);
+            }
+        }
+        moved => {
+            if root.dragging {
+                root.drag-value = clamp(self.mouse-x / self.width, 0, 1);
+                root.changed(root.drag-value);
+            }
+        }
+    }
+}
+
+export component Spinner {
+    in property <length> size: 32px;
+    width: root.size;
+    height: root.size;
+    property <float> turn: mod(animation-tick() / 1s, 1);
+    for i in 8: Rectangle {
+        x: root.width / 2 + cos((i / 8) * 360deg) * root.width * 0.38 - self.width / 2;
+        y: root.height / 2 + sin((i / 8) * 360deg) * root.height * 0.38 - self.height / 2;
+        width: root.size / 7;
+        height: self.width;
+        border-radius: self.width / 2;
+        background: Theme.text;
+        opacity: 0.15 + 0.85 * mod(1 + i / 8 - root.turn, 1);
+    }
+}

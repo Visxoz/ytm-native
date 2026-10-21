@@ -1,0 +1,481 @@
+import { Theme, Icons } from "theme.slint";
+import { Icon, IconButton, PillButton, Art } from "widgets.slint";
+import { Api, TrackItem, CardItem, RowItem, RowKind } from "types.slint";
+
+export global Layout {
+    out property <length> page-padding: 32px;
+    out property <length> card-width: 176px;
+    out property <length> card-gap: 24px;
+    out property <length> card-text: 56px;
+    out property <length> chip-min-width: 200px;
+    out property <length> chip-height: 48px;
+    out property <length> chip-gap: 12px;
+}
+
+component Link inherits Text {
+    in property <bool> enabled: true;
+    callback clicked();
+    overflow: elide;
+    color: Theme.text-secondary;
+    font-size: 13px;
+    TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component TrackRow inherits Rectangle {
+    in property <TrackItem> track;
+    in property <bool> numbered;
+    in property <int> section;
+    in property <int> index;
+    property <bool> playing: root.track.id != "" && Api.playing-id == root.track.id;
+    height: 56px;
+    border-radius: 4px;
+    background: touch.has-hover || more.has-hover ? Theme.hover : transparent;
+
+    menu := ContextMenuArea {
+        Menu {
+            MenuItem {
+                title: "Play next";
+                activated => { Api.track-action("next", root.section, root.index); }
+            }
+            MenuItem {
+                title: "Add to queue";
+                activated => { Api.track-action("queue", root.section, root.index); }
+            }
+            MenuItem {
+                title: "Start radio";
+                activated => { Api.track-action("radio", root.section, root.index); }
+            }
+            MenuSeparator { }
+            MenuItem {
+                title: "Go to artist";
+                enabled: root.track.has-artist;
+                activated => { Api.track-action("artist", root.section, root.index); }
+            }
+            MenuItem {
+                title: "Go to album";
+                enabled: root.track.has-album;
+                activated => { Api.track-action("album", root.section, root.index); }
+            }
+        }
+
+        touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { Api.play-track(root.section, root.index); }
+        }
+
+        HorizontalLayout {
+            padding-left: 8px;
+            padding-right: 8px;
+            spacing: 16px;
+
+            if root.numbered: Rectangle {
+                width: 32px;
+                if root.playing: Icon {
+                    path: Icons.play;
+                    size: 20px;
+                    color: Theme.accent;
+                }
+                if !root.playing: Text {
+                    text: root.track.number;
+                    color: Theme.text-secondary;
+                    font-size: 14px;
+                }
+            }
+            if !root.numbered: Rectangle {
+                width: 40px;
+                Art {
+                    y: (parent.height - self.height) / 2;
+                    width: 40px;
+                    height: 40px;
+                    source: root.track.art;
+                }
+                if touch.has-hover || root.playing: Rectangle {
+                    y: (parent.height - 40px) / 2;
+                    width: 40px;
+                    height: 40px;
+                    border-radius: 4px;
+                    background: #00000080;
+                    Icon {
+                        path: root.playing ? Icons.queue : Icons.play;
+                        size: 22px;
+                        color: Theme.text;
+                    }
+                }
+            }
+
+            VerticalLayout {
+                alignment: center;
+                spacing: 2px;
+                horizontal-stretch: 1;
+                Text {
+                    text: root.track.title;
+                    overflow: elide;
+                    font-size: 14px;
+                    font-weight: 500;
+                    color: root.playing ? Theme.accent : Theme.text;
+                }
+                HorizontalLayout {
+                    spacing: 0;
+                    alignment: start;
+                    Link {
+                        text: root.track.artists;
+                        enabled: root.track.has-artist;
+                        clicked => { Api.track-action("artist", root.section, root.index); }
+                    }
+                    if !root.numbered && root.track.album != "": Link {
+                        text: "  •  " + root.track.album;
+                        enabled: root.track.has-album;
+                        clicked => { Api.track-action("album", root.section, root.index); }
+                    }
+                }
+            }
+
+            more := Rectangle {
+                width: 40px;
+                property <bool> has-hover: more-touch.has-hover;
+                opacity: touch.has-hover || more-touch.has-hover ? 1 : 0;
+                IconButton {
+                    y: (parent.height - self.height) / 2;
+                    icon: Icons.more;
+                    size: 36px;
+                    icon-size: 20px;
+                }
+                more-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => { menu.show({ x: more.x, y: more.y + more.height - 8px }); }
+                }
+            }
+
+            Text {
+                width: 48px;
+                text: root.track.duration;
+                color: Theme.text-secondary;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                font-size: 13px;
+            }
+        }
+    }
+}
+
+export component Card {
+    in property <CardItem> card;
+    width: Layout.card-width;
+    height: self.width + Layout.card-text;
+
+    cm := ContextMenuArea {
+        Menu {
+            MenuItem {
+                title: "Play";
+                activated => { Api.play-card(root.card.kind, root.card.id); }
+            }
+            MenuItem {
+                title: "Start radio";
+                activated => { Api.card-radio(root.card.kind, root.card.id); }
+            }
+        }
+
+        touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { Api.navigate(root.card.kind, root.card.id, root.card.title); }
+        }
+
+        art := Art {
+            x: 0;
+            y: 0;
+            width: root.width;
+            height: root.width;
+            source: root.card.art;
+            round: root.card.round;
+        }
+        if touch.has-hover || play-touch.has-hover: Rectangle {
+            x: 0;
+            y: 0;
+            width: root.width;
+            height: root.width;
+            border-radius: art.border-radius;
+            background: @linear-gradient(180deg, #00000000 50%, #000000a0 100%);
+        }
+        Rectangle {
+            x: root.width - self.width - 12px;
+            y: root.width - self.height - 12px;
+            width: 40px;
+            height: 40px;
+            border-radius: 20px;
+            background: play-touch.has-hover ? #000000e0 : #000000b0;
+            opacity: touch.has-hover || play-touch.has-hover ? 1 : 0;
+            animate opacity { duration: 120ms; }
+            Icon {
+                path: Icons.play;
+                size: 24px;
+            }
+            play-touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { Api.play-card(root.card.kind, root.card.id); }
+            }
+        }
+
+        VerticalLayout {
+            y: root.width + 8px;
+            height: Layout.card-text - 8px;
+            spacing: 2px;
+            alignment: start;
+            Text {
+                text: root.card.title;
+                overflow: elide;
+                font-size: 14px;
+                font-weight: 600;
+                color: Theme.text;
+                horizontal-alignment: root.card.round ? center : left;
+            }
+            Text {
+                text: root.card.subtitle;
+                overflow: elide;
+                font-size: 13px;
+                color: Theme.text-secondary;
+                horizontal-alignment: root.card.round ? center : left;
+            }
+        }
+    }
+}
+
+component Chip inherits Rectangle {
+    in property <CardItem> card;
+    height: Layout.chip-height;
+    border-radius: 6px;
+    background: touch.has-hover ? #2c2c2c : Theme.raised;
+    clip: true;
+    Rectangle {
+        x: 0;
+        width: 6px;
+        background: root.card.tint;
+    }
+    Text {
+        x: 20px;
+        width: parent.width - 28px;
+        text: root.card.title;
+        overflow: elide;
+        vertical-alignment: center;
+        font-size: 14px;
+        font-weight: 600;
+        color: Theme.text;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { Api.navigate(root.card.kind, root.card.id, root.card.title); }
+    }
+}
+
+/// A row of cards scrolled with arrow buttons, like YouTube Music's shelves.
+export component Carousel {
+    in property <[CardItem]> cards;
+    property <length> step: Layout.card-width + Layout.card-gap;
+    property <length> content-width: root.cards.length * root.step - Layout.card-gap;
+    property <length> max-offset: max(0px, root.content-width - root.width);
+    property <length> offset;
+    height: Layout.card-width + Layout.card-text;
+
+    Rectangle {
+        clip: true;
+        Rectangle {
+            x: -root.offset;
+            animate x { duration: 300ms; easing: ease-out; }
+            for card[i] in root.cards: Card {
+                x: i * root.step;
+                y: 0;
+                card: card;
+            }
+        }
+    }
+    if root.offset > 0: IconButton {
+        x: -20px;
+        y: Layout.card-width / 2 - self.height / 2;
+        icon: Icons.chevron-left;
+        color: Theme.text;
+        background: #212121e0;
+        clicked => { root.offset = max(0px, root.offset - floor(root.width / root.step) * root.step); }
+    }
+    if root.offset < root.max-offset: IconButton {
+        x: root.width - self.width + 20px;
+        y: Layout.card-width / 2 - self.height / 2;
+        icon: Icons.chevron-right;
+        color: Theme.text;
+        background: #212121e0;
+        clicked => { root.offset = min(root.max-offset, root.offset + max(1, floor(root.width / root.step)) * root.step); }
+    }
+}
+
+export component CardGrid {
+    in property <[CardItem]> cards;
+    out property <int> columns: max(1, floor((root.width + Layout.card-gap) / (Layout.card-width + Layout.card-gap)));
+    property <length> cell: (root.width - (root.columns - 1) * Layout.card-gap) / root.columns;
+    property <int> rows: ceil(root.cards.length / root.columns);
+    height: root.rows * (root.cell + Layout.card-text + Layout.card-gap);
+    for card[i] in root.cards: Card {
+        x: mod(i, root.columns) * (root.cell + Layout.card-gap);
+        y: floor(i / root.columns) * (root.cell + Layout.card-text + Layout.card-gap);
+        width: root.cell;
+        card: card;
+    }
+}
+
+export component ChipGrid {
+    in property <[CardItem]> cards;
+    property <int> columns: max(1, floor((root.width + Layout.chip-gap) / (Layout.chip-min-width + Layout.chip-gap)));
+    property <length> cell: (root.width - (root.columns - 1) * Layout.chip-gap) / root.columns;
+    property <int> rows: ceil(root.cards.length / root.columns);
+    height: root.rows * (Layout.chip-height + Layout.chip-gap);
+    for card[i] in root.cards: Chip {
+        x: mod(i, root.columns) * (root.cell + Layout.chip-gap);
+        y: floor(i / root.columns) * (Layout.chip-height + Layout.chip-gap);
+        width: root.cell;
+        card: card;
+    }
+}
+
+export component PageHeader {
+    in property <RowItem> data;
+    property <bool> has-art: root.data.can-play || root.data.round;
+    height: root.has-art ? 296px : 112px;
+
+    if !root.has-art: Text {
+        y: 40px;
+        text: root.data.title;
+        font-size: 40px;
+        font-weight: 700;
+        color: Theme.text;
+    }
+    if root.has-art: HorizontalLayout {
+        padding-top: 32px;
+        padding-bottom: 24px;
+        spacing: 32px;
+        Art {
+            width: 240px;
+            height: 240px;
+            source: root.data.art;
+            round: root.data.round;
+        }
+        VerticalLayout {
+            alignment: center;
+            spacing: 8px;
+            Text {
+                text: root.data.title;
+                font-size: 36px;
+                font-weight: 700;
+                color: Theme.text;
+                overflow: elide;
+            }
+            if root.data.subtitle != "": Text {
+                text: root.data.subtitle;
+                font-size: 15px;
+                color: Theme.text;
+                overflow: elide;
+            }
+            if root.data.meta != "": Text {
+                text: root.data.meta;
+                font-size: 14px;
+                color: Theme.text-secondary;
+                overflow: elide;
+            }
+            if root.data.description != "": Rectangle {
+                height: 54px;
+                clip: true;
+                Text {
+                    width: 100%;
+                    height: 100%;
+                    text: root.data.description;
+                    font-size: 13px;
+                    color: Theme.text-secondary;
+                    wrap: word-wrap;
+                    overflow: elide;
+                    vertical-alignment: top;
+                }
+            }
+            HorizontalLayout {
+                padding-top: 12px;
+                spacing: 12px;
+                alignment: start;
+                if root.data.can-play: PillButton {
+                    text: "Play";
+                    icon: Icons.play;
+                    primary: true;
+                    clicked => { Api.header-action("play"); }
+                }
+                if root.data.can-shuffle: PillButton {
+                    text: "Shuffle";
+                    icon: Icons.shuffle;
+                    clicked => { Api.header-action("shuffle"); }
+                }
+                if root.data.can-radio: PillButton {
+                    text: "Radio";
+                    icon: Icons.radio;
+                    clicked => { Api.header-action("radio"); }
+                }
+            }
+        }
+    }
+}
+
+/// One entry of the page list; its kind picks what it shows.
+export component PageRow {
+    in property <RowItem> data;
+    in property <length> content-width;
+    property <length> inner: root.content-width - 2 * Layout.page-padding;
+    property <int> card-columns: max(1, floor((root.inner + Layout.card-gap) / (Layout.card-width + Layout.card-gap)));
+    property <length> card-cell: (root.inner - (root.card-columns - 1) * Layout.card-gap) / root.card-columns;
+    property <int> chip-columns: max(1, floor((root.inner + Layout.chip-gap) / (Layout.chip-min-width + Layout.chip-gap)));
+
+    width: root.content-width;
+    height: root.data.kind == RowKind.header ? (root.data.can-play || root.data.round ? 296px : 112px)
+        : root.data.kind == RowKind.title ? 64px
+        : root.data.kind == RowKind.track ? 56px
+        : root.data.kind == RowKind.carousel ? Layout.card-width + Layout.card-text + 16px
+        : root.data.kind == RowKind.grid ? ceil(root.data.cards.length / root.card-columns) * (root.card-cell + Layout.card-text + Layout.card-gap)
+        : ceil(root.data.cards.length / root.chip-columns) * (Layout.chip-height + Layout.chip-gap);
+
+    if root.data.kind == RowKind.header: PageHeader {
+        x: Layout.page-padding;
+        width: root.inner;
+        data: root.data;
+    }
+    if root.data.kind == RowKind.title: Text {
+        x: Layout.page-padding;
+        y: 24px;
+        width: root.inner;
+        text: root.data.title;
+        font-size: 22px;
+        font-weight: 700;
+        color: Theme.text;
+        overflow: elide;
+    }
+    if root.data.kind == RowKind.track: TrackRow {
+        x: Layout.page-padding - 8px;
+        width: root.inner + 16px;
+        track: root.data.track;
+        numbered: root.data.numbered;
+        section: root.data.section;
+        index: root.data.index;
+    }
+    if root.data.kind == RowKind.carousel: Carousel {
+        x: Layout.page-padding;
+        y: 0;
+        width: root.inner;
+        cards: root.data.cards;
+    }
+    if root.data.kind == RowKind.grid: CardGrid {
+        x: Layout.page-padding;
+        y: 0;
+        width: root.inner;
+        cards: root.data.cards;
+    }
+    if root.data.kind == RowKind.chips: ChipGrid {
+        x: Layout.page-padding;
+        y: 0;
+        width: root.inner;
+        cards: root.data.cards;
+    }
+}
