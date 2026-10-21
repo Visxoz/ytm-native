@@ -10,7 +10,7 @@ use rustypipe::{
 
 /// Thumbnail edge, in pixels, wanted for list rows and for cards.
 pub const ROW_THUMB: u32 = 120;
-pub const CARD_THUMB: u32 = 360;
+pub const CARD_THUMB: u32 = 240;
 const HEADER_THUMB: u32 = 544;
 /// Longest playlist loaded in one go.
 const PLAYLIST_LIMIT: usize = 500;
@@ -866,10 +866,9 @@ impl Api {
             .unwrap_or_default()
     }
 
-    /// Loudness YouTube measured for a track, from the player endpoint.
-    pub async fn loudness_db(&self, video_id: &str) -> Option<f32> {
-        let player = self.q().player(video_id).await.ok()?;
-        player.audio_streams.iter().find_map(|s| s.loudness_db)
+    /// A YouTube visitor ID, which the player endpoint wants.
+    pub async fn visitor_data(&self, fresh: bool) -> Result<String> {
+        self.q().get_visitor_data(fresh).await.map_err(err)
     }
 
     pub async fn sign_in(&self, cookie: &str) -> Result<()> {

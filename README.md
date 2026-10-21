@@ -24,7 +24,7 @@ The `master` branch is ytm-lite, a Tauri window around music.youtube.com. This b
 - **Browse and search.** Home (trending, new releases, top artists, charts, moods), Explore (moods, genres, new albums and videos), search with suggestions, and artist, album, playlist and genre pages.
 - **Plays like YouTube Music.** Playing a song from search starts a radio after it, and autoplay keeps going when the queue ends. Up Next supports play next, add to queue, remove and clear; shuffle reorders what's coming and restores the order when turned off; repeat all and repeat one.
 - **Lyrics** in the side panel when YouTube has them.
-- **Native audio.** Streams are downloaded in ranges, demuxed and decoded in-process (AAC through Symphonia, Opus through `opus-decoder`) and played through WASAPI. The next track's stream is resolved ahead of time, and YouTube's loudness normalisation is applied.
+- **Native audio.** Streams are downloaded in ranges, demuxed and decoded in-process and played through WASAPI. It always picks the best stream YouTube offers, normally Opus at about 160 kbps. The next track's stream is resolved ahead of time, and YouTube's loudness normalisation is applied.
 - **Windows integration.** Media keys and the Windows media overlay, a single instance, and the window's size and position are remembered.
 - **Discord Rich Presence**, ported from ytm-lite.
 - **Your library.** Sign in by pasting your YouTube cookies to see your playlists, albums, artists and listening history.
@@ -36,16 +36,27 @@ Keyboard: <kbd>Space</kbd> play/pause, <kbd>Ctrl</kbd>+<kbd>F</kbd> search, <kbd
 | Part | Crate or tool |
 | --- | --- |
 | YouTube Music data (search, pages, radio, lyrics, library) | [`rustypipe`](https://codeberg.org/ThetaDev/rustypipe) |
-| Stream URLs | [yt-dlp](https://github.com/yt-dlp/yt-dlp), downloaded to `%APPDATA%\ytm-native\bin` on first run and kept up to date |
+| Stream URLs | YouTube's player endpoint, called directly (`src/streams.rs`) |
 | Demuxing and AAC | [`symphonia`](https://github.com/pdeljanov/Symphonia) |
-| Opus | [`opus-decoder`](https://crates.io/crates/opus-decoder) (pure Rust) |
+| Opus | libopus 1.3.1, as Rust ([`unsafe-libopus`](https://crates.io/crates/unsafe-libopus)) |
 | Audio output | [`cpal`](https://github.com/RustAudio/cpal) (WASAPI) |
-| UI | [Slint](https://slint.dev) |
+| UI | [Slint](https://slint.dev), software renderer |
+| HTTPS | Windows SChannel through `reqwest` |
 | Media keys | [`souvlaki`](https://github.com/Sinono3/souvlaki) |
 
-Stream URLs are the one part handled outside Rust. YouTube scrambles them with its player JavaScript, which changes every few weeks. rustypipe's deobfuscator no longer keeps up, so the app hands that single step to yt-dlp, which is actively maintained. yt-dlp needs a JavaScript runtime such as Deno or Node.js on `PATH` to solve YouTube's challenges.
+Most YouTube clients get stream URLs scrambled by YouTube's player JavaScript. The visionOS client gets plain ones, so the app asks as that client and needs no JavaScript engine or external tool. When YouTube changes this, `src/streams.rs` is the one place to update.
 
-AAC is the default. The pure-Rust Opus decoder is correct but uses about ten times the CPU (roughly 20% of a core against 2%), so Opus is a setting.
+## Footprint
+
+Measured on the release build while playing Opus:
+
+| | |
+| --- | --- |
+| CPU | about 0.7% of one core |
+| Memory | about 62 MB private, 100 MB working set after browsing Home |
+| Download | one 15 MB exe, no runtime to install |
+
+The software renderer redraws only what changes and avoids loading an OpenGL driver, which alone saved about 140 MB of memory. libopus decodes about 700 times faster than real time.
 
 ## Build
 
@@ -57,7 +68,7 @@ cargo build --release # target/release/ytm-native.exe
 cargo test
 ```
 
-Settings, the rustypipe cache, cookies and yt-dlp live in `%APPDATA%\ytm-native`.
+Settings, the rustypipe cache and your sign-in live in `%APPDATA%\ytm-native`.
 
 ## Signing in
 

@@ -74,7 +74,7 @@ fn main() {
     let _ = std::fs::create_dir_all(settings::data_dir());
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(4)
+        .worker_threads(2)
         .enable_all()
         .build()
         .expect("Tokio runtime starts");

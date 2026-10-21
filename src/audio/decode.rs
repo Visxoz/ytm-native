@@ -1,7 +1,7 @@
 //! Demuxes WebM or MP4 audio with Symphonia and decodes it to interleaved
-//! f32 samples: AAC through Symphonia, Opus through `opus-decoder`.
+//! f32 samples: AAC through Symphonia, Opus through libopus.
 
-use opus_decoder::OpusDecoder;
+use super::opus::{self, OpusDecoder};
 use symphonia::core::{
     codecs::audio::{AudioDecoder, AudioDecoderOptions, well_known::CODEC_ID_OPUS},
     errors::Error as SymphoniaError,
@@ -13,13 +13,14 @@ use symphonia::core::{
 
 /// Opus always decodes at 48 kHz.
 const OPUS_RATE: u32 = 48_000;
-/// The longest Opus frame is 120 ms.
-const OPUS_MAX_FRAME: usize = 5_760;
 
 enum Codec {
-    Symphonia(Box<dyn AudioDecoder>),
+    Symphonia {
+        decoder: Box<dyn AudioDecoder>,
+        buf: Vec<f32>,
+    },
     Opus {
-        decoder: Box<OpusDecoder>,
+        decoder: OpusDecoder,
         buf: Vec<f32>,
         /// Encoder delay still to drop from the start of the stream.
         pre_skip: usize,
@@ -70,16 +71,15 @@ impl Decoder {
             .clamp(1, 2);
 
         let (codec, rate) = if params.codec == CODEC_ID_OPUS {
-            let decoder = OpusDecoder::new(OPUS_RATE, channels)
-                .map_err(|e| format!("Opus decoder: {e:?}"))?;
+            let decoder = OpusDecoder::new(OPUS_RATE, channels)?;
             let pre_skip = params
                 .extra_data
                 .as_deref()
                 .and_then(opus_pre_skip)
                 .unwrap_or(0);
             let codec = Codec::Opus {
-                decoder: Box::new(decoder),
-                buf: vec![0.0; OPUS_MAX_FRAME * channels],
+                decoder,
+                buf: vec![0.0; opus::MAX_FRAME * channels],
                 pre_skip,
             };
             (codec, OPUS_RATE)
@@ -88,7 +88,13 @@ impl Decoder {
                 .make_audio_decoder(&params, &AudioDecoderOptions::default())
                 .map_err(|e| format!("unsupported codec: {e}"))?;
             let rate = params.sample_rate.ok_or("stream has no sample rate")?;
-            (Codec::Symphonia(decoder), rate)
+            (
+                Codec::Symphonia {
+                    decoder,
+                    buf: Vec::new(),
+                },
+                rate,
+            )
         };
 
         Ok(Self {
@@ -117,12 +123,11 @@ impl Decoder {
                 continue;
             }
             match &mut self.codec {
-                Codec::Symphonia(decoder) => match decoder.decode(&packet) {
-                    Ok(buf) => {
-                        let channels = buf.spec().channels().count();
-                        let mut samples = Vec::new();
-                        buf.copy_to_vec_interleaved::<f32>(&mut samples);
-                        push_channels(out, &samples, channels, self.channels);
+                Codec::Symphonia { decoder, buf } => match decoder.decode(&packet) {
+                    Ok(decoded) => {
+                        let channels = decoded.spec().channels().count();
+                        decoded.copy_to_vec_interleaved::<f32>(buf);
+                        push_channels(out, buf, channels, self.channels);
                     }
                     Err(SymphoniaError::DecodeError(e)) => {
                         log::debug!("skipped undecodable packet: {e}");
@@ -134,14 +139,14 @@ impl Decoder {
                     decoder,
                     buf,
                     pre_skip,
-                } => match decoder.decode_float(&packet.data, buf, false) {
+                } => match decoder.decode(&packet.data, buf) {
                     Ok(frames) => {
                         let skip = (*pre_skip).min(frames);
                         *pre_skip -= skip;
                         out.extend_from_slice(&buf[skip * self.channels..frames * self.channels]);
                     }
                     Err(e) => {
-                        log::debug!("skipped undecodable Opus packet: {e:?}");
+                        log::debug!("skipped undecodable Opus packet: {e}");
                         continue;
                     }
                 },
@@ -164,11 +169,11 @@ impl Decoder {
             )
             .map_err(|e| format!("seek failed: {e}"))?;
         match &mut self.codec {
-            Codec::Symphonia(decoder) => decoder.reset(),
+            Codec::Symphonia { decoder, .. } => decoder.reset(),
             Codec::Opus {
                 decoder, pre_skip, ..
             } => {
-                decoder.reset();
+                decoder.reset()?;
                 *pre_skip = 0;
             }
         }

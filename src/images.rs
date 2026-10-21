@@ -10,7 +10,9 @@ use std::{
 use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
 use tokio::{runtime::Handle, sync::Semaphore};
 
-const MAX_CACHED: usize = 1_500;
+/// Decoded artwork kept for reuse, in bytes. Images still on screen stay
+/// alive regardless, as Slint holds its own reference.
+const CACHE_BUDGET: usize = 32 * 1024 * 1024;
 const PARALLEL_FETCHES: usize = 8;
 
 thread_local! {
@@ -21,16 +23,28 @@ thread_local! {
 struct Cache {
     images: HashMap<String, Image>,
     order: VecDeque<String>,
+    bytes: usize,
+}
+
+fn byte_size(image: &Image) -> usize {
+    let size = image.size();
+    size.width as usize * size.height as usize * 4
 }
 
 impl Cache {
     fn insert(&mut self, key: String, image: Image) {
-        if self.images.insert(key.clone(), image).is_none() {
+        self.bytes += byte_size(&image);
+        if let Some(old) = self.images.insert(key.clone(), image) {
+            self.bytes -= byte_size(&old);
+        } else {
             self.order.push_back(key);
         }
-        while self.order.len() > MAX_CACHED {
-            if let Some(old) = self.order.pop_front() {
-                self.images.remove(&old);
+        while self.bytes > CACHE_BUDGET {
+            let Some(oldest) = self.order.pop_front() else {
+                break;
+            };
+            if let Some(old) = self.images.remove(&oldest) {
+                self.bytes -= byte_size(&old);
             }
         }
     }

@@ -11,7 +11,7 @@ use std::{
 };
 
 use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
-use tokio::{runtime::Handle, sync::watch};
+use tokio::runtime::Handle;
 
 use crate::{
     Api as ApiGlobal, AppWindow, CardItem, QueueItem, RowItem, RowKind, TrackItem,
@@ -21,7 +21,7 @@ use crate::{
     media_controls::{Action, Controls},
     presence::{self, PresenceHandle},
     queue::{Queue, Repeat},
-    settings::{self, Settings},
+    settings::Settings,
     streams::{self, ResolvedStream},
 };
 
@@ -34,7 +34,6 @@ const PREFETCH_FRESH: Duration = Duration::from_secs(60 * 60);
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
 const SUGGEST_DELAY: Duration = Duration::from_millis(150);
 
-type EngineState = Option<Result<(), String>>;
 type CardArt = (Rc<VecModel<CardItem>>, Vec<Option<String>>);
 
 struct HistoryEntry {
@@ -76,7 +75,6 @@ pub struct App {
     player: Player,
     presence: PresenceHandle,
     media: RefCell<Option<Controls>>,
-    engine: watch::Receiver<EngineState>,
     state: RefCell<State>,
     rows: Rc<VecModel<RowItem>>,
     queue_model: Rc<VecModel<QueueItem>>,
@@ -141,11 +139,6 @@ impl App {
         player.set_volume(if settings.muted { 0.0 } else { settings.volume });
         player.set_normalise(settings.normalise);
 
-        let (engine_tx, engine) = watch::channel(None);
-        rt.spawn_blocking(move || {
-            let _ = engine_tx.send(Some(streams::ensure_ytdlp()));
-        });
-
         let presence = PresenceHandle::spawn().expect("presence thread spawns");
         let mut queue = Queue::new();
         queue.repeat = Repeat::from_index(settings.repeat);
@@ -157,7 +150,6 @@ impl App {
             player,
             presence,
             media: RefCell::new(None),
-            engine,
             state: RefCell::new(State {
                 settings,
                 signed_in: false,
@@ -180,7 +172,6 @@ impl App {
         });
         app.bind(ui);
         app.apply_settings_to_ui(ui);
-        ui.set_engine_status("Preparing playback engine…".into());
         ui.set_rows(ModelRc::from(Rc::clone(&app.rows)));
         ui.set_queue(ModelRc::from(Rc::clone(&app.queue_model)));
         app
@@ -245,7 +236,6 @@ impl App {
         ui.set_muted(settings.muted);
         ui.set_shuffle(settings.shuffle);
         ui.set_repeat_mode(settings.repeat);
-        ui.set_prefer_aac(settings.prefer_aac);
         ui.set_normalise(settings.normalise);
         ui.set_discord(settings.discord);
         ui.set_autoplay(settings.autoplay);
@@ -260,25 +250,6 @@ impl App {
         let app = Rc::clone(self);
         self.tick
             .start(TimerMode::Repeated, TICK, move || app.on_tick());
-
-        let mut engine = self.engine.clone();
-        self.spawn(
-            async move {
-                let _ = engine.wait_for(Option::is_some).await;
-                let state = engine.borrow().clone();
-                state.unwrap_or(Ok(()))
-            },
-            |app, result| {
-                let status = match result {
-                    Ok(()) => "Streams are resolved with yt-dlp.".to_owned(),
-                    Err(e) => {
-                        app.toast(format!("Playback engine unavailable: {e}"));
-                        format!("Playback engine unavailable: {e}")
-                    }
-                };
-                app.ui().set_engine_status(status.into());
-            },
-        );
 
         let api = self.api.clone();
         self.spawn(async move { api.is_signed_in().await }, |app, signed_in| {
@@ -398,10 +369,6 @@ impl App {
         });
         on!(on_sign_in, |app, cookie| app.sign_in(cookie.to_string()));
         on!(on_sign_out, |app| app.sign_out());
-        on!(on_set_prefer_aac, |app, value| {
-            app.update_settings(|s| s.prefer_aac = value);
-            app.state.borrow_mut().playback.prefetched.clear();
-        });
         on!(on_set_normalise, |app, value| {
             app.update_settings(|s| s.normalise = value);
             app.player.set_normalise(value);
@@ -998,64 +965,45 @@ impl App {
                 .map(|(stream, _)| stream)
         };
         let resolve = self.resolve_future(track.id.clone(), prefetched);
-        let api = self.api.clone();
-        let id = track.id.clone();
-        self.spawn(
-            async move {
-                let (stream, loudness) = tokio::join!(resolve, api.loudness_db(&id));
-                stream.map(|s| (s, loudness))
-            },
-            move |app, result| {
-                if app.state.borrow().playback.generation != generation {
-                    return;
-                }
-                match result {
-                    Ok((stream, loudness_db)) => app.load_stream(stream, loudness_db),
-                    Err(e) => app.playback_failed(&track.title, &e),
-                }
-            },
-        );
+        self.spawn(resolve, move |app, result| {
+            if app.state.borrow().playback.generation != generation {
+                return;
+            }
+            match result {
+                Ok(stream) => app.load_stream(stream),
+                Err(e) => app.playback_failed(&track.title, &e),
+            }
+        });
     }
 
-    /// Resolves a stream once yt-dlp is ready, reusing a prefetched one.
+    /// Resolves a stream from the player endpoint, reusing a prefetched one.
     fn resolve_future(
         &self,
         video_id: String,
         prefetched: Option<ResolvedStream>,
     ) -> impl Future<Output = Result<ResolvedStream, String>> + Send + 'static {
-        let mut engine = self.engine.clone();
-        let (prefer_aac, signed_in) = {
-            let state = self.state.borrow();
-            (state.settings.prefer_aac, state.signed_in)
-        };
+        let api = self.api.clone();
         async move {
             if let Some(stream) = prefetched {
                 return Ok(stream);
             }
-            let ready = engine
-                .wait_for(Option::is_some)
-                .await
-                .map_err(|e| e.to_string())?
-                .clone();
-            ready.unwrap_or(Ok(()))?;
-            tokio::task::spawn_blocking(move || {
-                let cookies = settings::cookies_path();
-                let cookies = (signed_in && cookies.exists()).then_some(cookies.as_path());
-                streams::resolve(&video_id, cookies, prefer_aac)
-            })
-            .await
-            .map_err(|e| e.to_string())?
+            let visitor = api.visitor_data(false).await?;
+            match streams::resolve(&video_id, &visitor).await {
+                Ok(stream) => Ok(stream),
+                // YouTube sometimes bot-checks a visitor ID; retry with a fresh one.
+                Err(e) => {
+                    log::debug!("retrying with a new visitor ID: {e}");
+                    let visitor = api.visitor_data(true).await?;
+                    streams::resolve(&video_id, &visitor).await
+                }
+            }
         }
     }
 
-    fn load_stream(self: &Rc<Self>, stream: ResolvedStream, loudness_db: Option<f32>) {
-        let codec = match stream.codec.split('.').next().unwrap_or_default() {
-            "mp4a" => "AAC".to_owned(),
-            other => other.to_uppercase(),
-        };
+    fn load_stream(self: &Rc<Self>, stream: ResolvedStream) {
         let quality = match stream.bitrate_kbps {
-            Some(kbps) if !codec.is_empty() => format!("{codec} {}", kbps.round()),
-            _ => codec,
+            Some(kbps) => format!("{} {}", stream.codec.to_uppercase(), kbps.round()),
+            None => stream.codec.to_uppercase(),
         };
         if let Some(duration) = stream.duration {
             let mut state = self.state.borrow_mut();
@@ -1071,7 +1019,7 @@ impl App {
             size: stream.size,
             mime: stream.mime,
             headers: stream.headers,
-            loudness_db,
+            loudness_db: stream.loudness_db,
         });
     }
 
@@ -1458,37 +1406,26 @@ impl App {
         ui.set_signing_in(true);
         ui.set_sign_in_error(SharedString::new());
         let api = self.api.clone();
-        let pasted = cookie.clone();
-        self.spawn(
-            async move { api.sign_in(&pasted).await },
-            move |app, result| {
-                let ui = app.ui();
-                ui.set_signing_in(false);
-                match result {
-                    Ok(()) => {
-                        let file = settings::netscape_cookies(&cookie);
-                        if let Err(e) = std::fs::write(settings::cookies_path(), file) {
-                            log::warn!("could not save cookies for yt-dlp: {e}");
-                        }
-                        app.state.borrow_mut().signed_in = true;
-                        app.state.borrow_mut().playback.prefetched.clear();
-                        ui.set_signed_in(true);
-                        ui.set_sign_in_open(false);
-                        app.toast("Signed in");
-                        app.navigate(Route::Library, true);
-                    }
-                    Err(e) => ui.set_sign_in_error(format!("Sign-in failed: {e}").into()),
+        self.spawn(async move { api.sign_in(&cookie).await }, |app, result| {
+            let ui = app.ui();
+            ui.set_signing_in(false);
+            match result {
+                Ok(()) => {
+                    app.state.borrow_mut().signed_in = true;
+                    ui.set_signed_in(true);
+                    ui.set_sign_in_open(false);
+                    app.toast("Signed in");
+                    app.navigate(Route::Library, true);
                 }
-            },
-        );
+                Err(e) => ui.set_sign_in_error(format!("Sign-in failed: {e}").into()),
+            }
+        });
     }
 
     fn sign_out(self: &Rc<Self>) {
         let api = self.api.clone();
         self.spawn(async move { api.sign_out().await }, |app, ()| {
-            let _ = std::fs::remove_file(settings::cookies_path());
             app.state.borrow_mut().signed_in = false;
-            app.state.borrow_mut().playback.prefetched.clear();
             let ui = app.ui();
             ui.set_signed_in(false);
             ui.set_settings_open(false);

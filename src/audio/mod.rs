@@ -2,6 +2,7 @@
 //! that the output device drains.
 
 pub mod decode;
+mod opus;
 mod source;
 
 use std::{

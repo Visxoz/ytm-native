@@ -1,24 +1,20 @@
-//! Resolves playable stream URLs with yt-dlp.
+//! Resolves playable stream URLs straight from YouTube's player endpoint.
 //!
-//! Everything else talks to YouTube directly, but stream URLs need YouTube's
-//! player JavaScript solved, which changes every few weeks. yt-dlp keeps up
-//! with that, so the app keeps a private copy and updates it.
+//! Most clients get scrambled URLs that need YouTube's player JavaScript to
+//! unlock. The visionOS client gets plain URLs, so asking as that client keeps
+//! the whole pipeline native.
 
-use std::{
-    os::windows::process::CommandExt,
-    path::{Path, PathBuf},
-    process::{Command, Stdio},
-    time::{Duration, SystemTime},
-};
+use std::{sync::OnceLock, time::Duration};
 
 use serde::Deserialize;
+use serde_json::json;
 
-const DOWNLOAD_URL: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
-const UPDATE_EVERY: Duration = Duration::from_secs(3 * 24 * 60 * 60);
-/// Opus is YouTube's best-quality audio; AAC is cheaper to decode.
-const FORMAT_OPUS: &str = "bestaudio[acodec=opus]/bestaudio[ext=m4a]/bestaudio";
-const FORMAT_AAC: &str = "bestaudio[ext=m4a]/bestaudio";
-const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+const PLAYER_URL: &str = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false";
+const CLIENT_NAME: &str = "VISIONOS";
+const CLIENT_ID: &str = "101";
+const CLIENT_VERSION: &str = "1.02";
+const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 \
+    (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
 
 #[derive(Debug, Clone)]
 pub struct ResolvedStream {
@@ -29,145 +25,238 @@ pub struct ResolvedStream {
     pub codec: String,
     pub bitrate_kbps: Option<f64>,
     pub duration: Option<f64>,
+    pub loudness_db: Option<f32>,
 }
 
 #[derive(Deserialize)]
-struct Info {
-    url: Option<String>,
-    filesize: Option<u64>,
-    ext: Option<String>,
-    acodec: Option<String>,
-    abr: Option<f64>,
-    duration: Option<f64>,
+#[serde(rename_all = "camelCase")]
+struct PlayerResponse {
+    playability_status: PlayabilityStatus,
+    streaming_data: Option<StreamingData>,
+    player_config: Option<PlayerConfig>,
+}
+
+#[derive(Deserialize)]
+struct PlayabilityStatus {
+    status: String,
+    reason: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct StreamingData {
     #[serde(default)]
-    http_headers: std::collections::BTreeMap<String, String>,
+    adaptive_formats: Vec<Format>,
 }
 
-fn bin_dir() -> PathBuf {
-    crate::settings::data_dir().join("bin")
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct PlayerConfig {
+    audio_config: Option<AudioConfig>,
 }
 
-/// Path of the yt-dlp binary, preferring the app's own copy.
-fn ytdlp_path() -> PathBuf {
-    bin_dir().join("yt-dlp.exe")
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AudioConfig {
+    loudness_db: Option<f32>,
 }
 
-/// Makes sure yt-dlp is installed and reasonably fresh. Blocking.
-pub fn ensure_ytdlp() -> Result<(), String> {
-    let path = ytdlp_path();
-    if !path.exists() {
-        log::info!("downloading yt-dlp");
-        std::fs::create_dir_all(bin_dir()).map_err(|e| e.to_string())?;
-        let bytes = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(120))
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+struct Format {
+    itag: u32,
+    url: Option<String>,
+    mime_type: String,
+    bitrate: u64,
+    content_length: Option<String>,
+    approx_duration_ms: Option<String>,
+    loudness_db: Option<f32>,
+    #[serde(default)]
+    is_drc: bool,
+    audio_track: Option<AudioTrack>,
+}
+
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+struct AudioTrack {
+    #[serde(default)]
+    audio_is_default: bool,
+}
+
+impl Format {
+    fn is_opus(&self) -> bool {
+        self.mime_type.starts_with("audio/webm") && self.mime_type.contains("opus")
+    }
+
+    fn is_aac(&self) -> bool {
+        self.mime_type.starts_with("audio/mp4")
+    }
+}
+
+fn http() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .user_agent(USER_AGENT)
+            .timeout(Duration::from_secs(15))
             .build()
-            .and_then(|c| c.get(DOWNLOAD_URL).send())
-            .and_then(|r| r.error_for_status())
-            .and_then(|r| r.bytes())
-            .map_err(|e| format!("could not download yt-dlp: {e}"))?;
-        let partial = path.with_extension("part");
-        std::fs::write(&partial, &bytes).map_err(|e| e.to_string())?;
-        std::fs::rename(&partial, &path).map_err(|e| e.to_string())?;
-        return Ok(());
-    }
-
-    let stale = std::fs::metadata(&path)
-        .and_then(|m| m.modified())
-        .ok()
-        .and_then(|t| SystemTime::now().duration_since(t).ok())
-        .is_some_and(|age| age > UPDATE_EVERY);
-    if stale {
-        log::info!("updating yt-dlp");
-        let status = Command::new(&path)
-            .arg("-U")
-            .creation_flags(CREATE_NO_WINDOW)
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
-        if status.is_ok() {
-            // Touch so the next check waits another interval even when
-            // yt-dlp was already current.
-            let _ = std::fs::File::options()
-                .append(true)
-                .open(&path)
-                .and_then(|f| f.set_modified(SystemTime::now()));
-        }
-    }
-    Ok(())
-}
-
-/// Resolves the best audio stream of a video. Blocking, takes a few seconds.
-pub fn resolve(
-    video_id: &str,
-    cookies: Option<&Path>,
-    prefer_aac: bool,
-) -> Result<ResolvedStream, String> {
-    let mut command = Command::new(ytdlp_path());
-    command
-        .args(["-J", "--no-playlist", "--no-warnings", "-f"])
-        .arg(if prefer_aac { FORMAT_AAC } else { FORMAT_OPUS })
-        .creation_flags(CREATE_NO_WINDOW)
-        .stdin(Stdio::null());
-    if let Some(cookies) = cookies {
-        command.arg("--cookies").arg(cookies);
-    }
-    command.arg(format!("https://music.youtube.com/watch?v={video_id}"));
-
-    let output = command
-        .output()
-        .map_err(|e| format!("could not run yt-dlp: {e}"))?;
-    if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        let reason = stderr
-            .lines()
-            .rev()
-            .find(|l| l.contains("ERROR"))
-            .unwrap_or("yt-dlp failed")
-            .trim_start_matches("ERROR: ")
-            .to_owned();
-        return Err(reason);
-    }
-    parse(&output.stdout)
-}
-
-fn parse(json: &[u8]) -> Result<ResolvedStream, String> {
-    let info: Info =
-        serde_json::from_slice(json).map_err(|e| format!("unexpected yt-dlp output: {e}"))?;
-    let url = info.url.ok_or("yt-dlp returned no stream URL")?;
-    let mime = match info.ext.as_deref() {
-        Some("webm") => "audio/webm",
-        Some("m4a" | "mp4") => "audio/mp4",
-        _ => return Err("unsupported stream container".into()),
-    };
-    Ok(ResolvedStream {
-        url,
-        size: info.filesize.unwrap_or(0),
-        mime: mime.into(),
-        headers: info.http_headers.into_iter().collect(),
-        codec: info.acodec.unwrap_or_default(),
-        bitrate_kbps: info.abr,
-        duration: info.duration,
+            .expect("HTTP client builds")
     })
+}
+
+/// Fetches the player response and picks the best audio stream.
+pub async fn resolve(video_id: &str, visitor_data: &str) -> Result<ResolvedStream, String> {
+    let body = json!({
+        "context": {
+            "client": {
+                "clientName": CLIENT_NAME,
+                "clientVersion": CLIENT_VERSION,
+                "deviceMake": "Apple",
+                "deviceModel": "RealityDevice17,1",
+                "userAgent": USER_AGENT,
+                "osName": "visionOS",
+                "osVersion": "26.5.23O471",
+                "hl": "en",
+                "visitorData": visitor_data,
+            }
+        },
+        "videoId": video_id,
+        "contentCheckOk": true,
+        "racyCheckOk": true,
+    });
+    let text = http()
+        .post(PLAYER_URL)
+        .header("Content-Type", "application/json")
+        .header("Origin", "https://www.youtube.com")
+        .header("X-YouTube-Client-Name", CLIENT_ID)
+        .header("X-YouTube-Client-Version", CLIENT_VERSION)
+        .header("X-Goog-Visitor-Id", visitor_data)
+        .body(body.to_string())
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| format!("player request failed: {e}"))?
+        .text()
+        .await
+        .map_err(|e| format!("player request failed: {e}"))?;
+    parse(&text)
+}
+
+fn parse(json: &str) -> Result<ResolvedStream, String> {
+    let response: PlayerResponse =
+        serde_json::from_str(json).map_err(|e| format!("unexpected player response: {e}"))?;
+    if response.playability_status.status != "OK" {
+        return Err(response
+            .playability_status
+            .reason
+            .unwrap_or_else(|| format!("not playable ({})", response.playability_status.status)));
+    }
+    let formats = response
+        .streaming_data
+        .map(|s| s.adaptive_formats)
+        .unwrap_or_default();
+    let format = best_audio(&formats).ok_or("no playable audio stream")?;
+    let mime = if format.is_opus() {
+        "audio/webm"
+    } else {
+        "audio/mp4"
+    };
+    let codec = if format.is_opus() { "Opus" } else { "AAC" };
+    Ok(ResolvedStream {
+        url: format.url.clone().unwrap_or_default(),
+        size: format
+            .content_length
+            .as_deref()
+            .and_then(|n| n.parse().ok())
+            .unwrap_or(0),
+        mime: mime.into(),
+        headers: vec![("User-Agent".into(), USER_AGENT.into())],
+        codec: codec.into(),
+        bitrate_kbps: Some(format.bitrate as f64 / 1000.0),
+        duration: format
+            .approx_duration_ms
+            .as_deref()
+            .and_then(|ms| ms.parse::<f64>().ok())
+            .map(|ms| ms / 1000.0),
+        loudness_db: format.loudness_db.or_else(|| {
+            response
+                .player_config
+                .and_then(|c| c.audio_config)
+                .and_then(|a| a.loudness_db)
+        }),
+    })
+}
+
+/// The highest-bitrate Opus stream, else the best AAC. Skips dynamic-range
+/// compressed variants and dubbed tracks.
+fn best_audio(formats: &[Format]) -> Option<&Format> {
+    let candidates = || {
+        formats.iter().filter(|f| {
+            f.url.is_some()
+                && !f.is_drc
+                && f.audio_track.as_ref().is_none_or(|t| t.audio_is_default)
+        })
+    };
+    candidates()
+        .filter(|f| f.is_opus())
+        .max_by_key(|f| (f.bitrate, f.itag))
+        .or_else(|| {
+            candidates()
+                .filter(|f| f.is_aac())
+                .max_by_key(|f| f.bitrate)
+        })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
+    fn response(formats: &str) -> String {
+        format!(
+            r#"{{"playabilityStatus":{{"status":"OK"}},
+                "streamingData":{{"adaptiveFormats":[{formats}]}},
+                "playerConfig":{{"audioConfig":{{"loudnessDb":-2.5}}}}}}"#
+        )
+    }
+
+    const AAC: &str = r#"{"itag":140,"url":"https://a/140","mimeType":"audio/mp4; codecs=\"mp4a.40.2\"",
+        "bitrate":137064,"contentLength":"5983881","approxDurationMs":"369626"}"#;
+    const OPUS: &str = r#"{"itag":251,"url":"https://a/251","mimeType":"audio/webm; codecs=\"opus\"",
+        "bitrate":146460,"contentLength":"6214234","approxDurationMs":"369641","loudnessDb":4.5}"#;
+    const OPUS_DRC: &str = r#"{"itag":251,"url":"https://a/drc","mimeType":"audio/webm; codecs=\"opus\"",
+        "bitrate":150000,"isDrc":true}"#;
+    const VIDEO: &str = r#"{"itag":248,"url":"https://a/248","mimeType":"video/webm; codecs=\"vp9\"",
+        "bitrate":2000000}"#;
+
     #[test]
-    fn parses_ytdlp_json() {
-        let json = br#"{"url":"https://rr1.googlevideo.com/videoplayback?x=1","filesize":6214234,
-            "ext":"webm","acodec":"opus","abr":146.4,"http_headers":{"User-Agent":"UA"}}"#;
-        let stream = parse(json).unwrap();
-        assert_eq!(stream.size, 6214234);
+    fn prefers_opus() {
+        let stream = parse(&response(&[AAC, OPUS, OPUS_DRC, VIDEO].join(","))).unwrap();
+        assert_eq!(stream.url, "https://a/251");
         assert_eq!(stream.mime, "audio/webm");
-        assert_eq!(stream.codec, "opus");
-        assert_eq!(stream.headers, [("User-Agent".to_owned(), "UA".to_owned())]);
+        assert_eq!(stream.size, 6214234);
+        assert_eq!(stream.loudness_db, Some(4.5));
+        assert_eq!(stream.duration, Some(369.641));
     }
 
     #[test]
-    fn rejects_unknown_containers() {
-        assert!(parse(br#"{"url":"https://x","ext":"mhtml"}"#).is_err());
-        assert!(parse(br#"{"ext":"webm"}"#).is_err());
+    fn falls_back_to_aac() {
+        let stream = parse(&response(&[AAC, VIDEO].join(","))).unwrap();
+        assert_eq!(stream.url, "https://a/140");
+        assert_eq!(stream.codec, "AAC");
+        assert_eq!(
+            stream.loudness_db,
+            Some(-2.5),
+            "uses the player-wide loudness"
+        );
+    }
+
+    #[test]
+    fn reports_unplayable_reason() {
+        let json = r#"{"playabilityStatus":{"status":"LOGIN_REQUIRED","reason":"Sign in to confirm your age"}}"#;
+        assert_eq!(parse(json).unwrap_err(), "Sign in to confirm your age");
+        assert_eq!(
+            parse(&response(VIDEO)).unwrap_err(),
+            "no playable audio stream"
+        );
     }
 }
