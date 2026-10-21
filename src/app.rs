@@ -7,6 +7,10 @@ use std::{
     collections::{HashMap, HashSet},
     future::Future,
     rc::Rc,
+    sync::{
+        Arc,
+        atomic::{AtomicU8, Ordering},
+    },
     time::{Duration, Instant},
 };
 
@@ -19,9 +23,10 @@ use crate::{
     audio::{Player, PlayerEvent, StreamSpec},
     images,
     media_controls::{Action, Controls},
+    premium,
     presence::{self, PresenceHandle},
     queue::{Queue, Repeat},
-    settings::Settings,
+    settings::{self, Settings},
     streams::{self, ResolvedStream},
 };
 
@@ -52,6 +57,12 @@ struct Playback {
     prefetched: HashMap<String, (ResolvedStream, Instant)>,
     prefetching: HashSet<String>,
     extending: bool,
+    /// When the current track was asked for, to time the first sound.
+    requested_at: Option<Instant>,
+    /// The current stream came from the Premium path.
+    current_premium: bool,
+    /// A track whose Premium stream failed and plays the free one instead.
+    force_free: Option<String>,
 }
 
 struct State {
@@ -83,6 +94,8 @@ pub struct App {
     queue_model: Rc<VecModel<QueueItem>>,
     tick: Timer,
     eq_timer: Timer,
+    premium: Arc<PremiumShared>,
+    premium_shown: std::cell::Cell<u8>,
     toast_timer: Timer,
 }
 
@@ -174,6 +187,16 @@ impl App {
             queue_model: Rc::new(VecModel::default()),
             tick: Timer::default(),
             eq_timer: Timer::default(),
+            premium: Arc::new(PremiumShared {
+                player: tokio::sync::Mutex::new(None),
+                cookie: std::sync::RwLock::new(
+                    std::fs::read_to_string(settings::cookie_path())
+                        .ok()
+                        .filter(|c| !c.trim().is_empty()),
+                ),
+                status: AtomicU8::new(PREMIUM_UNKNOWN),
+            }),
+            premium_shown: std::cell::Cell::new(u8::MAX),
             toast_timer: Timer::default(),
         });
         app.bind(ui);
@@ -255,6 +278,7 @@ impl App {
         ui.set_normalise(settings.normalise);
         ui.set_discord(settings.discord);
         ui.set_autoplay(settings.autoplay);
+        ui.set_premium_audio(settings.premium_audio);
         ui.set_sidebar_collapsed(settings.sidebar_collapsed);
     }
 
@@ -285,6 +309,7 @@ impl App {
             if signed_in {
                 app.load_library();
             }
+            app.warm_premium();
             app.ui().set_signed_in(signed_in);
             app.navigate(Route::Home, false);
         });
@@ -410,6 +435,11 @@ impl App {
         });
         on!(on_sidebar_changed, |app, collapsed| app
             .update_settings(|s| s.sidebar_collapsed = collapsed));
+        on!(on_set_premium_audio, |app, value| {
+            app.update_settings(|s| s.premium_audio = value);
+            app.state.borrow_mut().playback.prefetched.clear();
+            app.warm_premium();
+        });
         on!(on_set_autoplay, |app, value| app
             .update_settings(|s| s.autoplay = value));
         on!(on_player_event, |app, kind, message| app
@@ -992,6 +1022,7 @@ impl App {
             playback.generation += 1;
             playback.started = false;
             playback.duration = track.duration.unwrap_or(0) as f64;
+            playback.requested_at = Some(Instant::now());
             playback.generation
         };
         self.player.stop();
@@ -1078,19 +1109,65 @@ impl App {
         });
     }
 
-    /// Resolves a stream from the player endpoint, reusing a prefetched one.
+    /// Resolves a stream: Premium when signed in with Premium, otherwise the
+    /// free visionOS stream. Reuses a prefetched one.
     fn resolve_future(
         &self,
         video_id: String,
         prefetched: Option<ResolvedStream>,
     ) -> impl Future<Output = Result<ResolvedStream, String>> + Send + 'static {
         let api = self.api.clone();
+        let premium = Arc::clone(&self.premium);
+        let want_premium = {
+            let state = self.state.borrow();
+            state.signed_in
+                && state.settings.premium_audio
+                && state.playback.force_free.as_deref() != Some(video_id.as_str())
+        };
+        let dry_run = !want_premium && premium_dry_run();
         async move {
             if let Some(stream) = prefetched {
                 return Ok(stream);
             }
+            let started = Instant::now();
             let visitor = api.visitor_data(false).await?;
-            match streams::resolve(&video_id, &visitor).await {
+            let cookie = premium.cookie.read().unwrap().clone();
+            let not_premium = premium.status.load(Ordering::Relaxed) == PREMIUM_NO;
+            if let Some(cookie) = cookie.filter(|_| want_premium && !not_premium) {
+                match premium_player(&premium).await {
+                    Ok(player) => {
+                        match premium::resolve(&video_id, Some(&cookie), &visitor, &player).await {
+                            Ok(premium::Outcome::Premium(stream)) => {
+                                premium.status.store(PREMIUM_YES, Ordering::Relaxed);
+                                log::info!(
+                                    "{video_id}: Premium stream resolved in {} ms",
+                                    started.elapsed().as_millis()
+                                );
+                                return Ok(stream);
+                            }
+                            Ok(premium::Outcome::NotPremium) => {
+                                premium.status.store(PREMIUM_NO, Ordering::Relaxed);
+                            }
+                            Err(e) => premium::diag(format!(
+                                "{video_id}: Premium path failed, using the free stream: {e}"
+                            )),
+                        }
+                    }
+                    Err(e) => premium::diag(format!("could not prepare the player: {e}")),
+                }
+            } else if dry_run && let Ok(player) = premium_player(&premium).await {
+                // Times the Premium path without an account; the result is
+                // discarded as YouTube won't serve it anonymously.
+                let dry = Instant::now();
+                let result = premium::resolve(&video_id, None, &visitor, &player).await;
+                premium::diag(format!(
+                    "{video_id}: dry run {} in {} ms",
+                    if result.is_ok() { "resolved" } else { "failed" },
+                    dry.elapsed().as_millis()
+                ));
+            }
+            let free = Instant::now();
+            let result = match streams::resolve(&video_id, &visitor).await {
                 Ok(stream) => Ok(stream),
                 // YouTube sometimes bot-checks a visitor ID; retry with a fresh one.
                 Err(e) => {
@@ -1098,7 +1175,12 @@ impl App {
                     let visitor = api.visitor_data(true).await?;
                     streams::resolve(&video_id, &visitor).await
                 }
-            }
+            };
+            log::info!(
+                "{video_id}: free stream resolved in {} ms",
+                free.elapsed().as_millis()
+            );
+            result
         }
     }
 
@@ -1116,6 +1198,7 @@ impl App {
             }
         }
         self.ui().set_np_quality(quality.into());
+        self.state.borrow_mut().playback.current_premium = stream.premium;
         self.player.load(StreamSpec {
             url: stream.url,
             size: stream.size,
@@ -1127,6 +1210,26 @@ impl App {
 
     fn playback_failed(self: &Rc<Self>, title: &str, error: &str) {
         log::warn!("playback failed: {error}");
+        // A Premium stream that will not play gets one retry on the free one.
+        let retry_free = {
+            let mut state = self.state.borrow_mut();
+            let id = state.queue.current().map(|t| t.id.clone());
+            if state.playback.current_premium && state.playback.force_free != id {
+                state.playback.current_premium = false;
+                state.playback.force_free.clone_from(&id);
+                state.playback.prefetched.clear();
+                id
+            } else {
+                None
+            }
+        };
+        if let Some(id) = retry_free {
+            premium::diag(format!(
+                "{id}: Premium stream failed to play ({error}); retrying the free stream"
+            ));
+            self.start_current();
+            return;
+        }
         let failures = {
             let mut state = self.state.borrow_mut();
             state.playback.failures += 1;
@@ -1145,10 +1248,25 @@ impl App {
     fn on_player_event(self: &Rc<Self>, kind: &str, message: String) {
         match kind {
             "started" => {
-                {
+                let (waited, premium_stream) = {
                     let mut state = self.state.borrow_mut();
                     state.playback.started = true;
                     state.playback.failures = 0;
+                    let waited = state.playback.requested_at.take().map(|t| t.elapsed());
+                    (waited, state.playback.current_premium)
+                };
+                if let Some(waited) = waited {
+                    let line = format!(
+                        "first sound after {} ms ({}, {})",
+                        waited.as_millis(),
+                        if premium_stream { "Premium" } else { "free" },
+                        self.ui().get_np_quality()
+                    );
+                    if premium_stream || premium_dry_run() {
+                        premium::diag(&line);
+                    } else {
+                        log::info!("{line}");
+                    }
                 }
                 self.ui().set_np_loading(false);
                 self.update_media_state();
@@ -1366,6 +1484,17 @@ impl App {
 
     fn on_tick(self: &Rc<Self>) {
         let ui = self.ui();
+        let status = self.premium.status.load(Ordering::Relaxed);
+        if self.premium_shown.replace(status) != status {
+            ui.set_premium_status(
+                match status {
+                    PREMIUM_YES => "Active: playing 256 kbps Premium streams.",
+                    PREMIUM_NO => "This account has no Premium; playing standard streams.",
+                    _ => "When signed in with YouTube Premium, plays 256 kbps Opus.",
+                }
+                .into(),
+            );
+        }
         if !ui.get_has_track() {
             return;
         }
@@ -1508,19 +1637,49 @@ impl App {
         ui.set_signing_in(true);
         ui.set_sign_in_error(SharedString::new());
         let api = self.api.clone();
-        self.spawn(async move { api.sign_in(&cookie).await }, |app, result| {
-            let ui = app.ui();
-            ui.set_signing_in(false);
-            match result {
-                Ok(()) => {
-                    app.state.borrow_mut().signed_in = true;
-                    app.load_library();
-                    ui.set_signed_in(true);
-                    ui.set_sign_in_open(false);
-                    app.toast("Signed in");
-                    app.navigate(Route::Library, true);
+        let header = premium::cookie_header(&cookie);
+        self.spawn(
+            async move { api.sign_in(&cookie).await },
+            move |app, result| {
+                let ui = app.ui();
+                ui.set_signing_in(false);
+                match result {
+                    Ok(()) => {
+                        app.state.borrow_mut().signed_in = true;
+                        app.load_library();
+                        if let Err(e) = std::fs::write(settings::cookie_path(), &header) {
+                            log::warn!("could not save the session for Premium audio: {e}");
+                        }
+                        *app.premium.cookie.write().unwrap() = Some(header);
+                        app.premium.status.store(PREMIUM_UNKNOWN, Ordering::Relaxed);
+                        app.warm_premium();
+                        ui.set_signed_in(true);
+                        ui.set_sign_in_open(false);
+                        app.toast("Signed in");
+                        app.navigate(Route::Library, true);
+                    }
+                    Err(e) => ui.set_sign_in_error(format!("Sign-in failed: {e}").into()),
                 }
-                Err(e) => ui.set_sign_in_error(format!("Sign-in failed: {e}").into()),
+            },
+        );
+    }
+
+    /// Prepares the Premium player script in the background, so the first
+    /// song does not wait for it. Only runs when Premium audio can apply.
+    fn warm_premium(self: &Rc<Self>) {
+        let wanted = {
+            let state = self.state.borrow();
+            state.signed_in
+                && state.settings.premium_audio
+                && self.premium.cookie.read().unwrap().is_some()
+        };
+        if !wanted && !premium_dry_run() {
+            return;
+        }
+        let shared = Arc::clone(&self.premium);
+        self.rt.spawn(async move {
+            if let Err(e) = premium_player(&shared).await {
+                premium::diag(format!("could not prepare the player: {e}"));
             }
         });
     }
@@ -1554,6 +1713,9 @@ impl App {
         self.spawn(async move { api.sign_out().await }, |app, ()| {
             app.state.borrow_mut().signed_in = false;
             app.library.set_vec(Vec::new());
+            let _ = std::fs::remove_file(settings::cookie_path());
+            *app.premium.cookie.write().unwrap() = None;
+            app.premium.status.store(PREMIUM_UNKNOWN, Ordering::Relaxed);
             let ui = app.ui();
             ui.set_signed_in(false);
             ui.set_settings_open(false);
@@ -1588,4 +1750,31 @@ fn route_tint(route: &Route) -> slint::Color {
         _ => 0x333333,
     };
     slint::Color::from_argb_encoded(0xff00_0000 | rgb)
+}
+
+const PREMIUM_UNKNOWN: u8 = 0;
+const PREMIUM_YES: u8 = 1;
+const PREMIUM_NO: u8 = 2;
+
+/// Premium audio state shared with background tasks.
+struct PremiumShared {
+    /// The cut-down player script, loaded once per session.
+    player: tokio::sync::Mutex<Option<Arc<premium::Player>>>,
+    cookie: std::sync::RwLock<Option<String>>,
+    status: AtomicU8,
+}
+
+/// `YTM_PREMIUM_DRYRUN=1` times the Premium path while playing free streams.
+fn premium_dry_run() -> bool {
+    std::env::var_os("YTM_PREMIUM_DRYRUN").is_some()
+}
+
+async fn premium_player(shared: &PremiumShared) -> Result<Arc<premium::Player>, String> {
+    let mut slot = shared.player.lock().await;
+    if let Some(player) = slot.as_ref() {
+        return Ok(Arc::clone(player));
+    }
+    let player = Arc::new(premium::load_player().await?);
+    *slot = Some(Arc::clone(&player));
+    Ok(player)
 }

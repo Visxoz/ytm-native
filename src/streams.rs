@@ -2,7 +2,7 @@
 //!
 //! Most clients get scrambled URLs that need YouTube's player JavaScript to
 //! unlock. The visionOS client gets plain URLs, so asking as that client keeps
-//! the whole pipeline native.
+//! the whole pipeline native. Premium streams go through `crate::premium`.
 
 use std::{sync::OnceLock, time::Duration};
 
@@ -26,11 +26,13 @@ pub struct ResolvedStream {
     pub bitrate_kbps: Option<f64>,
     pub duration: Option<f64>,
     pub loudness_db: Option<f32>,
+    /// Came from the signed-in Premium path.
+    pub premium: bool,
 }
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct PlayerResponse {
+pub(crate) struct PlayerResponse {
     playability_status: PlayabilityStatus,
     streaming_data: Option<StreamingData>,
     player_config: Option<PlayerConfig>,
@@ -63,11 +65,13 @@ struct AudioConfig {
 
 #[derive(Deserialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
-struct Format {
-    itag: u32,
-    url: Option<String>,
+pub(crate) struct Format {
+    pub itag: u32,
+    pub url: Option<String>,
+    /// `s`, `sp` and `url`, when the URL is scrambled.
+    pub signature_cipher: Option<String>,
     mime_type: String,
-    bitrate: u64,
+    pub bitrate: u64,
     content_length: Option<String>,
     approx_duration_ms: Option<String>,
     loudness_db: Option<f32>,
@@ -84,12 +88,65 @@ struct AudioTrack {
 }
 
 impl Format {
-    fn is_opus(&self) -> bool {
+    pub fn is_opus(&self) -> bool {
         self.mime_type.starts_with("audio/webm") && self.mime_type.contains("opus")
     }
 
     fn is_aac(&self) -> bool {
         self.mime_type.starts_with("audio/mp4")
+    }
+
+    fn has_url(&self) -> bool {
+        self.url.is_some() || self.signature_cipher.is_some()
+    }
+}
+
+impl PlayerResponse {
+    pub fn audio_formats(&self) -> &[Format] {
+        self.streaming_data
+            .as_ref()
+            .map_or(&[], |s| s.adaptive_formats.as_slice())
+    }
+
+    fn loudness_db(&self) -> Option<f32> {
+        self.player_config
+            .as_ref()
+            .and_then(|c| c.audio_config.as_ref())
+            .and_then(|a| a.loudness_db)
+    }
+
+    /// Builds the stream to play from one of this response's formats.
+    pub fn stream(
+        &self,
+        format: &Format,
+        url: String,
+        user_agent: &str,
+        premium: bool,
+    ) -> ResolvedStream {
+        ResolvedStream {
+            url,
+            size: format
+                .content_length
+                .as_deref()
+                .and_then(|n| n.parse().ok())
+                .unwrap_or(0),
+            mime: if format.is_opus() {
+                "audio/webm"
+            } else {
+                "audio/mp4"
+            }
+            .into(),
+            headers: vec![("User-Agent".into(), user_agent.into())],
+            codec: if format.is_opus() { "Opus" } else { "AAC" }.into(),
+            bitrate_kbps: Some(format.bitrate as f64 / 1000.0),
+            duration: format
+                .approx_duration_ms
+                .as_deref()
+                .and_then(|ms| ms.parse::<f64>().ok())
+                .map(|ms| ms / 1000.0),
+            loudness_db: format.loudness_db.or_else(|| self.loudness_db()),
+            premium,
+        }
     }
 }
 
@@ -142,59 +199,33 @@ pub async fn resolve(video_id: &str, visitor_data: &str) -> Result<ResolvedStrea
     parse(&text)
 }
 
-fn parse(json: &str) -> Result<ResolvedStream, String> {
+/// Parses a player response, failing with YouTube's reason if unplayable.
+pub(crate) fn parse_response(json: &str) -> Result<PlayerResponse, String> {
     let response: PlayerResponse =
         serde_json::from_str(json).map_err(|e| format!("unexpected player response: {e}"))?;
     if response.playability_status.status != "OK" {
         return Err(response
             .playability_status
             .reason
+            .clone()
             .unwrap_or_else(|| format!("not playable ({})", response.playability_status.status)));
     }
-    let formats = response
-        .streaming_data
-        .map(|s| s.adaptive_formats)
-        .unwrap_or_default();
-    let format = best_audio(&formats).ok_or("no playable audio stream")?;
-    let mime = if format.is_opus() {
-        "audio/webm"
-    } else {
-        "audio/mp4"
-    };
-    let codec = if format.is_opus() { "Opus" } else { "AAC" };
-    Ok(ResolvedStream {
-        url: format.url.clone().unwrap_or_default(),
-        size: format
-            .content_length
-            .as_deref()
-            .and_then(|n| n.parse().ok())
-            .unwrap_or(0),
-        mime: mime.into(),
-        headers: vec![("User-Agent".into(), USER_AGENT.into())],
-        codec: codec.into(),
-        bitrate_kbps: Some(format.bitrate as f64 / 1000.0),
-        duration: format
-            .approx_duration_ms
-            .as_deref()
-            .and_then(|ms| ms.parse::<f64>().ok())
-            .map(|ms| ms / 1000.0),
-        loudness_db: format.loudness_db.or_else(|| {
-            response
-                .player_config
-                .and_then(|c| c.audio_config)
-                .and_then(|a| a.loudness_db)
-        }),
-    })
+    Ok(response)
+}
+
+fn parse(json: &str) -> Result<ResolvedStream, String> {
+    let response = parse_response(json)?;
+    let format = best_audio(response.audio_formats()).ok_or("no playable audio stream")?;
+    let url = format.url.clone().ok_or("no playable audio stream")?;
+    Ok(response.stream(format, url, USER_AGENT, false))
 }
 
 /// The highest-bitrate Opus stream, else the best AAC. Skips dynamic-range
 /// compressed variants and dubbed tracks.
-fn best_audio(formats: &[Format]) -> Option<&Format> {
+pub(crate) fn best_audio(formats: &[Format]) -> Option<&Format> {
     let candidates = || {
         formats.iter().filter(|f| {
-            f.url.is_some()
-                && !f.is_drc
-                && f.audio_track.as_ref().is_none_or(|t| t.audio_is_default)
+            f.has_url() && !f.is_drc && f.audio_track.as_ref().is_none_or(|t| t.audio_is_default)
         })
     };
     candidates()
@@ -227,6 +258,8 @@ mod tests {
         "bitrate":150000,"isDrc":true}"#;
     const VIDEO: &str = r#"{"itag":248,"url":"https://a/248","mimeType":"video/webm; codecs=\"vp9\"",
         "bitrate":2000000}"#;
+    const PREMIUM: &str = r#"{"itag":774,"signatureCipher":"s=abc&sp=sig&url=https%3A%2F%2Fa%2F774",
+        "mimeType":"audio/webm; codecs=\"opus\"","bitrate":260000}"#;
 
     #[test]
     fn prefers_opus() {
@@ -236,6 +269,7 @@ mod tests {
         assert_eq!(stream.size, 6214234);
         assert_eq!(stream.loudness_db, Some(4.5));
         assert_eq!(stream.duration, Some(369.641));
+        assert!(!stream.premium);
     }
 
     #[test]
@@ -248,6 +282,14 @@ mod tests {
             Some(-2.5),
             "uses the player-wide loudness"
         );
+    }
+
+    #[test]
+    fn picks_scrambled_premium_formats() {
+        let response = parse_response(&response(&[OPUS, PREMIUM].join(","))).unwrap();
+        let best = best_audio(response.audio_formats()).unwrap();
+        assert_eq!(best.itag, 774);
+        assert!(best.signature_cipher.is_some());
     }
 
     #[test]

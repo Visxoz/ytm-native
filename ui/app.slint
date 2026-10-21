@@ -438,6 +438,8 @@ export component AppWindow inherits Window {
     in property <bool> normalise;
     in property <bool> discord;
     in property <bool> autoplay;
+    in property <bool> premium-audio;
+    in property <string> premium-status;
 
     in property <string> toast;
     in property <bool> toast-visible;
@@ -467,6 +469,7 @@ export component AppWindow inherits Window {
     callback set-normalise(value: bool);
     callback set-discord(value: bool);
     callback set-autoplay(value: bool);
+    callback set-premium-audio(value: bool);
     // Delivered from background threads through the event loop.
     callback player-event(kind: string, message: string);
     callback media-action(action: string, value: float);
@@ -1196,6 +1199,15 @@ export component AppWindow inherits Window {
         if root.settings-open: Dialog {
             title: "Settings";
             close => { root.settings-open = false; }
+            SettingRow {
+                label: "Premium audio";
+                detail: root.premium-status;
+                Toggle {
+                    y: (parent.height - self.height) / 2;
+                    checked: root.premium-audio;
+                    toggled(v) => { root.set-premium-audio(v); }
+                }
+            }
             SettingRow {
                 label: "Normalise volume";
                 detail: "Plays every track at a similar loudness, as YouTube Music does.";

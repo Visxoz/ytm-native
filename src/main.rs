@@ -6,6 +6,7 @@ mod audio;
 mod images;
 mod logger;
 mod media_controls;
+mod premium;
 mod presence;
 mod queue;
 mod settings;

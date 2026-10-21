@@ -12,6 +12,11 @@ pub fn data_dir() -> PathBuf {
         .join("ytm-native")
 }
 
+/// The signed-in session's `Cookie` header, for Premium stream requests.
+pub fn cookie_path() -> PathBuf {
+    data_dir().join("cookie")
+}
+
 fn settings_path() -> PathBuf {
     data_dir().join("settings.json")
 }
@@ -36,6 +41,8 @@ pub struct Settings {
     pub shuffle: bool,
     pub repeat: i32,
     pub sidebar_collapsed: bool,
+    /// Use 256 kbps streams when signed in with YouTube Premium.
+    pub premium_audio: bool,
     pub window: Option<WindowGeometry>,
 }
 
@@ -50,6 +57,7 @@ impl Default for Settings {
             shuffle: false,
             repeat: 0,
             sidebar_collapsed: false,
+            premium_audio: true,
             window: None,
         }
     }

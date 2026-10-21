@@ -131,10 +131,15 @@ export component TrackRow inherits Rectangle {
                         font-weight: 500;
                         color: root.playing ? Theme.accent : Theme.text;
                     }
-                    Link {
-                        text: root.track.artists;
-                        enabled: root.track.has-artist;
-                        clicked => { Api.track-action("artist", root.section, root.index); }
+                    // Only the text is a link, so the rest of the row still plays.
+                    HorizontalLayout {
+                        alignment: start;
+                        Link {
+                            max-width: self.preferred-width;
+                            text: root.track.artists;
+                            enabled: root.track.has-artist;
+                            clicked => { Api.track-action("artist", root.section, root.index); }
+                        }
                     }
                 }
             }
