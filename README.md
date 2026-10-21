@@ -41,7 +41,7 @@ Keyboard: <kbd>Space</kbd> play/pause, <kbd>Ctrl</kbd>+<kbd>K</kbd> search, <kbd
 | Demuxing and AAC | [`symphonia`](https://github.com/pdeljanov/Symphonia) |
 | Opus | libopus 1.3.1, as Rust ([`unsafe-libopus`](https://crates.io/crates/unsafe-libopus)) |
 | Audio output | [`cpal`](https://github.com/RustAudio/cpal) (WASAPI) |
-| UI | [Slint](https://slint.dev) with Skia drawing on the CPU |
+| UI | [Slint](https://slint.dev) with Skia drawing on the GPU (Direct3D 12) |
 | HTTPS | Windows SChannel through `reqwest` |
 | Media keys | [`souvlaki`](https://github.com/Sinono3/souvlaki) |
 
@@ -54,10 +54,10 @@ Measured on the release build while playing Opus:
 | | |
 | --- | --- |
 | CPU | about 1% of one core |
-| Memory | about 60 MB private, 100 MB working set |
+| Memory | about 100 MB in Task Manager, 165 MB working set |
 | Download | one 22 MB exe, no runtime to install |
 
-Skia draws into a CPU buffer, which gives hinted text and smooth artwork scaling without the 140–240 MB a GPU context costs. Animations run only while something changes; the equaliser steps at 8 frames a second rather than repainting continuously. libopus decodes about 700 times faster than real time.
+Skia draws on the GPU through Direct3D 12, so scrolling takes about a quarter of one core rather than all of it; the graphics driver accounts for about 50 MB of the memory. Without a usable GPU, Skia draws into a CPU buffer instead. Animations run only while something changes; the equaliser steps at 8 frames a second rather than repainting continuously. libopus decodes about 700 times faster than real time.
 
 ## Build
 

@@ -99,15 +99,16 @@ fn main() {
     };
 
     let settings = settings::Settings::load();
-    // Skia drawing into a CPU buffer: crisp hinted text and smooth artwork
-    // without the memory an OpenGL or Direct3D context costs.
+    // Skia on the GPU through Direct3D 12, which takes most of the work of
+    // scrolling off the CPU for about 50 MB of driver memory. Without a usable GPU, Skia falls back
+    // to drawing into a CPU buffer.
     if std::env::var_os("SLINT_BACKEND").is_none()
         && let Err(e) = slint::BackendSelector::new()
             .backend_name("winit".into())
-            .renderer_name("skia-software".into())
+            .renderer_name("skia".into())
             .select()
     {
-        log::warn!("could not select the Skia software renderer: {e}");
+        log::warn!("could not select the Skia renderer: {e}");
     }
     let ui = AppWindow::new().expect("window opens");
     restore_geometry(&ui, settings.window);
