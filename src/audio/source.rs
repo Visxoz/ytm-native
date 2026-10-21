@@ -14,6 +14,8 @@ use symphonia::core::io::MediaSource;
 /// ranges no bigger than this.
 const CHUNK: u64 = 1024 * 1024;
 const READ_BUF: usize = 64 * 1024;
+/// Upper bound on the up-front allocation, should a reported size be wrong.
+const MAX_RESERVE: u64 = 64 * 1024 * 1024;
 const MAX_RETRIES: u32 = 4;
 const RETRY_DELAY: Duration = Duration::from_millis(500);
 
@@ -46,7 +48,12 @@ impl Download {
     /// Starts fetching `url`, whose length YouTube reports up front.
     pub fn start(url: String, total: u64, headers: Vec<(String, String)>) -> Arc<Self> {
         let download = Arc::new(Self::default());
-        download.state.lock().unwrap().total = total;
+        {
+            let mut state = download.state.lock().unwrap();
+            state.total = total;
+            // Sized once, as growing by doubling can hold twice the file.
+            state.data = Vec::with_capacity(total.min(MAX_RESERVE) as usize);
+        }
         let worker = Arc::clone(&download);
         thread::Builder::new()
             .name("stream-download".into())
@@ -133,7 +140,9 @@ impl Download {
         let mut response = request.send()?.error_for_status()?;
         if total == 0 {
             let length = response.content_length().unwrap_or(0);
-            self.state.lock().unwrap().total = length;
+            let mut state = self.state.lock().unwrap();
+            state.total = length;
+            state.data.reserve(length.min(MAX_RESERVE) as usize);
         }
 
         let mut buf = vec![0; READ_BUF];
