@@ -5,7 +5,7 @@
 # ytm-native
 
 **A fully native YouTube Music client for Windows, written in Rust.**<br>
-No WebView, no browser engine: the UI, the player and the audio pipeline are all native.
+No browser engine runs the app: the UI, the player and the audio pipeline are all native.
 
 ![Rust](https://img.shields.io/badge/Rust-2024-B7410E?logo=rust&logoColor=white)
 ![Slint](https://img.shields.io/badge/UI-Slint-2379F4)
@@ -17,7 +17,7 @@ No WebView, no browser engine: the UI, the player and the audio pipeline are all
 
 ## Why
 
-The `master` branch is ytm-lite, a Tauri window around music.youtube.com. This branch is a personal experiment in the opposite direction: rebuild the client itself, talking to YouTube's unofficial API, with its own interface.
+[ytm-lite](https://github.com/Visxoz/ytm-lite) is a Tauri window around music.youtube.com. ytm-native goes the other way: it rebuilds the client itself, talking to YouTube's unofficial API, with its own interface.
 
 ## What it does
 
@@ -25,10 +25,10 @@ The `master` branch is ytm-lite, a Tauri window around music.youtube.com. This b
 - **Browse and search.** Home (trending, new releases, top artists, charts, moods), Explore (moods, genres, new albums and videos), search with suggestions, and artist, album, playlist and genre pages.
 - **Plays like YouTube Music.** Playing a song from search starts a radio after it, and autoplay keeps going when the queue ends. Up Next supports play next, add to queue, remove and clear; shuffle reorders what's coming and restores the order when turned off; repeat all and repeat one.
 - **Lyrics** in the side panel when YouTube has them.
-- **Native audio.** Streams are downloaded in ranges, demuxed and decoded in-process and played through WASAPI. It always picks the best stream YouTube offers, normally Opus at about 160 kbps. The next track's stream is resolved ahead of time, and YouTube's loudness normalisation is applied.
+- **Native audio.** Streams are downloaded in ranges, demuxed and decoded in-process and played through WASAPI. It always picks the best stream YouTube offers: Opus at about 160 kbps, or 256 kbps with YouTube Premium. The next track's stream is resolved ahead of time, and YouTube's loudness normalisation is applied.
 - **Windows integration.** Media keys and the Windows media overlay, a single instance, and the window's size and position are remembered.
 - **Discord Rich Presence**, ported from ytm-lite.
-- **Your library.** Sign in by pasting your YouTube cookies to see your playlists, albums, artists and listening history.
+- **Your library.** Sign in on Google's own page to see your playlists, albums, artists and listening history.
 
 Keyboard: <kbd>Space</kbd> play/pause, <kbd>Ctrl</kbd>+<kbd>K</kbd> search, <kbd>Ctrl</kbd>+<kbd>B</kbd> sidebar, <kbd>Ctrl</kbd>+<kbd>←</kbd>/<kbd>→</kbd> previous/next, <kbd>Alt</kbd>+<kbd>←</kbd> back. Right-click a song for more actions.
 
@@ -42,7 +42,8 @@ Keyboard: <kbd>Space</kbd> play/pause, <kbd>Ctrl</kbd>+<kbd>K</kbd> search, <kbd
 | Opus | libopus 1.3.1, as Rust ([`unsafe-libopus`](https://crates.io/crates/unsafe-libopus)) |
 | Audio output | [`cpal`](https://github.com/RustAudio/cpal) (WASAPI) |
 | UI | [Slint](https://slint.dev) with Skia drawing on the GPU (Direct3D 12) |
-| HTTPS | Windows SChannel through `reqwest` |
+| HTTPS | Windows SChannel through `reqwest`, over HTTP/2 |
+| Google sign-in | WebView2 through [`wry`](https://github.com/tauri-apps/wry), only while signing in |
 | Media keys | [`souvlaki`](https://github.com/Sinono3/souvlaki) |
 
 Most YouTube clients get stream URLs scrambled by YouTube's player JavaScript. The visionOS client gets plain ones, so the app asks as that client and needs no JavaScript engine or external tool. When YouTube changes this, `src/streams.rs` is the one place to update.
@@ -69,10 +70,11 @@ cargo build --release # target/release/ytm-native.exe
 cargo test
 ```
 
-Settings, the rustypipe cache and your sign-in live in `%APPDATA%\ytm-native`.
+Settings, the rustypipe cache and your sign-in live in `%APPDATA%\ytm-native`; the sign-in is encrypted for your Windows account.
 
-Two crates are built from `vendor/` with a patch from `patches/` applied:
+Three crates are built from `vendor/` with a patch from `patches/` applied:
 
+- `i-slint-common` memory-maps the fallback fonts in `SLINT_FONT_PATH` instead of reading them into memory, about 18 MB.
 - `i-slint-renderer-skia`, Slint's Skia renderer, reads fallback fonts for CJK and emoji from their memory-mapped files rather than copying them, which saves 40 to 70 MB.
 - `rustypipe` opens playlists the signed-in user owns, whose page YouTube sends with an editable header, and returns an error instead of crashing when YouTube refuses a visitor ID.
 
@@ -80,6 +82,8 @@ The folder is not checked in: run `scripts/vendor-patched.ps1` once after clonin
 
 ## Signing in
 
-Open music.youtube.com in a private browser window and sign in. Then copy either a cookies.txt export or the `Cookie` request header from the developer tools (Network tab), paste it into **Sign in**, and close the private window. YouTube rotates the cookies of sessions that stay open.
+Choose **Sign in**, then **Sign in with Google**, and sign in on Google's page as usual. The window closes by itself once you're signed in. It runs in private mode, so Google's cookies stay in memory; the app keeps only the session cookie, encrypted.
 
-This is an unofficial client using undocumented APIs; a dedicated account is the safer choice.
+You can paste cookies instead: open music.youtube.com in a private browser window and sign in, copy either a cookies.txt export or the `Cookie` request header from the developer tools (Network tab), paste it under **Paste cookies instead**, and close the private window. YouTube rotates the cookies of sessions that stay open.
+
+This is an unofficial client using undocumented APIs, against YouTube's terms of service. Google could ask you to confirm you're not a bot or revoke the session, and could in principle restrict the account; a dedicated account is the safer choice.
