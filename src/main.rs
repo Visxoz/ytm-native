@@ -123,8 +123,8 @@ fn main() {
 
     let settings = settings::Settings::load();
     // Skia on the GPU through Direct3D 12, which takes most of the work of
-    // scrolling off the CPU for about 50 MB of driver memory. Without a usable GPU, Skia falls back
-    // to drawing into a CPU buffer.
+    // scrolling off the CPU for about 50 MB of driver memory. Without a usable
+    // GPU, Skia falls back to drawing into a CPU buffer.
     if std::env::var_os("SLINT_BACKEND").is_none()
         && let Err(e) = slint::BackendSelector::new()
             .backend_name("winit".into())

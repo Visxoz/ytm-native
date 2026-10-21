@@ -8,7 +8,10 @@ use std::{
 };
 
 use slint::{Color, Image, Rgba8Pixel, SharedPixelBuffer};
-use tokio::{runtime::Handle, sync::Semaphore};
+use tokio::{
+    runtime::Handle,
+    sync::{Semaphore, oneshot},
+};
 
 // Logical sizes artwork is drawn at.
 pub const ROW: u32 = 48;
@@ -25,6 +28,9 @@ const PARALLEL_FETCHES: usize = 8;
 
 thread_local! {
     static CACHE: RefCell<Cache> = RefCell::new(Cache::default());
+    /// Images being fetched, with whoever else is waiting for each.
+    static PENDING: RefCell<HashMap<String, Vec<oneshot::Sender<Option<Image>>>>> =
+        RefCell::new(HashMap::new());
     /// Window scale factor, so artwork decodes at the size it is drawn.
     static SCALE: Cell<f32> = const { Cell::new(1.0) };
 }
@@ -100,40 +106,82 @@ fn physical(edge: u32) -> u32 {
 }
 
 /// Fetches `url` and scales it to `edge` logical pixels. Call on the UI thread.
+/// Requests for an image already on its way wait for that one.
 pub async fn load(rt: &Handle, url: &str, edge: u32) -> Option<Image> {
     if let Some(image) = cached(url, edge) {
         return Some(image);
     }
-    let owned = url.to_owned();
-    let pixels = physical(edge);
-    let (buffer, accent) = rt
-        .spawn(async move {
-            let _permit = permits().acquire().await.ok()?;
-            let bytes = http()
-                .get(&owned)
-                .send()
-                .await
-                .and_then(|r| r.error_for_status())
-                .ok()?
-                .bytes()
-                .await
-                .ok()?;
-            tokio::task::spawn_blocking(move || decode(&bytes, pixels))
-                .await
-                .ok()?
-        })
-        .await
-        .ok()??;
-    let image = Image::from_rgba8(buffer);
-    CACHE.with(|c| {
-        let mut cache = c.borrow_mut();
-        cache.accents.insert(key(url, edge), accent);
-        cache.insert(key(url, edge), image.clone());
+    let key = key(url, edge);
+    let waiting = PENDING.with(|p| {
+        let mut pending = p.borrow_mut();
+        match pending.get_mut(&key) {
+            Some(waiters) => {
+                let (tx, rx) = oneshot::channel();
+                waiters.push(tx);
+                Some(rx)
+            }
+            None => {
+                pending.insert(key.clone(), Vec::new());
+                None
+            }
+        }
     });
-    Some(image)
+    if let Some(rx) = waiting {
+        return rx.await.ok().flatten();
+    }
+
+    // Only artwork with something drawn behind it needs a colour picked.
+    let with_accent = matches!(edge, PLAYER | HEADER | BANNER);
+    let image = fetch(rt, url.to_owned(), physical(edge), with_accent)
+        .await
+        .map(|(buffer, accent)| {
+            let image = Image::from_rgba8(buffer);
+            CACHE.with(|c| {
+                let mut cache = c.borrow_mut();
+                if let Some(accent) = accent {
+                    cache.accents.insert(key.clone(), accent);
+                }
+                cache.insert(key.clone(), image.clone());
+            });
+            image
+        });
+    let waiters = PENDING.with(|p| p.borrow_mut().remove(&key));
+    for tx in waiters.into_iter().flatten() {
+        let _ = tx.send(image.clone());
+    }
+    image
 }
 
-fn decode(bytes: &[u8], edge: u32) -> Option<(SharedPixelBuffer<Rgba8Pixel>, Color)> {
+async fn fetch(
+    rt: &Handle,
+    url: String,
+    pixels: u32,
+    with_accent: bool,
+) -> Option<(SharedPixelBuffer<Rgba8Pixel>, Option<Color>)> {
+    rt.spawn(async move {
+        let _permit = permits().acquire().await.ok()?;
+        let bytes = http()
+            .get(&url)
+            .send()
+            .await
+            .and_then(|r| r.error_for_status())
+            .ok()?
+            .bytes()
+            .await
+            .ok()?;
+        tokio::task::spawn_blocking(move || decode(&bytes, pixels, with_accent))
+            .await
+            .ok()?
+    })
+    .await
+    .ok()?
+}
+
+fn decode(
+    bytes: &[u8],
+    edge: u32,
+    with_accent: bool,
+) -> Option<(SharedPixelBuffer<Rgba8Pixel>, Option<Color>)> {
     let image = image::load_from_memory(bytes)
         .map_err(|e| log::debug!("undecodable artwork: {e}"))
         .ok()?;
@@ -149,7 +197,7 @@ fn decode(bytes: &[u8], edge: u32) -> Option<(SharedPixelBuffer<Rgba8Pixel>, Col
     } else {
         image
     };
-    let accent = accent_of(&image);
+    let accent = with_accent.then(|| accent_of(&image));
     let rgba = image.to_rgba8();
     let buffer = SharedPixelBuffer::clone_from_slice(rgba.as_raw(), rgba.width(), rgba.height());
     Some((buffer, accent))

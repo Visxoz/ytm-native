@@ -1,7 +1,10 @@
 //! The play queue. Shuffle reorders what comes after the current track, as
 //! YouTube Music does, and turning it off restores the original order.
 
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::{
+    collections::HashMap,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum Repeat {
@@ -48,6 +51,8 @@ pub struct Queue<T> {
     pub repeat: Repeat,
     next_uid: u64,
     rng: u64,
+    /// Bumped whenever entries are added, removed or reordered.
+    revision: u64,
 }
 
 impl<T: Clone> Default for Queue<T> {
@@ -72,10 +77,16 @@ impl<T: Clone> Queue<T> {
             repeat: Repeat::Off,
             next_uid: 0,
             rng: seed | 1,
+            revision: 0,
         }
     }
 
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
     fn entry(&mut self, item: T) -> Entry<T> {
+        self.revision += 1;
         self.next_uid += 1;
         Entry {
             uid: self.next_uid,
@@ -106,6 +117,7 @@ impl<T: Clone> Queue<T> {
 
     /// Replaces the queue, starting at `start`.
     pub fn set(&mut self, items: Vec<T>, start: usize, shuffle: bool) {
+        self.revision += 1;
         self.entries = items.into_iter().map(|item| self.entry(item)).collect();
         self.current = (!self.entries.is_empty()).then(|| start.min(self.entries.len() - 1));
         self.unshuffled = None;
@@ -117,21 +129,22 @@ impl<T: Clone> Queue<T> {
     pub fn set_shuffle(&mut self, on: bool) {
         match (on, self.unshuffled.is_some()) {
             (true, false) => {
+                self.revision += 1;
                 self.unshuffled = Some(self.entries.iter().map(|e| e.uid).collect());
                 self.shuffle_after_current();
             }
             (false, true) => {
+                self.revision += 1;
                 let order = self.unshuffled.take().unwrap_or_default();
                 let current_uid = self.current.map(|c| self.entries[c].uid);
+                let rank: HashMap<u64, usize> = order
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, uid)| (uid, i))
+                    .collect();
                 // Entries added while shuffled keep their place at the end.
-                let mut restored: Vec<Entry<T>> = Vec::with_capacity(self.entries.len());
-                for uid in order {
-                    if let Some(pos) = self.entries.iter().position(|e| e.uid == uid) {
-                        restored.push(self.entries.remove(pos));
-                    }
-                }
-                restored.append(&mut self.entries);
-                self.entries = restored;
+                self.entries
+                    .sort_by_key(|e| rank.get(&e.uid).copied().unwrap_or(usize::MAX));
                 self.current =
                     current_uid.and_then(|uid| self.entries.iter().position(|e| e.uid == uid));
             }
@@ -239,6 +252,7 @@ impl<T: Clone> Queue<T> {
         if index >= self.entries.len() || index == current {
             return false;
         }
+        self.revision += 1;
         self.entries.remove(index);
         if index < current {
             self.current = Some(current - 1);
@@ -249,6 +263,7 @@ impl<T: Clone> Queue<T> {
     /// Drops everything after the current track.
     pub fn clear_upcoming(&mut self) {
         if let Some(current) = self.current {
+            self.revision += 1;
             self.entries.truncate(current + 1);
         }
     }
@@ -345,6 +360,21 @@ mod tests {
         assert_eq!(q.advance(false), None);
         q.push(4);
         assert_eq!(q.current(), Some(&4));
+    }
+
+    #[test]
+    fn revision_tracks_changes_to_entries_only() {
+        let mut q = queue(3);
+        let r = q.revision();
+        q.advance(false);
+        q.jump(0);
+        q.back();
+        assert_eq!(q.revision(), r, "moving through the queue changes nothing");
+        q.push(9);
+        assert_ne!(q.revision(), r);
+        let r = q.revision();
+        q.set_shuffle(true);
+        assert_ne!(q.revision(), r);
     }
 
     #[test]

@@ -80,7 +80,6 @@ struct State {
     page_generation: u64,
     restore_scroll: Option<f32>,
     queue: Queue<Track>,
-    queue_generation: u64,
     playback: Playback,
     lyrics_for: Option<String>,
     suggest_generation: u64,
@@ -99,11 +98,14 @@ pub struct App {
     rows: Rc<VecModel<RowItem>>,
     library: Rc<VecModel<CardItem>>,
     queue_model: Rc<VecModel<QueueItem>>,
+    /// Queue revision the queue model shows.
+    queue_shown: std::cell::Cell<Option<u64>>,
     tick: Timer,
     eq_timer: Timer,
     premium: Arc<PremiumShared>,
     premium_shown: std::cell::Cell<u8>,
     toast_timer: Timer,
+    suggest_timer: Timer,
 }
 
 fn s(text: impl AsRef<str>) -> SharedString {
@@ -125,6 +127,23 @@ fn track_item(track: &Track, number: usize) -> TrackItem {
         number: s(number.to_string()),
         has_artist: track.first_artist_id().is_some(),
         has_album: track.album.is_some(),
+    }
+}
+
+fn track_row(track: &Track, index: usize, numbered: bool, section: usize) -> RowItem {
+    let number = if numbered {
+        track.track_nr.map_or(index + 1, usize::from)
+    } else {
+        index + 1
+    };
+    RowItem {
+        kind: RowKind::Track,
+        track: track_item(track, number),
+        numbered,
+        show_album: !numbered,
+        section: section as i32,
+        index: index as i32,
+        ..Default::default()
     }
 }
 
@@ -184,7 +203,6 @@ impl App {
                 page_generation: 0,
                 restore_scroll: None,
                 queue,
-                queue_generation: 0,
                 playback: Playback::default(),
                 lyrics_for: None,
                 suggest_generation: 0,
@@ -193,6 +211,7 @@ impl App {
             rows: Rc::new(VecModel::default()),
             library: Rc::new(VecModel::default()),
             queue_model: Rc::new(VecModel::default()),
+            queue_shown: std::cell::Cell::new(None),
             tick: Timer::default(),
             eq_timer: Timer::default(),
             premium: Arc::new(PremiumShared {
@@ -210,6 +229,7 @@ impl App {
             }),
             premium_shown: std::cell::Cell::new(u8::MAX),
             toast_timer: Timer::default(),
+            suggest_timer: Timer::default(),
         });
         app.bind(ui);
         app.apply_settings_to_ui(ui);
@@ -316,16 +336,24 @@ impl App {
             }
         });
 
-        let api = self.api.clone();
-        self.spawn(async move { api.is_signed_in().await }, |app, signed_in| {
-            app.state.borrow_mut().signed_in = signed_in;
-            if signed_in {
-                app.load_library();
-            }
-            app.warm_premium();
-            app.ui().set_signed_in(signed_in);
-            app.navigate(Route::Home, false);
-        });
+        // A stored cookie counts as signed in, so Home loads without waiting
+        // for YouTube to confirm it.
+        let signed_in = self.api.has_cookie();
+        self.state.borrow_mut().signed_in = signed_in;
+        self.ui().set_signed_in(signed_in);
+        if signed_in {
+            self.load_library();
+        }
+        self.warm_premium();
+        self.navigate(Route::Home, false);
+        if signed_in {
+            let api = self.api.clone();
+            self.spawn(async move { api.cookie_valid().await }, |app, valid| {
+                if valid == Some(false) {
+                    app.sign_in_expired();
+                }
+            });
+        }
     }
 
     pub fn attach_media_controls(&self, hwnd: *mut std::ffi::c_void) {
@@ -438,6 +466,8 @@ impl App {
         on!(on_forward, |app| app.go_forward());
         on!(on_search, |app, query| {
             let query = query.trim().to_owned();
+            app.suggest_timer.stop();
+            app.state.borrow_mut().suggest_generation += 1;
             app.ui().set_suggestions(ModelRc::default());
             if !query.is_empty() {
                 app.navigate(Route::Search(query), true);
@@ -792,23 +822,10 @@ impl App {
                         });
                     }
                     for (i, track) in tracks.iter().enumerate() {
-                        let number = if *numbered {
-                            track.track_nr.map_or(i + 1, usize::from)
-                        } else {
-                            i + 1
-                        };
                         if track.thumb.is_some() && !*numbered {
                             track_art.push((rows.len(), track.thumb.clone()));
                         }
-                        rows.push(RowItem {
-                            kind: RowKind::Track,
-                            track: track_item(track, number),
-                            numbered: *numbered,
-                            show_album: !*numbered,
-                            section: section_index as i32,
-                            index: i as i32,
-                            ..Default::default()
-                        });
+                        rows.push(track_row(track, i, *numbered, section_index));
                     }
                 }
                 Section::Cards { cards, layout, .. } => {
@@ -854,10 +871,9 @@ impl App {
         let scroll = self.state.borrow_mut().restore_scroll.take().unwrap_or(0.0);
         ui.set_page_scroll(scroll);
 
-        let still_current = move |app: &Rc<Self>| app.state.borrow().page_generation == generation;
         let accent_url = header_thumb.clone();
         self.load_image(header_thumb, header_edge, move |app, image| {
-            if !still_current(app) {
+            if app.state.borrow().page_generation != generation {
                 return;
             }
             if let Some(color) = accent_url
@@ -877,15 +893,7 @@ impl App {
             }
         });
         for (row_index, url) in track_art {
-            self.load_image(url, images::ROW, move |app, image| {
-                if !still_current(app) {
-                    return;
-                }
-                if let Some(mut row) = app.rows.row_data(row_index) {
-                    row.track.art = image;
-                    app.rows.set_row_data(row_index, row);
-                }
-            });
+            self.load_row_art(row_index, url, generation);
         }
         for (model, urls, edge) in card_art {
             for (i, url) in urls.into_iter().enumerate() {
@@ -898,6 +906,75 @@ impl App {
                 });
             }
         }
+        if self.state.borrow().page.more.is_some() {
+            self.complete_page(route, generation);
+        }
+    }
+
+    fn load_row_art(self: &Rc<Self>, row_index: usize, url: Option<String>, generation: u64) {
+        self.load_image(url, images::ROW, move |app, image| {
+            if app.state.borrow().page_generation != generation {
+                return;
+            }
+            if let Some(mut row) = app.rows.row_data(row_index) {
+                row.track.art = image;
+                app.rows.set_row_data(row_index, row);
+            }
+        });
+    }
+
+    /// Fetches the rest of a long playlist after its first page shows.
+    fn complete_page(self: &Rc<Self>, route: Route, generation: u64) {
+        let page = self.state.borrow().page.clone();
+        let api = self.api.clone();
+        self.spawn(async move { api.complete(page).await }, move |app, page| {
+            if let Some((cached, _)) = app.state.borrow_mut().page_cache.get_mut(&route) {
+                *cached = page.clone();
+            }
+            if app.state.borrow().page_generation == generation {
+                app.append_tracks(page, generation);
+            }
+        });
+    }
+
+    /// Shows the tracks `page` has beyond those of the page on screen.
+    fn append_tracks(self: &Rc<Self>, page: Page, generation: u64) {
+        let shown = match self.state.borrow().page.sections.first() {
+            Some(Section::Tracks { tracks, .. }) => tracks.len(),
+            _ => return,
+        };
+        let Some(Section::Tracks {
+            tracks, numbered, ..
+        }) = page.sections.first()
+        else {
+            return;
+        };
+        let last_row = (0..self.rows.row_count()).rev().find(|&i| {
+            self.rows
+                .row_data(i)
+                .is_some_and(|r| r.kind == RowKind::Track && r.section == 0)
+        });
+        let Some(last_row) = last_row else { return };
+        for (index, track) in tracks.iter().enumerate().skip(shown) {
+            let row_index = last_row + 1 + index - shown;
+            self.rows
+                .insert(row_index, track_row(track, index, *numbered, 0));
+            if !*numbered {
+                self.load_row_art(row_index, track.thumb.clone(), generation);
+            }
+        }
+        if let Some(header) = &page.header
+            && let Some(i) = (0..self.rows.row_count()).find(|&i| {
+                self.rows
+                    .row_data(i)
+                    .is_some_and(|r| r.kind == RowKind::Header)
+            })
+            && let Some(mut row) = self.rows.row_data(i)
+        {
+            row.meta = s(&header.meta);
+            self.rows.set_row_data(i, row);
+        }
+        self.state.borrow_mut().page = page;
     }
 
     fn suggest(self: &Rc<Self>, query: String) {
@@ -907,24 +984,29 @@ impl App {
             state.suggest_generation
         };
         if query.trim().chars().count() < 2 {
+            self.suggest_timer.stop();
             self.ui().set_suggestions(ModelRc::default());
             return;
         }
-        let api = self.api.clone();
-        self.spawn(
-            async move {
-                tokio::time::sleep(SUGGEST_DELAY).await;
-                api.suggestions(&query).await
-            },
-            move |app, terms| {
-                if app.state.borrow().suggest_generation != generation {
-                    return;
-                }
-                let terms: Vec<SharedString> = terms.iter().take(8).map(s).collect();
-                app.ui()
-                    .set_suggestions(ModelRc::from(Rc::new(VecModel::from(terms))));
-            },
-        );
+        // Restarting the timer drops the previous keystroke's request.
+        let weak = Rc::downgrade(self);
+        self.suggest_timer
+            .start(TimerMode::SingleShot, SUGGEST_DELAY, move || {
+                let Some(app) = weak.upgrade() else { return };
+                let api = app.api.clone();
+                let query = query.clone();
+                app.spawn(
+                    async move { api.suggestions(&query).await },
+                    move |app, terms| {
+                        if app.state.borrow().suggest_generation != generation {
+                            return;
+                        }
+                        let terms: Vec<SharedString> = terms.iter().take(8).map(s).collect();
+                        app.ui()
+                            .set_suggestions(ModelRc::from(Rc::new(VecModel::from(terms))));
+                    },
+                );
+            });
     }
 
     // Starting playback
@@ -956,20 +1038,32 @@ impl App {
     /// Plays `track` now and queues a radio based on it, like YouTube Music.
     fn play_with_radio(self: &Rc<Self>, track: Track) {
         let id = track.id.clone();
-        self.state.borrow_mut().queue.set(vec![track], 0, false);
+        {
+            let mut state = self.state.borrow_mut();
+            state.queue.set(vec![track], 0, false);
+            // Autoplay would otherwise fetch the same radio once this starts.
+            state.playback.extending = true;
+        }
         self.start_current();
         let api = self.api.clone();
         let seed = id.clone();
         self.spawn(
             async move { api.track_radio(&seed).await },
-            move |app, result| match result {
-                Ok(tracks) => {
-                    let still_first = app.state.borrow().queue.get(0).is_some_and(|t| t.id == id);
-                    if still_first {
-                        app.append_unique(tracks);
+            move |app, result| {
+                app.state.borrow_mut().playback.extending = false;
+                match result {
+                    Ok(tracks) => {
+                        let still_first =
+                            app.state.borrow().queue.get(0).is_some_and(|t| t.id == id);
+                        if still_first {
+                            app.append_unique(tracks);
+                        }
+                    }
+                    Err(e) => {
+                        log::warn!("radio failed: {e}");
+                        app.extend_with_radio_if_ending();
                     }
                 }
-                Err(e) => log::warn!("radio failed: {e}"),
             },
         );
     }
@@ -977,12 +1071,14 @@ impl App {
     fn append_unique(self: &Rc<Self>, tracks: Vec<Track>) {
         {
             let mut state = self.state.borrow_mut();
-            let known: HashSet<String> = state.queue.items().map(|t| t.id.clone()).collect();
+            let fresh: Vec<Track> = {
+                let known: HashSet<&str> = state.queue.items().map(|t| t.id.as_str()).collect();
+                tracks
+                    .into_iter()
+                    .filter(|t| !known.contains(t.id.as_str()))
+                    .collect()
+            };
             let shuffle = state.settings.shuffle;
-            let fresh: Vec<Track> = tracks
-                .into_iter()
-                .filter(|t| !known.contains(&t.id))
-                .collect();
             state.queue.extend(fresh);
             // Keep newly added tracks in the shuffle.
             if shuffle {
@@ -1652,9 +1748,10 @@ impl App {
         let started = self.state.borrow().playback.started;
         if started {
             ui.set_np_position(self.player.position() as f32);
-            ui.set_np_buffered(self.player.buffered());
+            let buffered = self.player.buffered();
+            ui.set_np_buffered(buffered);
             let stalled = self.player.is_buffering() && !self.player.is_paused();
-            ui.set_np_loading(stalled && self.player.buffered() < 1.0);
+            ui.set_np_loading(stalled && buffered < 1.0);
         }
     }
 
@@ -1690,47 +1787,57 @@ impl App {
     }
 
     fn refresh_queue(self: &Rc<Self>) {
-        let (items, thumbs, generation) = {
-            let mut state = self.state.borrow_mut();
-            state.queue_generation += 1;
-            let current = state.queue.current_index();
-            let items: Vec<QueueItem> = state
-                .queue
-                .items()
-                .enumerate()
-                .map(|(i, t)| QueueItem {
+        let (revision, current) = {
+            let state = self.state.borrow();
+            (state.queue.revision(), state.queue.current_index())
+        };
+        let current = current.map_or(-1, |i| i as i32);
+        let ui = self.ui();
+        let previous = ui.get_queue_current();
+        ui.set_queue_current(current);
+        if self.queue_shown.get() == Some(revision) {
+            // Same entries: only the highlight moves.
+            for (index, is_current) in [(previous, false), (current, true)] {
+                if let Ok(i) = usize::try_from(index)
+                    && let Some(mut item) = self.queue_model.row_data(i)
+                    && item.current != is_current
+                {
+                    item.current = is_current;
+                    self.queue_model.set_row_data(i, item);
+                }
+            }
+            return;
+        }
+        self.queue_shown.set(Some(revision));
+
+        let mut missing = Vec::new();
+        let items: Vec<QueueItem> = self
+            .state
+            .borrow()
+            .queue
+            .items()
+            .enumerate()
+            .map(|(i, t)| {
+                let art = t
+                    .thumb
+                    .as_deref()
+                    .and_then(|u| images::cached(u, images::ROW));
+                if art.is_none() && t.thumb.is_some() {
+                    missing.push((i, t.thumb.clone()));
+                }
+                QueueItem {
                     title: s(&t.title),
                     artists: s(t.artist_names()),
                     duration: s(t.duration.map(api::format_duration).unwrap_or_default()),
-                    art: t
-                        .thumb
-                        .as_deref()
-                        .and_then(|u| images::cached(u, images::ROW))
-                        .unwrap_or_default(),
-                    current: Some(i) == current,
-                })
-                .collect();
-            let thumbs: Vec<Option<String>> =
-                state.queue.items().map(|t| t.thumb.clone()).collect();
-            (items, thumbs, state.queue_generation)
-        };
-        self.ui().set_queue_current(
-            self.state
-                .borrow()
-                .queue
-                .current_index()
-                .map_or(-1, |i| i as i32),
-        );
+                    art: art.unwrap_or_default(),
+                    current: i as i32 == current,
+                }
+            })
+            .collect();
         self.queue_model.set_vec(items);
-        for (i, url) in thumbs.into_iter().enumerate() {
-            if url
-                .as_deref()
-                .is_some_and(|u| images::cached(u, images::ROW).is_some())
-            {
-                continue;
-            }
+        for (i, url) in missing {
             self.load_image(url, images::ROW, move |app, image| {
-                if app.state.borrow().queue_generation != generation {
+                if app.queue_shown.get() != Some(revision) {
                     return;
                 }
                 if let Some(mut item) = app.queue_model.row_data(i) {
@@ -1859,6 +1966,22 @@ impl App {
                 Err(e) => log::warn!("{e}"),
             },
         );
+    }
+
+    /// Drops back to signed out when YouTube rejects the stored cookie.
+    fn sign_in_expired(self: &Rc<Self>) {
+        log::warn!("the stored sign-in was rejected");
+        let on_home = {
+            let mut state = self.state.borrow_mut();
+            state.signed_in = false;
+            state.page_cache.clear();
+            state.route == Route::Home
+        };
+        self.library.set_vec(Vec::new());
+        self.ui().set_signed_in(false);
+        if on_home {
+            self.reload();
+        }
     }
 
     fn sign_out(self: &Rc<Self>) {

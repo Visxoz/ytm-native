@@ -144,6 +144,14 @@ pub struct Header {
 pub struct Page {
     pub header: Option<Header>,
     pub sections: Vec<Section>,
+    /// Tracks of a long playlist still to fetch after its first page shows.
+    pub more: Option<MoreTracks>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MoreTracks {
+    tracks: Paginator<TrackItem>,
+    count: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -344,6 +352,12 @@ fn total_time(tracks: &[Track]) -> Option<String> {
     })
 }
 
+fn playlist_meta(count: Option<u64>, tracks: &[Track]) -> String {
+    let mut meta = vec![songs(count.unwrap_or(tracks.len() as u64))];
+    meta.extend(total_time(tracks));
+    meta.join(" • ")
+}
+
 fn track_section(title: &str, tracks: Vec<Track>, mode: QueueMode) -> Option<Section> {
     (!tracks.is_empty()).then(|| Section::Tracks {
         title: title.to_owned(),
@@ -392,13 +406,15 @@ impl Api {
         }
     }
 
-    /// A playlist with up to `PLAYLIST_LIMIT` tracks, as its owner sees it.
-    /// Should the cookie have gone stale, public playlists still open signed
-    /// out.
-    async fn fetch_playlist(&self, id: &str) -> Result<MusicPlaylist> {
+    /// A playlist as its owner sees it: its first page, or up to
+    /// `PLAYLIST_LIMIT` tracks when `full`. Should the cookie have gone stale,
+    /// public playlists still open signed out.
+    async fn fetch_playlist(&self, id: &str, full: bool) -> Result<MusicPlaylist> {
         let fetch = |q: RustyPipeQuery| async move {
             let mut playlist = q.music_playlist(id).await?;
-            let _ = playlist.tracks.extend_limit(&q, PLAYLIST_LIMIT).await;
+            if full {
+                let _ = playlist.tracks.extend_limit(&q, PLAYLIST_LIMIT).await;
+            }
             Ok::<_, rustypipe::error::Error>(playlist)
         };
         let q = self.user_q();
@@ -425,7 +441,6 @@ impl Api {
 
     async fn home(&self, signed_in: bool) -> Result<Page> {
         let q = self.q();
-        // Signed in: YouTube Music's own personal home feed.
         if signed_in {
             let (feed, genres) = tokio::join!(crate::home_feed::fetch(&q), q.music_genres());
             match feed {
@@ -443,6 +458,7 @@ impl Api {
                     return Ok(Page {
                         header: None,
                         sections,
+                        more: None,
                     });
                 }
                 Ok(_) => log::warn!("the personal home feed was empty"),
@@ -507,6 +523,7 @@ impl Api {
         Ok(Page {
             header: None,
             sections,
+            more: None,
         })
     }
 
@@ -547,6 +564,7 @@ impl Api {
         Ok(Page {
             header: None,
             sections,
+            more: None,
         })
     }
 
@@ -583,6 +601,7 @@ impl Api {
         Ok(Page {
             header: None,
             sections,
+            more: None,
         })
     }
 
@@ -691,6 +710,7 @@ impl Api {
         Ok(Page {
             header: None,
             sections,
+            more: None,
         })
     }
 
@@ -743,21 +763,23 @@ impl Api {
         Ok(Page {
             header: Some(header),
             sections,
+            more: None,
         })
     }
 
+    /// A playlist's first page of tracks; `complete` fetches the rest.
     async fn playlist(&self, id: &str) -> Result<Page> {
-        let playlist = self.fetch_playlist(id).await?;
-        let tracks = tracks(playlist.tracks.items);
-
-        let mut meta = Vec::new();
-        meta.push(songs(playlist.track_count.unwrap_or(tracks.len() as u64)));
-        meta.extend(total_time(&tracks));
+        let playlist = self.fetch_playlist(id, false).await?;
+        let tracks = tracks(playlist.tracks.items.clone());
+        let more = (playlist.tracks.ctoken.is_some() && !tracks.is_empty()).then_some(MoreTracks {
+            tracks: playlist.tracks,
+            count: playlist.track_count,
+        });
         let header = Header {
             label: "Playlist".to_owned(),
             title: playlist.name,
             subtitle: playlist.channel.map(|c| c.name).unwrap_or_default(),
-            meta: meta.join(" • "),
+            meta: playlist_meta(playlist.track_count, &tracks),
             description: playlist
                 .description
                 .map(|d| d.to_plaintext())
@@ -784,7 +806,27 @@ impl Api {
         Ok(Page {
             header: Some(header),
             sections,
+            more,
         })
+    }
+
+    /// Fetches the rest of a playlist page's tracks, up to `PLAYLIST_LIMIT`.
+    /// Keeps what arrived should a later request fail.
+    pub async fn complete(&self, mut page: Page) -> Page {
+        let Some(MoreTracks { mut tracks, count }) = page.more.take() else {
+            return page;
+        };
+        let shown = tracks.items.len();
+        let _ = tracks.extend_limit(self.q(), PLAYLIST_LIMIT).await;
+        let extra = self::tracks(tracks.items.split_off(shown));
+        if let Some(Section::Tracks { tracks, .. }) = page.sections.first_mut() {
+            tracks.extend_from_slice(&extra);
+        }
+        if let Some(header) = &mut page.header {
+            header.tracks.extend(extra);
+            header.meta = playlist_meta(count, &header.tracks);
+        }
+        page
     }
 
     async fn artist(&self, id: &str) -> Result<Page> {
@@ -845,6 +887,7 @@ impl Api {
         Ok(Page {
             header: Some(header),
             sections,
+            more: None,
         })
     }
 
@@ -868,22 +911,31 @@ impl Api {
                 ..Default::default()
             }),
             sections,
+            more: None,
         })
     }
 
     /// Tracks of an album or playlist, for playing a card directly.
     pub async fn card_tracks(&self, kind: CardKind, id: &str) -> Result<Vec<Track>> {
-        let page = match kind {
-            CardKind::Album => self.album(id).await?,
-            CardKind::Playlist => self.playlist(id).await?,
-            CardKind::Artist => self.artist(id).await?,
-            CardKind::Genre | CardKind::Song => return Ok(Vec::new()),
-        };
-        Ok(page.header.map(|h| h.tracks).unwrap_or_default())
+        match kind {
+            CardKind::Album => Ok(self
+                .album(id)
+                .await?
+                .header
+                .map(|h| h.tracks)
+                .unwrap_or_default()),
+            CardKind::Playlist => self.playlist_tracks(id).await,
+            // The top songs only, without the discography the page fetches.
+            CardKind::Artist => {
+                let artist = self.q().music_artist(id, false).await.map_err(err)?;
+                Ok(tracks(artist.tracks))
+            }
+            CardKind::Genre | CardKind::Song => Ok(Vec::new()),
+        }
     }
 
     pub async fn playlist_tracks(&self, id: &str) -> Result<Vec<Track>> {
-        let playlist = self.fetch_playlist(id).await?;
+        let playlist = self.fetch_playlist(id, true).await?;
         Ok(tracks(playlist.tracks.items))
     }
 
@@ -944,8 +996,22 @@ impl Api {
         let _ = self.rp.user_auth_remove_cookie().await;
     }
 
-    pub async fn is_signed_in(&self) -> bool {
-        self.rp.user_auth_check_cookie().await.is_ok()
+    /// Whether a sign-in cookie is stored, without asking YouTube.
+    pub fn has_cookie(&self) -> bool {
+        self.q().auth_enabled(ClientType::DesktopMusic)
+    }
+
+    /// Checks the stored cookie with YouTube, which costs a page load.
+    /// `None` when YouTube could not be asked.
+    pub async fn cookie_valid(&self) -> Option<bool> {
+        match self.rp.user_auth_check_cookie().await {
+            Ok(()) => Some(true),
+            Err(rustypipe::error::Error::Auth(_)) => Some(false),
+            Err(e) => {
+                log::warn!("could not check the sign-in: {e}");
+                None
+            }
+        }
     }
 }
 
