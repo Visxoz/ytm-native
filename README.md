@@ -21,6 +21,7 @@ The `master` branch is ytm-lite, a Tauri window around music.youtube.com. This b
 
 ## What it does
 
+- **A Spotify-style interface in YouTube Music red.** Rounded panels, a collapsible Your Library sidebar with your playlists, page headers tinted from the artwork, a sticky title bar, quick picks on Home, and animated hover, press, panel and page transitions.
 - **Browse and search.** Home (trending, new releases, top artists, charts, moods), Explore (moods, genres, new albums and videos), search with suggestions, and artist, album, playlist and genre pages.
 - **Plays like YouTube Music.** Playing a song from search starts a radio after it, and autoplay keeps going when the queue ends. Up Next supports play next, add to queue, remove and clear; shuffle reorders what's coming and restores the order when turned off; repeat all and repeat one.
 - **Lyrics** in the side panel when YouTube has them.
@@ -29,7 +30,7 @@ The `master` branch is ytm-lite, a Tauri window around music.youtube.com. This b
 - **Discord Rich Presence**, ported from ytm-lite.
 - **Your library.** Sign in by pasting your YouTube cookies to see your playlists, albums, artists and listening history.
 
-Keyboard: <kbd>Space</kbd> play/pause, <kbd>Ctrl</kbd>+<kbd>F</kbd> search, <kbd>Ctrl</kbd>+<kbd>←</kbd>/<kbd>→</kbd> previous/next, <kbd>Alt</kbd>+<kbd>←</kbd> back. Right-click a song for more actions.
+Keyboard: <kbd>Space</kbd> play/pause, <kbd>Ctrl</kbd>+<kbd>K</kbd> search, <kbd>Ctrl</kbd>+<kbd>B</kbd> sidebar, <kbd>Ctrl</kbd>+<kbd>←</kbd>/<kbd>→</kbd> previous/next, <kbd>Alt</kbd>+<kbd>←</kbd> back. Right-click a song for more actions.
 
 ## How it works
 
@@ -40,7 +41,7 @@ Keyboard: <kbd>Space</kbd> play/pause, <kbd>Ctrl</kbd>+<kbd>F</kbd> search, <kbd
 | Demuxing and AAC | [`symphonia`](https://github.com/pdeljanov/Symphonia) |
 | Opus | libopus 1.3.1, as Rust ([`unsafe-libopus`](https://crates.io/crates/unsafe-libopus)) |
 | Audio output | [`cpal`](https://github.com/RustAudio/cpal) (WASAPI) |
-| UI | [Slint](https://slint.dev), software renderer |
+| UI | [Slint](https://slint.dev) with Skia drawing on the CPU |
 | HTTPS | Windows SChannel through `reqwest` |
 | Media keys | [`souvlaki`](https://github.com/Sinono3/souvlaki) |
 
@@ -52,11 +53,11 @@ Measured on the release build while playing Opus:
 
 | | |
 | --- | --- |
-| CPU | about 0.7% of one core |
-| Memory | about 62 MB private, 100 MB working set after browsing Home |
-| Download | one 15 MB exe, no runtime to install |
+| CPU | about 1% of one core |
+| Memory | about 60 MB private, 100 MB working set |
+| Download | one 22 MB exe, no runtime to install |
 
-The software renderer redraws only what changes and avoids loading an OpenGL driver, which alone saved about 140 MB of memory. libopus decodes about 700 times faster than real time.
+Skia draws into a CPU buffer, which gives hinted text and smooth artwork scaling without the 140–240 MB a GPU context costs. Animations run only while something changes; the equaliser steps at 8 frames a second rather than repainting continuously. libopus decodes about 700 times faster than real time.
 
 ## Build
 

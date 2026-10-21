@@ -26,6 +26,8 @@ use crate::{
 };
 
 const TICK: Duration = Duration::from_millis(250);
+/// Equaliser animation step; a few frames a second keeps repaints cheap.
+const EQ_FRAME: Duration = Duration::from_millis(125);
 const TOAST_FOR: Duration = Duration::from_secs(5);
 /// Pressing previous later than this restarts the track instead.
 const RESTART_AFTER_SECS: f64 = 3.0;
@@ -34,7 +36,7 @@ const PREFETCH_FRESH: Duration = Duration::from_secs(60 * 60);
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
 const SUGGEST_DELAY: Duration = Duration::from_millis(150);
 
-type CardArt = (Rc<VecModel<CardItem>>, Vec<Option<String>>);
+type CardArt = (Rc<VecModel<CardItem>>, Vec<Option<String>>, u32);
 
 struct HistoryEntry {
     route: Route,
@@ -77,8 +79,10 @@ pub struct App {
     media: RefCell<Option<Controls>>,
     state: RefCell<State>,
     rows: Rc<VecModel<RowItem>>,
+    library: Rc<VecModel<CardItem>>,
     queue_model: Rc<VecModel<QueueItem>>,
     tick: Timer,
+    eq_timer: Timer,
     toast_timer: Timer,
 }
 
@@ -96,7 +100,7 @@ fn track_item(track: &Track, number: usize) -> TrackItem {
         art: track
             .thumb
             .as_deref()
-            .and_then(|url| images::cached(url, api::ROW_THUMB))
+            .and_then(|url| images::cached(url, images::ROW))
             .unwrap_or_default(),
         number: s(number.to_string()),
         has_artist: track.first_artist_id().is_some(),
@@ -104,7 +108,7 @@ fn track_item(track: &Track, number: usize) -> TrackItem {
     }
 }
 
-fn card_item(card: &Card) -> CardItem {
+fn card_item(card: &Card, edge: u32) -> CardItem {
     let tint = card.color.map_or(slint::Color::default(), |c| {
         slint::Color::from_argb_encoded(0xFF00_0000 | (c & 0x00FF_FFFF))
     });
@@ -116,7 +120,7 @@ fn card_item(card: &Card) -> CardItem {
         art: card
             .thumb
             .as_deref()
-            .and_then(|url| images::cached(url, api::CARD_THUMB))
+            .and_then(|url| images::cached(url, edge))
             .unwrap_or_default(),
         round: card.kind == CardKind::Artist,
         tint,
@@ -166,13 +170,16 @@ impl App {
                 suggest_generation: 0,
             }),
             rows: Rc::new(VecModel::default()),
+            library: Rc::new(VecModel::default()),
             queue_model: Rc::new(VecModel::default()),
             tick: Timer::default(),
+            eq_timer: Timer::default(),
             toast_timer: Timer::default(),
         });
         app.bind(ui);
         app.apply_settings_to_ui(ui);
         ui.set_rows(ModelRc::from(Rc::clone(&app.rows)));
+        ui.set_library(ModelRc::from(Rc::clone(&app.library)));
         ui.set_queue(ModelRc::from(Rc::clone(&app.queue_model)));
         app
     }
@@ -216,15 +223,24 @@ impl App {
         });
     }
 
+    /// Updates the play button and the equalisers on playing rows.
+    fn show_playing(&self, playing: bool) {
+        let ui = self.ui();
+        ui.set_np_playing(playing);
+        ui.global::<ApiGlobal>().set_is_playing(playing);
+    }
+
     fn toast(self: &Rc<Self>, message: impl Into<String>) {
         let message = message.into();
         log::info!("{message}");
-        self.ui().set_toast(message.into());
+        let ui = self.ui();
+        ui.set_toast(message.into());
+        ui.set_toast_visible(true);
         let weak = self.ui.clone();
         self.toast_timer
             .start(TimerMode::SingleShot, TOAST_FOR, move || {
                 if let Some(ui) = weak.upgrade() {
-                    ui.set_toast(SharedString::new());
+                    ui.set_toast_visible(false);
                 }
             });
     }
@@ -239,6 +255,7 @@ impl App {
         ui.set_normalise(settings.normalise);
         ui.set_discord(settings.discord);
         ui.set_autoplay(settings.autoplay);
+        ui.set_sidebar_collapsed(settings.sidebar_collapsed);
     }
 
     pub fn settings(&self) -> Settings {
@@ -247,13 +264,27 @@ impl App {
 
     /// Starts background work once the event loop runs.
     pub fn start(self: &Rc<Self>) {
+        images::set_scale(self.ui().window().scale_factor());
         let app = Rc::clone(self);
         self.tick
             .start(TimerMode::Repeated, TICK, move || app.on_tick());
 
+        let weak = self.ui.clone();
+        self.eq_timer.start(TimerMode::Repeated, EQ_FRAME, move || {
+            if let Some(ui) = weak.upgrade() {
+                let api = ui.global::<ApiGlobal>();
+                if api.get_is_playing() {
+                    api.set_eq_phase(api.get_eq_phase().wrapping_add(1));
+                }
+            }
+        });
+
         let api = self.api.clone();
         self.spawn(async move { api.is_signed_in().await }, |app, signed_in| {
             app.state.borrow_mut().signed_in = signed_in;
+            if signed_in {
+                app.load_library();
+            }
             app.ui().set_signed_in(signed_in);
             app.navigate(Route::Home, false);
         });
@@ -377,6 +408,8 @@ impl App {
             app.update_settings(|s| s.discord = value);
             app.update_presence();
         });
+        on!(on_sidebar_changed, |app, collapsed| app
+            .update_settings(|s| s.sidebar_collapsed = collapsed));
         on!(on_set_autoplay, |app, value| app
             .update_settings(|s| s.autoplay = value));
         on!(on_player_event, |app, kind, message| app
@@ -468,8 +501,9 @@ impl App {
         self.update_nav(&ui);
         ui.set_page_loading(true);
         ui.set_page_error(SharedString::new());
-        if let Route::Search(query) = &route {
-            ui.set_search_text(query.into());
+        match &route {
+            Route::Search(query) => ui.set_search_text(query.into()),
+            _ => ui.set_search_text(SharedString::new()),
         }
 
         let signed_in = self.state.borrow().signed_in;
@@ -549,16 +583,32 @@ impl App {
     }
 
     fn show_page(self: &Rc<Self>, page: Page) {
-        let generation = self.state.borrow().page_generation;
+        let (generation, route) = {
+            let state = self.state.borrow();
+            (state.page_generation, state.route.clone())
+        };
         let mut rows = Vec::new();
         // (row, thumbnail) for track artwork to fetch.
         let mut track_art = Vec::new();
         // Each card model with the thumbnails its cards still need.
         let mut card_art: Vec<CardArt> = Vec::new();
 
+        if route == Route::Home {
+            rows.push(RowItem {
+                kind: RowKind::Greeting,
+                title: s(greeting()),
+                ..Default::default()
+            });
+        }
+
+        let header_edge = match &page.header {
+            Some(h) if h.banner => images::BANNER,
+            _ => images::HEADER,
+        };
         if let Some(header) = &page.header {
             rows.push(RowItem {
                 kind: RowKind::Header,
+                label: s(&header.label),
                 title: s(&header.title),
                 subtitle: s(&header.subtitle),
                 meta: s(&header.meta),
@@ -566,9 +616,10 @@ impl App {
                 art: header
                     .thumb
                     .as_deref()
-                    .and_then(|url| images::cached(url, 544))
+                    .and_then(|url| images::cached(url, header_edge))
                     .unwrap_or_default(),
                 round: header.round,
+                banner: header.banner,
                 can_play: !header.tracks.is_empty(),
                 can_shuffle: !header.tracks.is_empty() || header.shuffle_playlist.is_some(),
                 can_radio: header.radio_id.is_some(),
@@ -591,8 +642,20 @@ impl App {
                 Section::Tracks {
                     tracks, numbered, ..
                 } => {
+                    // Album and playlist track lists get column labels.
+                    if title.is_empty() {
+                        rows.push(RowItem {
+                            kind: RowKind::Columns,
+                            show_album: !*numbered,
+                            ..Default::default()
+                        });
+                    }
                     for (i, track) in tracks.iter().enumerate() {
-                        let number = track.track_nr.map_or(i + 1, usize::from);
+                        let number = if *numbered {
+                            track.track_nr.map_or(i + 1, usize::from)
+                        } else {
+                            i + 1
+                        };
                         if track.thumb.is_some() && !*numbered {
                             track_art.push((rows.len(), track.thumb.clone()));
                         }
@@ -600,6 +663,7 @@ impl App {
                             kind: RowKind::Track,
                             track: track_item(track, number),
                             numbered: *numbered,
+                            show_album: !*numbered,
                             section: section_index as i32,
                             index: i as i32,
                             ..Default::default()
@@ -607,18 +671,26 @@ impl App {
                     }
                 }
                 Section::Cards { cards, layout, .. } => {
+                    let edge = match layout {
+                        CardLayout::Tiles => images::TILE,
+                        CardLayout::Top => images::TOP,
+                        _ => images::CARD,
+                    };
                     let model = Rc::new(VecModel::from(
-                        cards.iter().map(card_item).collect::<Vec<_>>(),
+                        cards.iter().map(|c| card_item(c, edge)).collect::<Vec<_>>(),
                     ));
                     card_art.push((
                         Rc::clone(&model),
                         cards.iter().map(|c| c.thumb.clone()).collect(),
+                        edge,
                     ));
                     rows.push(RowItem {
                         kind: match layout {
                             CardLayout::Carousel => RowKind::Carousel,
                             CardLayout::Grid => RowKind::Grid,
                             CardLayout::Chips => RowKind::Chips,
+                            CardLayout::Tiles => RowKind::Tiles,
+                            CardLayout::Top => RowKind::Top,
                         },
                         cards: ModelRc::from(model),
                         section: section_index as i32,
@@ -628,24 +700,45 @@ impl App {
             }
         }
 
+        let ui = self.ui();
         let header_thumb = page.header.as_ref().and_then(|h| h.thumb.clone());
+        ui.set_page_title(s(page.header.as_ref().map_or("", |h| h.title.as_str())));
+        ui.set_page_can_play(page.header.as_ref().is_some_and(|h| !h.tracks.is_empty()));
+        let tint = header_thumb
+            .as_deref()
+            .and_then(|url| images::accent(url, header_edge))
+            .unwrap_or_else(|| route_tint(&route));
+        ui.set_accent(tint);
+
         self.state.borrow_mut().page = page;
         self.rows.set_vec(rows);
         let scroll = self.state.borrow_mut().restore_scroll.take().unwrap_or(0.0);
-        self.ui().set_page_scroll(scroll);
+        ui.set_page_scroll(scroll);
 
         let still_current = move |app: &Rc<Self>| app.state.borrow().page_generation == generation;
-        self.load_image(header_thumb, 544, move |app, image| {
-            if still_current(app) && app.rows.row_count() > 0 {
-                let mut row = app.rows.row_data(0).unwrap_or_default();
-                if row.kind == RowKind::Header {
-                    row.art = image;
-                    app.rows.set_row_data(0, row);
-                }
+        let accent_url = header_thumb.clone();
+        self.load_image(header_thumb, header_edge, move |app, image| {
+            if !still_current(app) {
+                return;
+            }
+            if let Some(color) = accent_url
+                .as_deref()
+                .and_then(|url| images::accent(url, header_edge))
+            {
+                app.ui().set_accent(color);
+            }
+            if let Some(index) = (0..app.rows.row_count()).find(|&i| {
+                app.rows
+                    .row_data(i)
+                    .is_some_and(|r| r.kind == RowKind::Header)
+            }) {
+                let mut row = app.rows.row_data(index).unwrap_or_default();
+                row.art = image;
+                app.rows.set_row_data(index, row);
             }
         });
         for (row_index, url) in track_art {
-            self.load_image(url, api::ROW_THUMB, move |app, image| {
+            self.load_image(url, images::ROW, move |app, image| {
                 if !still_current(app) {
                     return;
                 }
@@ -655,10 +748,10 @@ impl App {
                 }
             });
         }
-        for (model, urls) in card_art {
+        for (model, urls, edge) in card_art {
             for (i, url) in urls.into_iter().enumerate() {
                 let model = Rc::clone(&model);
-                self.load_image(url, api::CARD_THUMB, move |_, image| {
+                self.load_image(url, edge, move |_, image| {
                     if let Some(mut card) = model.row_data(i) {
                         card.art = image;
                         model.set_row_data(i, card);
@@ -914,27 +1007,36 @@ impl App {
         ui.set_np_duration(track.duration.unwrap_or(0) as f32);
         ui.set_np_position(0.0);
         ui.set_np_buffered(0.0);
-        ui.set_np_playing(true);
+        self.show_playing(true);
         ui.set_np_loading(true);
         ui.set_np_quality(SharedString::new());
         ui.set_np_art(
             track
                 .thumb
                 .as_deref()
-                .and_then(|u| images::cached(u, api::ROW_THUMB))
+                .and_then(|u| images::cached(u, images::ROW))
                 .unwrap_or_default(),
         );
         ui.global::<ApiGlobal>().set_playing_id(s(&track.id));
         let id = track.id.clone();
-        self.load_image(track.large_thumb(), 240, move |app, image| {
-            if app
+        let large = track.large_thumb();
+        self.load_image(large.clone(), images::PLAYER, move |app, image| {
+            if !app
                 .state
                 .borrow()
                 .queue
                 .current()
                 .is_some_and(|t| t.id == id)
             {
-                app.ui().set_np_art(image);
+                return;
+            }
+            let ui = app.ui();
+            ui.set_np_art(image);
+            if let Some(color) = large
+                .as_deref()
+                .and_then(|url| images::accent(url, images::PLAYER))
+            {
+                ui.set_np_accent(color);
             }
         });
 
@@ -1036,7 +1138,7 @@ impl App {
             self.next(true);
         } else {
             self.ui().set_np_loading(false);
-            self.ui().set_np_playing(false);
+            self.show_playing(false);
         }
     }
 
@@ -1184,7 +1286,7 @@ impl App {
         self.player.stop();
         self.player.set_paused(true);
         let ui = self.ui();
-        ui.set_np_playing(false);
+        self.show_playing(false);
         ui.set_np_loading(false);
         self.update_media_state();
         self.update_presence();
@@ -1205,7 +1307,7 @@ impl App {
 
     fn set_paused(self: &Rc<Self>, paused: bool) {
         self.player.set_paused(paused);
-        self.ui().set_np_playing(!paused);
+        self.show_playing(!paused);
         self.update_media_state();
         self.update_presence();
     }
@@ -1323,7 +1425,7 @@ impl App {
                     art: t
                         .thumb
                         .as_deref()
-                        .and_then(|u| images::cached(u, api::ROW_THUMB))
+                        .and_then(|u| images::cached(u, images::ROW))
                         .unwrap_or_default(),
                     current: Some(i) == current,
                 })
@@ -1343,11 +1445,11 @@ impl App {
         for (i, url) in thumbs.into_iter().enumerate() {
             if url
                 .as_deref()
-                .is_some_and(|u| images::cached(u, api::ROW_THUMB).is_some())
+                .is_some_and(|u| images::cached(u, images::ROW).is_some())
             {
                 continue;
             }
-            self.load_image(url, api::ROW_THUMB, move |app, image| {
+            self.load_image(url, images::ROW, move |app, image| {
                 if app.state.borrow().queue_generation != generation {
                     return;
                 }
@@ -1412,6 +1514,7 @@ impl App {
             match result {
                 Ok(()) => {
                     app.state.borrow_mut().signed_in = true;
+                    app.load_library();
                     ui.set_signed_in(true);
                     ui.set_sign_in_open(false);
                     app.toast("Signed in");
@@ -1422,10 +1525,35 @@ impl App {
         });
     }
 
+    /// Fills the sidebar with the signed-in user's playlists.
+    fn load_library(self: &Rc<Self>) {
+        let api = self.api.clone();
+        self.spawn(
+            async move { api.library_playlists().await },
+            |app, result| match result {
+                Ok(cards) => {
+                    let items: Vec<CardItem> =
+                        cards.iter().map(|c| card_item(c, images::ROW)).collect();
+                    app.library.set_vec(items);
+                    for (i, url) in cards.into_iter().map(|c| c.thumb).enumerate() {
+                        app.load_image(url, images::ROW, move |app, image| {
+                            if let Some(mut item) = app.library.row_data(i) {
+                                item.art = image;
+                                app.library.set_row_data(i, item);
+                            }
+                        });
+                    }
+                }
+                Err(e) => log::warn!("{e}"),
+            },
+        );
+    }
+
     fn sign_out(self: &Rc<Self>) {
         let api = self.api.clone();
         self.spawn(async move { api.sign_out().await }, |app, ()| {
             app.state.borrow_mut().signed_in = false;
+            app.library.set_vec(Vec::new());
             let ui = app.ui();
             ui.set_signed_in(false);
             ui.set_settings_open(false);
@@ -1433,4 +1561,31 @@ impl App {
             app.navigate(Route::Home, true);
         });
     }
+}
+
+/// "Good morning" and so on, by the local time.
+fn greeting() -> &'static str {
+    // SAFETY: GetLocalTime only fills in the struct it is given.
+    let hour = unsafe {
+        let mut time = std::mem::zeroed();
+        windows_sys::Win32::System::SystemInformation::GetLocalTime(&mut time);
+        time.wHour
+    };
+    match hour {
+        5..12 => "Good morning",
+        12..18 => "Good afternoon",
+        _ => "Good evening",
+    }
+}
+
+/// The header tint for pages without artwork.
+fn route_tint(route: &Route) -> slint::Color {
+    let rgb = match route {
+        Route::Home => 0x5c0f1c,
+        Route::Explore => 0x1e3264,
+        Route::Library => 0x3d1f5c,
+        Route::Search(_) => 0x2a2a2a,
+        _ => 0x333333,
+    };
+    slint::Color::from_argb_encoded(0xff00_0000 | rgb)
 }

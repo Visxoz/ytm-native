@@ -1,24 +1,35 @@
 import { Theme, Icons } from "theme.slint";
-import { Icon, IconButton, PillButton, Art } from "widgets.slint";
+import { Icon, IconButton, PlayButton, PillButton, Art, Equalizer } from "widgets.slint";
 import { Api, TrackItem, CardItem, RowItem, RowKind } from "types.slint";
 
 export global Layout {
-    out property <length> page-padding: 32px;
-    out property <length> card-width: 176px;
-    out property <length> card-gap: 24px;
-    out property <length> card-text: 56px;
-    out property <length> chip-min-width: 200px;
-    out property <length> chip-height: 48px;
-    out property <length> chip-gap: 12px;
+    out property <length> card-width: 188px;
+    out property <length> card-padding: 12px;
+    out property <length> card-text: 52px;
+    out property <length> card-gap: 4px;
+    out property <length> chip-min-width: 190px;
+    out property <length> chip-height: 96px;
+    out property <length> chip-gap: 16px;
+    out property <length> tile-height: 56px;
+    out property <length> tile-gap: 8px;
+    out property <length> header-height: 300px;
+    out property <length> banner-height: 340px;
+    out property <length> actions-height: 96px;
+    out property <length> top-height: 236px;
+
+    // Card height for a given card width.
+    public pure function card-height(width: length) -> length {
+        return width - 2 * self.card-padding + self.card-text + 2 * self.card-padding;
+    }
 }
 
 component Link inherits Text {
     in property <bool> enabled: true;
     callback clicked();
     overflow: elide;
-    color: Theme.text-secondary;
+    color: touch.has-hover && root.enabled ? Theme.text : Theme.text-secondary;
     font-size: 13px;
-    TouchArea {
+    touch := TouchArea {
         enabled: root.enabled;
         mouse-cursor: root.enabled ? pointer : default;
         clicked => { root.clicked(); }
@@ -28,12 +39,15 @@ component Link inherits Text {
 export component TrackRow inherits Rectangle {
     in property <TrackItem> track;
     in property <bool> numbered;
+    in property <bool> show-album;
     in property <int> section;
     in property <int> index;
     property <bool> playing: root.track.id != "" && Api.playing-id == root.track.id;
+    property <bool> hot: touch.has-hover || more.has-hover;
     height: 56px;
-    border-radius: 4px;
-    background: touch.has-hover || more.has-hover ? Theme.hover : transparent;
+    border-radius: 6px;
+    background: root.hot ? Theme.hover : transparent;
+    animate background { duration: Theme.fast; }
 
     menu := ContextMenuArea {
         Menu {
@@ -68,81 +82,87 @@ export component TrackRow inherits Rectangle {
         }
 
         HorizontalLayout {
-            padding-left: 8px;
-            padding-right: 8px;
+            padding-left: 16px;
+            padding-right: 16px;
             spacing: 16px;
 
-            if root.numbered: Rectangle {
-                width: 32px;
-                if root.playing: Icon {
-                    path: Icons.play;
-                    size: 20px;
-                    color: Theme.accent;
+            // Number, or play / equaliser
+            Rectangle {
+                width: 24px;
+                if root.playing && !root.hot: Equalizer {
+                    active: Api.is-playing;
                 }
-                if !root.playing: Text {
+                if root.hot: Rectangle {
+                    Icon {
+                        path: root.playing && Api.is-playing ? Icons.pause : Icons.play;
+                        size: 18px;
+                    }
+                    TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { Api.play-track(root.section, root.index); }
+                    }
+                }
+                if !root.playing && !root.hot: Text {
                     text: root.track.number;
+                    font-size: 15px;
                     color: Theme.text-secondary;
-                    font-size: 14px;
                 }
             }
-            if !root.numbered: Rectangle {
-                width: 40px;
-                Art {
+
+            HorizontalLayout {
+                spacing: 12px;
+                horizontal-stretch: 3;
+                // Zero preferred width so columns split by stretch alone and line up.
+                preferred-width: 0px;
+                min-width: 0px;
+                if !root.numbered: Art {
                     y: (parent.height - self.height) / 2;
                     width: 40px;
                     height: 40px;
                     source: root.track.art;
                 }
-                if touch.has-hover || root.playing: Rectangle {
-                    y: (parent.height - 40px) / 2;
-                    width: 40px;
-                    height: 40px;
-                    border-radius: 4px;
-                    background: #00000080;
-                    Icon {
-                        path: root.playing ? Icons.queue : Icons.play;
-                        size: 22px;
-                        color: Theme.text;
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 2px;
+                    Text {
+                        text: root.track.title;
+                        overflow: elide;
+                        font-size: 15px;
+                        font-weight: 500;
+                        color: root.playing ? Theme.accent : Theme.text;
                     }
-                }
-            }
-
-            VerticalLayout {
-                alignment: center;
-                spacing: 2px;
-                horizontal-stretch: 1;
-                Text {
-                    text: root.track.title;
-                    overflow: elide;
-                    font-size: 14px;
-                    font-weight: 500;
-                    color: root.playing ? Theme.accent : Theme.text;
-                }
-                HorizontalLayout {
-                    spacing: 0;
-                    alignment: start;
                     Link {
                         text: root.track.artists;
                         enabled: root.track.has-artist;
                         clicked => { Api.track-action("artist", root.section, root.index); }
                     }
-                    if !root.numbered && root.track.album != "": Link {
-                        text: "  •  " + root.track.album;
-                        enabled: root.track.has-album;
-                        clicked => { Api.track-action("album", root.section, root.index); }
-                    }
+                }
+            }
+
+            if root.show-album: HorizontalLayout {
+                horizontal-stretch: 2;
+                preferred-width: 0px;
+                min-width: 0px;
+                alignment: start;
+                Link {
+                    vertical-alignment: center;
+                    max-width: self.preferred-width;
+                    text: root.track.album;
+                    font-size: 14px;
+                    enabled: root.track.has-album;
+                    clicked => { Api.track-action("album", root.section, root.index); }
                 }
             }
 
             more := Rectangle {
-                width: 40px;
+                width: 32px;
                 property <bool> has-hover: more-touch.has-hover;
-                opacity: touch.has-hover || more-touch.has-hover ? 1 : 0;
-                IconButton {
-                    y: (parent.height - self.height) / 2;
-                    icon: Icons.more;
-                    size: 36px;
-                    icon-size: 20px;
+                opacity: root.hot ? 1 : 0;
+                animate opacity { duration: Theme.fast; }
+                Icon {
+                    path: Icons.more;
+                    size: 20px;
+                    color: more-touch.has-hover ? Theme.text : Theme.text-secondary;
                 }
                 more-touch := TouchArea {
                     mouse-cursor: pointer;
@@ -151,23 +171,77 @@ export component TrackRow inherits Rectangle {
             }
 
             Text {
-                width: 48px;
+                width: 44px;
                 text: root.track.duration;
                 color: Theme.text-secondary;
                 horizontal-alignment: right;
                 vertical-alignment: center;
-                font-size: 13px;
+                font-size: 14px;
             }
         }
+    }
+}
+
+/// The column labels above a track list.
+component Columns {
+    in property <bool> show-album;
+    height: 44px;
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 16px;
+        Text {
+            width: 24px;
+            text: "#";
+            font-size: 14px;
+            color: Theme.text-secondary;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+        Text {
+            horizontal-stretch: 3;
+            preferred-width: 0px;
+            min-width: 0px;
+            text: "Title";
+            font-size: 14px;
+            color: Theme.text-secondary;
+            vertical-alignment: center;
+        }
+        if root.show-album: Text {
+            horizontal-stretch: 2;
+            preferred-width: 0px;
+            min-width: 0px;
+            text: "Album";
+            font-size: 14px;
+            color: Theme.text-secondary;
+            vertical-alignment: center;
+        }
+        Rectangle { width: 32px; }
+        Rectangle {
+            width: 44px;
+            Icon {
+                x: parent.width - self.width;
+                path: Icons.clock;
+                size: 16px;
+                color: Theme.text-secondary;
+            }
+        }
+    }
+    Rectangle {
+        y: parent.height - 9px;
+        height: 1px;
+        background: Theme.divider;
     }
 }
 
 export component Card {
     in property <CardItem> card;
     width: Layout.card-width;
-    height: self.width + Layout.card-text;
+    height: Layout.card-height(self.width);
+    property <length> art-size: root.width - 2 * Layout.card-padding;
+    property <bool> hot: touch.has-hover || play.has-hover;
 
-    cm := ContextMenuArea {
+    ContextMenuArea {
         Menu {
             MenuItem {
                 title: "Play";
@@ -179,90 +253,140 @@ export component Card {
             }
         }
 
+        Rectangle {
+            border-radius: 8px;
+            background: root.hot ? Theme.elevated : transparent;
+            animate background { duration: Theme.normal; }
+        }
         touch := TouchArea {
             mouse-cursor: pointer;
             clicked => { Api.navigate(root.card.kind, root.card.id, root.card.title); }
         }
-
-        art := Art {
-            x: 0;
-            y: 0;
-            width: root.width;
-            height: root.width;
+        Art {
+            x: Layout.card-padding;
+            y: Layout.card-padding;
+            width: root.art-size;
+            height: root.art-size;
             source: root.card.art;
             round: root.card.round;
+            radius: 6px;
+            drop-shadow-blur: 16px;
+            drop-shadow-offset-y: 6px;
+            drop-shadow-color: #00000060;
         }
-        if touch.has-hover || play-touch.has-hover: Rectangle {
-            x: 0;
-            y: 0;
-            width: root.width;
-            height: root.width;
-            border-radius: art.border-radius;
-            background: @linear-gradient(180deg, #00000000 50%, #000000a0 100%);
-        }
-        Rectangle {
-            x: root.width - self.width - 12px;
-            y: root.width - self.height - 12px;
-            width: 40px;
-            height: 40px;
-            border-radius: 20px;
-            background: play-touch.has-hover ? #000000e0 : #000000b0;
-            opacity: touch.has-hover || play-touch.has-hover ? 1 : 0;
-            animate opacity { duration: 120ms; }
-            Icon {
-                path: Icons.play;
-                size: 24px;
-            }
-            play-touch := TouchArea {
-                mouse-cursor: pointer;
-                clicked => { Api.play-card(root.card.kind, root.card.id); }
+        play := Rectangle {
+            property <bool> has-hover: play-button.has-hover;
+            x: Layout.card-padding + root.art-size - self.width - 8px;
+            y: Layout.card-padding + root.art-size - self.height - (root.hot ? 8px : 0px);
+            width: 48px;
+            height: 48px;
+            opacity: root.hot ? 1 : 0;
+            animate y, opacity { duration: Theme.normal; easing: ease-out; }
+            play-button := TouchArea {
+                PlayButton {
+                    size: 48px;
+                    clicked => { Api.play-card(root.card.kind, root.card.id); }
+                }
             }
         }
-
         VerticalLayout {
-            y: root.width + 8px;
-            height: Layout.card-text - 8px;
-            spacing: 2px;
+            x: Layout.card-padding;
+            y: Layout.card-padding + root.art-size + 8px;
+            width: root.art-size;
+            height: Layout.card-text - 4px;
+            spacing: 4px;
             alignment: start;
             Text {
                 text: root.card.title;
                 overflow: elide;
-                font-size: 14px;
+                font-size: 15px;
                 font-weight: 600;
                 color: Theme.text;
-                horizontal-alignment: root.card.round ? center : left;
             }
             Text {
                 text: root.card.subtitle;
                 overflow: elide;
                 font-size: 13px;
                 color: Theme.text-secondary;
-                horizontal-alignment: root.card.round ? center : left;
             }
         }
     }
 }
 
-component Chip inherits Rectangle {
+/// A compact shortcut: artwork on the left, title on the right.
+component Tile inherits Rectangle {
     in property <CardItem> card;
-    height: Layout.chip-height;
+    height: Layout.tile-height;
     border-radius: 6px;
-    background: touch.has-hover ? #2c2c2c : Theme.raised;
     clip: true;
-    Rectangle {
+    background: touch.has-hover ? #ffffff2a : #ffffff17;
+    animate background { duration: Theme.normal; }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { Api.navigate(root.card.kind, root.card.id, root.card.title); }
+    }
+    Art {
         x: 0;
-        width: 6px;
-        background: root.card.tint;
+        width: root.height;
+        height: root.height;
+        source: root.card.art;
+        radius: 0;
+        drop-shadow-blur: 8px;
+        drop-shadow-color: #00000080;
     }
     Text {
-        x: 20px;
-        width: parent.width - 28px;
+        x: root.height + 12px;
+        width: root.width - root.height - (touch.has-hover ? 64px : 24px);
         text: root.card.title;
         overflow: elide;
-        vertical-alignment: center;
         font-size: 14px;
-        font-weight: 600;
+        font-weight: 700;
         color: Theme.text;
+        vertical-alignment: center;
+    }
+    Rectangle {
+        x: root.width - self.width - 8px;
+        width: 40px;
+        height: 40px;
+        opacity: touch.has-hover ? 1 : 0;
+        animate opacity { duration: Theme.normal; }
+        PlayButton {
+            size: 40px;
+            clicked => { Api.play-card(root.card.kind, root.card.id); }
+        }
+    }
+}
+
+/// A large colour tile, as in Spotify's "Browse all".
+component GenreTile inherits Rectangle {
+    in property <CardItem> card;
+    height: Layout.chip-height;
+    border-radius: 8px;
+    clip: true;
+    background: @linear-gradient(135deg, root.card.tint 0%, root.card.tint.darker(0.45) 100%);
+    Text {
+        x: 16px;
+        y: 14px;
+        width: parent.width - 32px;
+        text: root.card.title;
+        wrap: word-wrap;
+        font-size: 20px;
+        font-weight: 700;
+        font-family: Theme.display-font;
+        color: Theme.text;
+    }
+    Rectangle {
+        x: parent.width - 52px;
+        y: parent.height - 44px;
+        width: 64px;
+        height: 64px;
+        border-radius: 8px;
+        background: #ffffff22;
+        transform-rotation: 25deg;
+    }
+    Rectangle {
+        background: touch.has-hover ? #ffffff14 : transparent;
+        animate background { duration: Theme.fast; }
     }
     touch := TouchArea {
         mouse-cursor: pointer;
@@ -270,20 +394,23 @@ component Chip inherits Rectangle {
     }
 }
 
-/// A row of cards scrolled with arrow buttons, like YouTube Music's shelves.
+/// A row of cards scrolled with arrow buttons that appear on hover.
 export component Carousel {
     in property <[CardItem]> cards;
     property <length> step: Layout.card-width + Layout.card-gap;
     property <length> content-width: root.cards.length * root.step - Layout.card-gap;
     property <length> max-offset: max(0px, root.content-width - root.width);
     property <length> offset;
-    height: Layout.card-width + Layout.card-text;
+    height: Layout.card-height(Layout.card-width);
 
+    hover := TouchArea { }
     Rectangle {
+        x: -Layout.card-padding;
+        width: root.width + 2 * Layout.card-padding;
         clip: true;
         Rectangle {
             x: -root.offset;
-            animate x { duration: 300ms; easing: ease-out; }
+            animate x { duration: 400ms; easing: ease-in-out; }
             for card[i] in root.cards: Card {
                 x: i * root.step;
                 y: 0;
@@ -292,19 +419,29 @@ export component Carousel {
         }
     }
     if root.offset > 0: IconButton {
-        x: -20px;
-        y: Layout.card-width / 2 - self.height / 2;
-        icon: Icons.chevron-left;
+        x: -14px;
+        y: (Layout.card-width - Layout.card-padding) / 2 - self.height / 2;
+        icon: Icons.back;
+        size: 36px;
+        icon-size: 22px;
         color: Theme.text;
-        background: #212121e0;
-        clicked => { root.offset = max(0px, root.offset - floor(root.width / root.step) * root.step); }
+        background: #000000b0;
+        hover-background: #000000e0;
+        opacity: hover.has-hover || self.has-hover ? 1 : 0;
+        animate opacity { duration: Theme.normal; }
+        clicked => { root.offset = max(0px, root.offset - max(1, floor(root.width / root.step)) * root.step); }
     }
     if root.offset < root.max-offset: IconButton {
-        x: root.width - self.width + 20px;
-        y: Layout.card-width / 2 - self.height / 2;
-        icon: Icons.chevron-right;
+        x: root.width - self.width + 14px;
+        y: (Layout.card-width - Layout.card-padding) / 2 - self.height / 2;
+        icon: Icons.forward;
+        size: 36px;
+        icon-size: 22px;
         color: Theme.text;
-        background: #212121e0;
+        background: #000000b0;
+        hover-background: #000000e0;
+        opacity: hover.has-hover || self.has-hover ? 1 : 0;
+        animate opacity { duration: Theme.normal; }
         clicked => { root.offset = min(root.max-offset, root.offset + max(1, floor(root.width / root.step)) * root.step); }
     }
 }
@@ -312,24 +449,20 @@ export component Carousel {
 export component CardGrid {
     in property <[CardItem]> cards;
     out property <int> columns: max(1, floor((root.width + Layout.card-gap) / (Layout.card-width + Layout.card-gap)));
-    property <length> cell: (root.width - (root.columns - 1) * Layout.card-gap) / root.columns;
-    property <int> rows: ceil(root.cards.length / root.columns);
-    height: root.rows * (root.cell + Layout.card-text + Layout.card-gap);
+    property <length> cell: (root.width + 2 * Layout.card-padding - (root.columns - 1) * Layout.card-gap) / root.columns;
     for card[i] in root.cards: Card {
-        x: mod(i, root.columns) * (root.cell + Layout.card-gap);
-        y: floor(i / root.columns) * (root.cell + Layout.card-text + Layout.card-gap);
+        x: -Layout.card-padding + mod(i, root.columns) * (root.cell + Layout.card-gap);
+        y: floor(i / root.columns) * (Layout.card-height(root.cell) + Layout.card-gap);
         width: root.cell;
         card: card;
     }
 }
 
-export component ChipGrid {
+export component GenreGrid {
     in property <[CardItem]> cards;
     property <int> columns: max(1, floor((root.width + Layout.chip-gap) / (Layout.chip-min-width + Layout.chip-gap)));
     property <length> cell: (root.width - (root.columns - 1) * Layout.chip-gap) / root.columns;
-    property <int> rows: ceil(root.cards.length / root.columns);
-    height: root.rows * (Layout.chip-height + Layout.chip-gap);
-    for card[i] in root.cards: Chip {
+    for card[i] in root.cards: GenreTile {
         x: mod(i, root.columns) * (root.cell + Layout.chip-gap);
         y: floor(i / root.columns) * (Layout.chip-height + Layout.chip-gap);
         width: root.cell;
@@ -337,86 +470,225 @@ export component ChipGrid {
     }
 }
 
-export component PageHeader {
-    in property <RowItem> data;
-    property <bool> has-art: root.data.can-play || root.data.round;
-    height: root.has-art ? 296px : 112px;
+export component TileGrid {
+    in property <[CardItem]> cards;
+    property <int> columns: root.width >= 880px ? 4 : 2;
+    property <length> cell: (root.width - (root.columns - 1) * Layout.tile-gap) / root.columns;
+    for card[i] in root.cards: Tile {
+        x: mod(i, root.columns) * (root.cell + Layout.tile-gap);
+        y: floor(i / root.columns) * (Layout.tile-height + Layout.tile-gap);
+        width: root.cell;
+        card: card;
+    }
+}
 
-    if !root.has-art: Text {
-        y: 40px;
-        text: root.data.title;
-        font-size: 40px;
+/// The best search match, shown large.
+component TopResult inherits Rectangle {
+    in property <CardItem> card;
+    height: Layout.top-height - 36px;
+    border-radius: 8px;
+    background: touch.has-hover ? Theme.highlight : #181818;
+    animate background { duration: Theme.normal; }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { Api.navigate(root.card.kind, root.card.id, root.card.title); }
+    }
+    Art {
+        x: 20px;
+        y: 20px;
+        width: 96px;
+        height: 96px;
+        source: root.card.art;
+        round: root.card.round;
+        radius: 6px;
+        drop-shadow-blur: 16px;
+        drop-shadow-color: #00000080;
+    }
+    Text {
+        x: 20px;
+        y: 132px;
+        width: parent.width - 120px;
+        text: root.card.title;
+        overflow: elide;
+        font-size: 30px;
         font-weight: 700;
+        font-family: Theme.display-font;
         color: Theme.text;
     }
-    if root.has-art: HorizontalLayout {
-        padding-top: 32px;
+    Text {
+        x: 20px;
+        y: 172px;
+        width: parent.width - 120px;
+        text: root.card.subtitle;
+        overflow: elide;
+        font-size: 14px;
+        color: Theme.text-secondary;
+    }
+    Rectangle {
+        x: parent.width - self.width - 20px;
+        y: parent.height - self.height - (touch.has-hover ? 20px : 12px);
+        width: 52px;
+        height: 52px;
+        opacity: touch.has-hover ? 1 : 0;
+        animate y, opacity { duration: Theme.normal; easing: ease-out; }
+        PlayButton {
+            size: 52px;
+            clicked => { Api.play-card(root.card.kind, root.card.id); }
+        }
+    }
+}
+
+/// Album, playlist, artist and genre headers with their action buttons.
+export component PageHeader {
+    in property <RowItem> data;
+    in property <length> full-width;
+    property <bool> has-art: root.data.art.width > 0 || root.data.can-play;
+    property <length> art-height: root.data.banner ? Layout.banner-height : root.has-art ? Layout.header-height : 160px;
+    property <length> title-size: root.data.title.character-count <= 12 ? 76px : root.data.title.character-count <= 18 ? 60px : root.data.title.character-count <= 28 ? 44px : 34px;
+
+    if root.data.banner: Rectangle {
+        x: -Theme.page-padding;
+        y: 0;
+        width: root.full-width;
+        height: root.art-height;
+        clip: true;
+        Image {
+            width: 100%;
+            height: 100%;
+            source: root.data.art;
+            image-fit: cover;
+            opacity: root.data.art.width > 0 ? 1 : 0;
+            animate opacity { duration: 400ms; }
+        }
+        Rectangle {
+            background: @linear-gradient(180deg, #00000000 35%, #000000b0 100%);
+        }
+    }
+
+    HorizontalLayout {
+        y: 0;
+        height: root.art-height;
         padding-bottom: 24px;
-        spacing: 32px;
-        Art {
-            width: 240px;
-            height: 240px;
+        spacing: 24px;
+        alignment: start;
+        if root.has-art && !root.data.banner: Art {
+            y: parent.height - self.height - 24px;
+            width: 232px;
+            height: 232px;
             source: root.data.art;
             round: root.data.round;
+            radius: 6px;
+            drop-shadow-blur: 40px;
+            drop-shadow-offset-y: 8px;
+            drop-shadow-color: #00000090;
         }
         VerticalLayout {
-            alignment: center;
-            spacing: 8px;
+            alignment: end;
+            spacing: 6px;
+            Text {
+                text: root.data.label;
+                font-size: 14px;
+                font-weight: 600;
+                color: Theme.text;
+            }
             Text {
                 text: root.data.title;
-                font-size: 36px;
-                font-weight: 700;
+                font-size: root.title-size;
+                font-weight: 800;
+                font-family: Theme.display-font;
+                letter-spacing: -1px;
                 color: Theme.text;
                 overflow: elide;
-            }
-            if root.data.subtitle != "": Text {
-                text: root.data.subtitle;
-                font-size: 15px;
-                color: Theme.text;
-                overflow: elide;
-            }
-            if root.data.meta != "": Text {
-                text: root.data.meta;
-                font-size: 14px;
-                color: Theme.text-secondary;
-                overflow: elide;
-            }
-            if root.data.description != "": Rectangle {
-                height: 54px;
-                clip: true;
-                Text {
-                    width: 100%;
-                    height: 100%;
-                    text: root.data.description;
-                    font-size: 13px;
-                    color: Theme.text-secondary;
-                    wrap: word-wrap;
-                    overflow: elide;
-                    vertical-alignment: top;
-                }
             }
             HorizontalLayout {
-                padding-top: 12px;
-                spacing: 12px;
+                spacing: 0;
                 alignment: start;
-                if root.data.can-play: PillButton {
-                    text: "Play";
-                    icon: Icons.play;
-                    primary: true;
-                    clicked => { Api.header-action("play"); }
+                if root.data.subtitle != "": Text {
+                    text: root.data.subtitle;
+                    font-size: 14px;
+                    font-weight: 700;
+                    color: Theme.text;
+                    overflow: elide;
                 }
-                if root.data.can-shuffle: PillButton {
-                    text: "Shuffle";
-                    icon: Icons.shuffle;
-                    clicked => { Api.header-action("shuffle"); }
+                if root.data.subtitle != "" && root.data.meta != "": Text {
+                    text: "  •  ";
+                    font-size: 14px;
+                    color: Theme.text;
                 }
-                if root.data.can-radio: PillButton {
-                    text: "Radio";
-                    icon: Icons.radio;
-                    clicked => { Api.header-action("radio"); }
+                if root.data.meta != "": Text {
+                    text: root.data.meta;
+                    font-size: 14px;
+                    color: Theme.text-secondary;
+                    overflow: elide;
                 }
             }
         }
+    }
+
+    if root.data.can-play || root.data.can-radio: HorizontalLayout {
+        y: root.art-height;
+        height: Layout.actions-height;
+        spacing: 20px;
+        alignment: start;
+        if root.data.can-play: PlayButton {
+            y: (parent.height - self.height) / 2;
+            size: 56px;
+            clicked => { Api.header-action("play"); }
+        }
+        if root.data.can-shuffle: IconButton {
+            y: (parent.height - self.height) / 2;
+            icon: Icons.shuffle;
+            size: 48px;
+            icon-size: 30px;
+            clicked => { Api.header-action("shuffle"); }
+        }
+        if root.data.can-radio: IconButton {
+            y: (parent.height - self.height) / 2;
+            icon: Icons.radio;
+            size: 48px;
+            icon-size: 28px;
+            clicked => { Api.header-action("radio"); }
+        }
+    }
+}
+
+/// The height a row needs at a given content width.
+export global Rows {
+    public pure function height(row: RowItem, inner: length) -> length {
+        if row.kind == RowKind.greeting {
+            return 76px;
+        }
+        if row.kind == RowKind.header {
+            let has-art = row.art.width > 0 || row.can-play;
+            let base = row.banner ? Layout.banner-height : has-art ? Layout.header-height : 160px;
+            return base + (row.can-play || row.can-radio ? Layout.actions-height : 8px);
+        }
+        if row.kind == RowKind.title {
+            return 68px;
+        }
+        if row.kind == RowKind.columns {
+            return 52px;
+        }
+        if row.kind == RowKind.track {
+            return 56px;
+        }
+        if row.kind == RowKind.carousel {
+            return Layout.card-height(Layout.card-width) + 8px;
+        }
+        if row.kind == RowKind.top {
+            return Layout.top-height;
+        }
+        if row.kind == RowKind.tiles {
+            let columns = inner >= 880px ? 4 : 2;
+            return ceil(row.cards.length / columns) * (Layout.tile-height + Layout.tile-gap) + 16px;
+        }
+        if row.kind == RowKind.grid {
+            let columns = max(1, floor((inner + Layout.card-gap) / (Layout.card-width + Layout.card-gap)));
+            let cell = (inner + 2 * Layout.card-padding - (columns - 1) * Layout.card-gap) / columns;
+            return ceil(row.cards.length / columns) * (Layout.card-height(cell) + Layout.card-gap);
+        }
+        let columns = max(1, floor((inner + Layout.chip-gap) / (Layout.chip-min-width + Layout.chip-gap)));
+        return ceil(row.cards.length / columns) * (Layout.chip-height + Layout.chip-gap);
     }
 }
 
@@ -424,58 +696,83 @@ export component PageHeader {
 export component PageRow {
     in property <RowItem> data;
     in property <length> content-width;
-    property <length> inner: root.content-width - 2 * Layout.page-padding;
-    property <int> card-columns: max(1, floor((root.inner + Layout.card-gap) / (Layout.card-width + Layout.card-gap)));
-    property <length> card-cell: (root.inner - (root.card-columns - 1) * Layout.card-gap) / root.card-columns;
-    property <int> chip-columns: max(1, floor((root.inner + Layout.chip-gap) / (Layout.chip-min-width + Layout.chip-gap)));
-
+    property <length> inner: root.content-width - 2 * Theme.page-padding;
     width: root.content-width;
-    height: root.data.kind == RowKind.header ? (root.data.can-play || root.data.round ? 296px : 112px)
-        : root.data.kind == RowKind.title ? 64px
-        : root.data.kind == RowKind.track ? 56px
-        : root.data.kind == RowKind.carousel ? Layout.card-width + Layout.card-text + 16px
-        : root.data.kind == RowKind.grid ? ceil(root.data.cards.length / root.card-columns) * (root.card-cell + Layout.card-text + Layout.card-gap)
-        : ceil(root.data.cards.length / root.chip-columns) * (Layout.chip-height + Layout.chip-gap);
+    height: Rows.height(root.data, root.inner);
 
+    if root.data.kind == RowKind.greeting: Text {
+        x: Theme.page-padding;
+        y: 28px;
+        text: root.data.title;
+        font-size: 32px;
+        font-weight: 800;
+        font-family: Theme.display-font;
+        color: Theme.text;
+    }
     if root.data.kind == RowKind.header: PageHeader {
-        x: Layout.page-padding;
+        x: Theme.page-padding;
+        y: 0;
         width: root.inner;
+        height: root.height;
+        full-width: root.content-width;
         data: root.data;
     }
     if root.data.kind == RowKind.title: Text {
-        x: Layout.page-padding;
-        y: 24px;
+        x: Theme.page-padding;
+        y: 28px;
         width: root.inner;
         text: root.data.title;
-        font-size: 22px;
-        font-weight: 700;
+        font-size: 24px;
+        font-weight: 800;
+        font-family: Theme.display-font;
         color: Theme.text;
         overflow: elide;
     }
+    if root.data.kind == RowKind.columns: Columns {
+        x: Theme.page-padding;
+        width: root.inner;
+        show-album: root.data.show-album;
+    }
     if root.data.kind == RowKind.track: TrackRow {
-        x: Layout.page-padding - 8px;
-        width: root.inner + 16px;
+        x: Theme.page-padding;
+        width: root.inner;
         track: root.data.track;
         numbered: root.data.numbered;
+        show-album: root.data.show-album && root.inner > 640px;
         section: root.data.section;
         index: root.data.index;
     }
     if root.data.kind == RowKind.carousel: Carousel {
-        x: Layout.page-padding;
+        x: Theme.page-padding;
         y: 0;
         width: root.inner;
         cards: root.data.cards;
     }
     if root.data.kind == RowKind.grid: CardGrid {
-        x: Layout.page-padding;
+        x: Theme.page-padding;
         y: 0;
         width: root.inner;
+        height: root.height;
         cards: root.data.cards;
     }
-    if root.data.kind == RowKind.chips: ChipGrid {
-        x: Layout.page-padding;
+    if root.data.kind == RowKind.chips: GenreGrid {
+        x: Theme.page-padding;
         y: 0;
         width: root.inner;
+        height: root.height;
         cards: root.data.cards;
+    }
+    if root.data.kind == RowKind.tiles: TileGrid {
+        x: Theme.page-padding;
+        y: 8px;
+        width: root.inner;
+        height: root.height - 8px;
+        cards: root.data.cards;
+    }
+    if root.data.kind == RowKind.top: TopResult {
+        x: Theme.page-padding;
+        y: 12px;
+        width: min(root.inner, 520px);
+        card: root.data.cards[0];
     }
 }

@@ -35,6 +35,7 @@ pub struct Settings {
     pub autoplay: bool,
     pub shuffle: bool,
     pub repeat: i32,
+    pub sidebar_collapsed: bool,
     pub window: Option<WindowGeometry>,
 }
 
@@ -48,6 +49,7 @@ impl Default for Settings {
             autoplay: true,
             shuffle: false,
             repeat: 0,
+            sidebar_collapsed: false,
             window: None,
         }
     }

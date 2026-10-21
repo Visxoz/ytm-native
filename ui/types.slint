@@ -20,24 +20,27 @@ export struct CardItem {
     tint: color,
 }
 
-export enum RowKind { header, title, track, carousel, grid, chips }
+export enum RowKind { greeting, header, title, columns, track, carousel, grid, chips, tiles, top }
 
 /// One row of the virtualised page list.
 export struct RowItem {
     kind: RowKind,
-    // header and title
+    // header, title and greeting
+    label: string,
     title: string,
     subtitle: string,
     meta: string,
     description: string,
     art: image,
     round: bool,
+    banner: bool,
     can-play: bool,
     can-shuffle: bool,
     can-radio: bool,
-    // track rows
+    // track rows and their column header
     track: TrackItem,
     numbered: bool,
+    show-album: bool,
     // card rows
     cards: [CardItem],
     // where the row's items live in the page, for callbacks
@@ -53,7 +56,7 @@ export struct QueueItem {
     current: bool,
 }
 
-/// Calls from anywhere in the UI into Rust.
+/// Calls from anywhere in the UI into Rust, and state many components read.
 export global Api {
     callback navigate(kind: string, id: string, title: string);
     callback play-track(section: int, index: int);
@@ -62,4 +65,8 @@ export global Api {
     callback card-radio(kind: string, id: string);
     callback header-action(action: string);
     in-out property <string> playing-id;
+    in-out property <bool> is-playing;
+    /// Advanced a few times a second while playing; drives the equalisers
+    /// without repainting every frame.
+    in property <int> eq-phase;
 }

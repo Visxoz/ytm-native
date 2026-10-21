@@ -96,6 +96,10 @@ pub enum CardLayout {
     Carousel,
     Grid,
     Chips,
+    /// Compact shortcuts, as at the top of Spotify's home.
+    Tiles,
+    /// One large card for the best search match.
+    Top,
 }
 
 #[derive(Debug, Clone)]
@@ -116,12 +120,16 @@ pub enum Section {
 
 #[derive(Debug, Clone, Default)]
 pub struct Header {
+    /// "Album", "Playlist", "Artist"…, shown above the title.
+    pub label: String,
     pub title: String,
     pub subtitle: String,
     pub meta: String,
     pub description: String,
     pub thumb: Option<String>,
     pub round: bool,
+    /// Artists show their wide header image behind the title.
+    pub banner: bool,
     /// Tracks the Play and Shuffle buttons queue.
     pub tracks: Vec<Track>,
     /// Playlist whose tracks Shuffle loads when `tracks` is incomplete.
@@ -409,7 +417,22 @@ impl Api {
             None => tracks(charts.trending_tracks.clone()),
         };
 
+        let new_albums = new_albums.unwrap_or_default();
         let mut sections = Vec::new();
+        let mut tiles: Vec<Card> = charts
+            .playlists
+            .iter()
+            .cloned()
+            .map(playlist_card)
+            .collect();
+        tiles.extend(
+            new_albums
+                .iter()
+                .take(8 - tiles.len().min(8))
+                .cloned()
+                .map(album_card),
+        );
+        sections.extend(card_section("", tiles, CardLayout::Tiles));
         if let Some(history) = history {
             let mut seen = std::collections::HashSet::new();
             let recent = history
@@ -429,8 +452,8 @@ impl Api {
         sections.extend(card_section(
             "New releases",
             new_albums
-                .unwrap_or_default()
                 .into_iter()
+                .skip(8 - charts.playlists.len().min(8))
                 .take(HOME_SHELF)
                 .map(album_card)
                 .collect(),
@@ -447,12 +470,7 @@ impl Api {
             CardLayout::Carousel,
         ));
         sections.extend(card_section(
-            "Charts",
-            charts.playlists.into_iter().map(playlist_card).collect(),
-            CardLayout::Carousel,
-        ));
-        sections.extend(card_section(
-            "Moods & genres",
+            "Browse moods & genres",
             genres
                 .unwrap_or_default()
                 .into_iter()
@@ -509,37 +527,12 @@ impl Api {
 
     async fn library(&self) -> Result<Page> {
         let q = self.q();
-        let (playlists, albums, artists, liked) = tokio::join!(
-            q.music_saved_playlists(),
+        let (playlist_cards, albums, artists) = tokio::join!(
+            self.library_playlists(),
             q.music_saved_albums(),
             q.music_saved_artists(),
-            q.music_liked_tracks(),
         );
-        if let Err(e) = &playlists {
-            return Err(format!("could not load your library: {e}"));
-        }
-        let mut playlist_cards: Vec<Card> = Vec::new();
-        if let Ok(liked) = &liked {
-            playlist_cards.push(Card {
-                kind: CardKind::Playlist,
-                id: liked.id.clone(),
-                title: "Liked music".into(),
-                subtitle: liked.track_count.map_or_else(
-                    || "Auto playlist".into(),
-                    |n| format!("Auto playlist • {}", songs(n)),
-                ),
-                thumb: pick_thumb(&liked.thumbnail, CARD_THUMB),
-                color: None,
-            });
-        }
-        playlist_cards.extend(
-            playlists
-                .map(|p| p.items)
-                .unwrap_or_default()
-                .into_iter()
-                .filter(|p| liked.as_ref().map_or(true, |l| l.id != p.id))
-                .map(playlist_card),
-        );
+        let playlist_cards = playlist_cards?;
         let mut sections = Vec::new();
         sections.extend(card_section("Playlists", playlist_cards, CardLayout::Grid));
         sections.extend(card_section(
@@ -568,6 +561,35 @@ impl Api {
         })
     }
 
+    /// Liked music followed by the saved playlists, for the sidebar.
+    pub async fn library_playlists(&self) -> Result<Vec<Card>> {
+        let q = self.q();
+        let (playlists, liked) = tokio::join!(q.music_saved_playlists(), q.music_liked_tracks());
+        let playlists = playlists.map_err(|e| format!("could not load your library: {e}"))?;
+        let mut cards = Vec::new();
+        if let Ok(liked) = &liked {
+            cards.push(Card {
+                kind: CardKind::Playlist,
+                id: liked.id.clone(),
+                title: "Liked music".into(),
+                subtitle: liked.track_count.map_or_else(
+                    || "Auto playlist".into(),
+                    |n| format!("Auto playlist • {}", songs(n)),
+                ),
+                thumb: pick_thumb(&liked.thumbnail, CARD_THUMB),
+                color: None,
+            });
+        }
+        cards.extend(
+            playlists
+                .items
+                .into_iter()
+                .filter(|p| liked.as_ref().is_ok_and(|l| l.id != p.id) || liked.is_err())
+                .map(playlist_card),
+        );
+        Ok(cards)
+    }
+
     async fn search(&self, query: &str) -> Result<Page> {
         let q = self.q();
         let (main, songs, albums, artists, playlists) = tokio::join!(
@@ -585,17 +607,17 @@ impl Api {
             Some(MusicItem::Artist(a)) => sections.extend(card_section(
                 "Top result",
                 vec![artist_card(a)],
-                CardLayout::Grid,
+                CardLayout::Top,
             )),
             Some(MusicItem::Album(a)) => sections.extend(card_section(
                 "Top result",
                 vec![album_card(a)],
-                CardLayout::Grid,
+                CardLayout::Top,
             )),
             Some(MusicItem::Playlist(p)) => sections.extend(card_section(
                 "Top result",
                 vec![playlist_card(p)],
-                CardLayout::Grid,
+                CardLayout::Top,
             )),
             _ => {}
         }
@@ -655,7 +677,7 @@ impl Api {
                 t.album = Some((album.id.clone(), album.name.clone()));
             }
         }
-        let mut meta = vec![album_type(album.album_type).to_owned()];
+        let mut meta = Vec::new();
         if let Some(year) = album.year {
             meta.push(year.to_string());
         }
@@ -663,6 +685,7 @@ impl Api {
         meta.extend(total_time(&tracks));
 
         let header = Header {
+            label: album_type(album.album_type).to_owned(),
             title: album.name,
             subtitle: join_artists(&artist_refs(&album.artists)),
             meta: meta.join(" • "),
@@ -672,6 +695,7 @@ impl Api {
                 .unwrap_or_default(),
             thumb: pick_thumb(&album.cover, HEADER_THUMB),
             round: false,
+            banner: false,
             tracks: tracks.clone(),
             shuffle_playlist: None,
             radio_id: album.playlist_id.map(|p| format!("RDAMPL{p}")),
@@ -699,10 +723,11 @@ impl Api {
         let _ = playlist.tracks.extend_limit(&q, PLAYLIST_LIMIT).await;
         let tracks = tracks(playlist.tracks.items);
 
-        let mut meta = vec!["Playlist".to_owned()];
+        let mut meta = Vec::new();
         meta.push(songs(playlist.track_count.unwrap_or(tracks.len() as u64)));
         meta.extend(total_time(&tracks));
         let header = Header {
+            label: "Playlist".to_owned(),
             title: playlist.name,
             subtitle: playlist.channel.map(|c| c.name).unwrap_or_default(),
             meta: meta.join(" • "),
@@ -712,6 +737,7 @@ impl Api {
                 .unwrap_or_default(),
             thumb: pick_thumb(&playlist.thumbnail, HEADER_THUMB),
             round: false,
+            banner: false,
             tracks: tracks.clone(),
             shuffle_playlist: None,
             radio_id: Some(format!("RDAMPL{}", playlist.id)),
@@ -738,6 +764,7 @@ impl Api {
         let artist = self.q().music_artist(id, true).await.map_err(err)?;
         let top = tracks(artist.tracks);
         let header = Header {
+            label: "Artist".to_owned(),
             title: artist.name,
             subtitle: artist
                 .subscriber_count
@@ -745,8 +772,14 @@ impl Api {
                 .unwrap_or_default(),
             meta: String::new(),
             description: artist.description.unwrap_or_default(),
-            thumb: pick_thumb(&artist.header_image, HEADER_THUMB),
+            // Wide banners must keep their aspect, so take the largest as is.
+            thumb: artist
+                .header_image
+                .iter()
+                .max_by_key(|t| t.width)
+                .map(|t| t.url.clone()),
             round: true,
+            banner: true,
             tracks: top.clone(),
             shuffle_playlist: artist.tracks_playlist_id,
             radio_id: artist.radio_id,
@@ -803,6 +836,7 @@ impl Api {
             .collect();
         Ok(Page {
             header: Some(Header {
+                label: "Genre".to_owned(),
                 title: genre.name,
                 ..Default::default()
             }),

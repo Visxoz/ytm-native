@@ -1,4 +1,5 @@
 import { Theme, Icons } from "theme.slint";
+import { Api } from "types.slint";
 
 export component Icon {
     in property <string> path;
@@ -13,77 +14,105 @@ export component Icon {
         fill: root.color;
         viewbox-width: 24;
         viewbox-height: 24;
+        animate fill { duration: Theme.fast; }
     }
 }
 
+/// A round icon button that shrinks slightly while pressed.
 export component IconButton {
     in property <string> icon;
-    in property <length> size: 40px;
-    in property <length> icon-size: 24px;
+    in property <length> size: 36px;
+    in property <length> icon-size: 20px;
     in property <bool> active;
     in property <bool> enabled: true;
-    in property <color> color: root.active ? Theme.text : Theme.text-secondary;
-    in property <string> tooltip;
+    in property <bool> show-dot: root.active;
+    in property <color> color: Theme.text-secondary;
     in property <color> background: transparent;
+    in property <color> hover-background: Theme.hover;
+    out property <bool> has-hover: touch.has-hover;
     callback clicked();
     width: root.size;
     height: root.size;
+
     Rectangle {
         border-radius: self.height / 2;
-        background: touch.pressed ? Theme.pressed : touch.has-hover && root.enabled ? Theme.hover : root.background;
-        animate background { duration: 100ms; }
+        background: touch.has-hover && root.enabled ? root.hover-background : root.background;
+        animate background { duration: Theme.fast; }
     }
     Icon {
         path: root.icon;
         size: root.icon-size;
-        color: !root.enabled ? Theme.text-dim : touch.has-hover ? Theme.text : root.color;
+        color: !root.enabled ? #ffffff40 : root.active ? Theme.accent : touch.has-hover ? Theme.text : root.color;
+        transform-scale: touch.pressed ? 0.88 : 1.0;
+        animate transform-scale { duration: 90ms; }
     }
-    touch := TouchArea {
-        enabled: root.enabled;
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-    if root.active && root.tooltip == "": Rectangle {
-        y: root.height - 6px;
+    if root.show-dot: Rectangle {
+        y: root.height / 2 + root.icon-size / 2 + 2px;
         width: 4px;
         height: 4px;
         border-radius: 2px;
-        background: Theme.text;
+        background: Theme.accent;
+    }
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: root.enabled ? pointer : default;
+        clicked => { root.clicked(); }
+    }
+}
+
+/// The red circular play button.
+export component PlayButton {
+    in property <length> size: 56px;
+    in property <bool> playing;
+    in property <color> color: Theme.accent;
+    in property <color> icon-color: Theme.text;
+    callback clicked();
+    width: root.size;
+    height: root.size;
+
+    circle := Rectangle {
+        border-radius: self.height / 2;
+        background: touch.has-hover ? root.color.brighter(0.15) : root.color;
+        drop-shadow-blur: 12px;
+        drop-shadow-offset-y: 4px;
+        drop-shadow-color: #00000080;
+        transform-scale: touch.pressed ? 0.95 : touch.has-hover ? 1.05 : 1.0;
+        animate transform-scale { duration: Theme.fast; easing: ease-out; }
+        animate background { duration: Theme.fast; }
+        Icon {
+            path: root.playing ? Icons.pause : Icons.play;
+            size: root.size * 0.48;
+            color: root.icon-color;
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
     }
 }
 
 export component PillButton {
     in property <string> text;
-    in property <string> icon;
     in property <bool> primary;
+    in property <bool> small;
     callback clicked();
-    height: 36px;
-    min-width: layout.preferred-width;
+    height: root.small ? 32px : 40px;
+    min-width: label.preferred-width + (root.small ? 32px : 48px);
+
     Rectangle {
         border-radius: self.height / 2;
-        background: root.primary ? (touch.has-hover ? #e0e0e0 : #ffffff) : (touch.has-hover ? Theme.hover : transparent);
+        background: root.primary ? Theme.text : transparent;
         border-width: root.primary ? 0 : 1px;
-        border-color: #ffffff33;
-        animate background { duration: 100ms; }
+        border-color: touch.has-hover ? Theme.text : #ffffff70;
+        transform-scale: touch.pressed ? 0.96 : touch.has-hover && root.primary ? 1.04 : 1.0;
+        animate transform-scale { duration: Theme.fast; }
+        animate border-color { duration: Theme.fast; }
     }
-    layout := HorizontalLayout {
-        padding-left: 16px;
-        padding-right: 18px;
-        spacing: 8px;
-        alignment: center;
-        if root.icon != "": Icon {
-            y: (parent.height - self.height) / 2;
-            path: root.icon;
-            size: 20px;
-            color: root.primary ? #030303 : Theme.text;
-        }
-        Text {
-            text: root.text;
-            vertical-alignment: center;
-            font-size: 14px;
-            font-weight: 600;
-            color: root.primary ? #030303 : Theme.text;
-        }
+    label := Text {
+        text: root.text;
+        font-size: root.small ? 13px : 14px;
+        font-weight: 700;
+        color: root.primary ? #000000 : Theme.text;
     }
     touch := TouchArea {
         mouse-cursor: pointer;
@@ -91,16 +120,17 @@ export component PillButton {
     }
 }
 
-/// Artwork with rounded corners and a music-note placeholder while loading.
+/// Artwork with rounded corners that fades in once it has loaded.
 export component Art inherits Rectangle {
     in property <image> source;
     in property <bool> round;
-    border-radius: root.round ? self.width / 2 : 4px;
+    in property <length> radius: 4px;
+    border-radius: root.round ? min(self.width, self.height) / 2 : root.radius;
     clip: true;
-    background: Theme.raised;
+    background: Theme.highlight;
     if root.source.width == 0: Icon {
         path: Icons.note;
-        size: min(root.width, root.height) * 0.4;
+        size: min(root.width, root.height) * 0.38;
         color: Theme.text-dim;
     }
     Image {
@@ -108,48 +138,57 @@ export component Art inherits Rectangle {
         height: 100%;
         source: root.source;
         image-fit: cover;
+        opacity: root.source.width > 0 ? 1 : 0;
+        animate opacity { duration: 300ms; }
     }
 }
 
-/// A horizontal slider. `seek` fires on release; `changed` while dragging.
+/// A rounded slider. `changed` fires while dragging, `seek` on release.
 export component Slider {
     in property <float> value;
     in property <float> buffered;
-    in property <color> fill: Theme.accent;
-    in property <bool> thin;
+    in property <bool> enabled: true;
     callback changed(float);
     callback seek(float);
     property <bool> dragging;
     property <float> drag-value;
     property <float> shown: root.dragging ? root.drag-value : clamp(root.value, 0, 1);
-    property <bool> hot: touch.has-hover || root.dragging;
+    property <bool> hot: (touch.has-hover || root.dragging) && root.enabled;
     height: 16px;
+
     Rectangle {
         y: (parent.height - self.height) / 2;
-        height: root.hot ? 4px : (root.thin ? 2px : 3px);
-        border-radius: self.height / 2;
-        background: #ffffff33;
+        height: 4px;
+        border-radius: 2px;
+        background: #ffffff30;
         clip: true;
         Rectangle {
             x: 0;
             width: parent.width * clamp(root.buffered, 0, 1);
-            background: #ffffff40;
+            background: #ffffff28;
         }
         Rectangle {
             x: 0;
             width: parent.width * root.shown;
-            background: root.fill;
+            border-radius: 2px;
+            background: root.hot ? Theme.accent : Theme.text;
+            animate background { duration: Theme.fast; }
         }
     }
-    if root.hot: Rectangle {
+    Rectangle {
         x: root.width * root.shown - self.width / 2;
         y: (parent.height - self.height) / 2;
         width: 12px;
         height: 12px;
         border-radius: 6px;
-        background: root.fill;
+        background: Theme.text;
+        drop-shadow-blur: 4px;
+        drop-shadow-color: #00000080;
+        opacity: root.hot ? 1 : 0;
+        animate opacity { duration: Theme.fast; }
     }
     touch := TouchArea {
+        enabled: root.enabled;
         mouse-cursor: pointer;
         pointer-event(ev) => {
             if ev.button == PointerEventButton.left && ev.kind == PointerEventKind.down {
@@ -167,21 +206,71 @@ export component Slider {
                 root.changed(root.drag-value);
             }
         }
+        scroll-event(ev) => {
+            root.seek(clamp(root.value + (ev.delta-y > 0 ? 0.05 : -0.05), 0, 1));
+            accept
+        }
+    }
+}
+
+/// An on/off switch in the accent colour.
+export component Toggle {
+    in-out property <bool> checked;
+    callback toggled(bool);
+    width: 40px;
+    height: 22px;
+    Rectangle {
+        border-radius: self.height / 2;
+        background: root.checked ? Theme.accent : #ffffff38;
+        animate background { duration: Theme.normal; }
+    }
+    Rectangle {
+        x: root.checked ? root.width - self.width - 3px : 3px;
+        y: 3px;
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: Theme.text;
+        animate x { duration: Theme.normal; easing: ease-in-out; }
+    }
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
     }
 }
 
 export component Spinner {
     in property <length> size: 32px;
+    in property <color> color: Theme.text;
     width: root.size;
     height: root.size;
-    property <float> turn: mod(animation-tick() / 1s, 1);
-    for i in 8: Rectangle {
-        x: root.width / 2 + cos((i / 8) * 360deg) * root.width * 0.38 - self.width / 2;
-        y: root.height / 2 + sin((i / 8) * 360deg) * root.height * 0.38 - self.height / 2;
-        width: root.size / 7;
+    property <float> turn: mod(animation-tick() / 900ms, 1);
+    for i in 10: Rectangle {
+        x: root.width / 2 + cos((i / 10) * 360deg) * root.width * 0.38 - self.width / 2;
+        y: root.height / 2 + sin((i / 10) * 360deg) * root.height * 0.38 - self.height / 2;
+        width: root.size / 8;
         height: self.width;
         border-radius: self.width / 2;
-        background: Theme.text;
-        opacity: 0.15 + 0.85 * mod(1 + i / 8 - root.turn, 1);
+        background: root.color;
+        opacity: 0.12 + 0.88 * mod(1 + i / 10 - root.turn, 1);
+    }
+}
+
+/// Three bouncing bars marking the playing track.
+export component Equalizer {
+    in property <bool> active;
+    in property <color> color: Theme.accent;
+    width: 16px;
+    height: 14px;
+    for i in 3: Rectangle {
+        x: i * 5.5px;
+        width: 3px;
+        height: root.active ? root.height * (0.25 + 0.75 * abs(sin((Api.eq-phase * 0.55 + i * 0.37) * 180deg))) : root.height * 0.3;
+        y: root.height - self.height;
+        border-radius: 1px;
+        background: root.color;
     }
 }

@@ -88,6 +88,16 @@ fn main() {
     };
 
     let settings = settings::Settings::load();
+    // Skia drawing into a CPU buffer: crisp hinted text and smooth artwork
+    // without the memory an OpenGL or Direct3D context costs.
+    if std::env::var_os("SLINT_BACKEND").is_none()
+        && let Err(e) = slint::BackendSelector::new()
+            .backend_name("winit".into())
+            .renderer_name("skia-software".into())
+            .select()
+    {
+        log::warn!("could not select the Skia software renderer: {e}");
+    }
     let ui = AppWindow::new().expect("window opens");
     restore_geometry(&ui, settings.window);
 
