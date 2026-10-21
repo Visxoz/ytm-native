@@ -448,6 +448,9 @@ export component AppWindow inherits Window {
 
     in property <string> toast;
     in property <bool> toast-visible;
+    /// Flipped after restoring from minimised: the full-window background
+    /// changes by one shade, forcing a complete repaint.
+    in property <bool> repaint-flip;
 
     callback go(nav: string);
     callback back();
@@ -511,6 +514,10 @@ export component AppWindow inherits Window {
 
     public function focus-search() {
         search-box.focus-input();
+    }
+
+    Rectangle {
+        background: root.repaint-flip ? #010101 : Theme.background;
     }
 
     forward-focus: keys;

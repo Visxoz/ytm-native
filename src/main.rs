@@ -68,6 +68,15 @@ fn hwnd(ui: &AppWindow) -> Option<*mut std::ffi::c_void> {
     }
 }
 
+/// Whether the window is minimised, asking Windows directly.
+fn is_minimized(ui: &AppWindow) -> bool {
+    match hwnd(ui) {
+        // SAFETY: `hwnd` is this window's live handle.
+        Some(hwnd) => unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsIconic(hwnd) != 0 },
+        None => ui.window().is_minimized(),
+    }
+}
+
 fn main() {
     logger::init();
     let Some(_instance) = single_instance::acquire(WINDOW_TITLE) else {
@@ -159,15 +168,17 @@ fn main() {
         Duration::from_millis(100),
         move || {
             let Some(ui) = weak.upgrade() else { return };
-            let minimized = ui.window().is_minimized();
+            let minimized = is_minimized(&ui);
             if was_minimized.replace(minimized) && !minimized {
-                ui.window().request_redraw();
-                let weak = ui.as_weak();
-                slint::Timer::single_shot(Duration::from_millis(150), move || {
-                    if let Some(ui) = weak.upgrade() {
-                        ui.window().request_redraw();
-                    }
-                });
+                // Again after the restore animation, which can swallow frames.
+                for delay in [0, 150, 500] {
+                    let weak = ui.as_weak();
+                    slint::Timer::single_shot(Duration::from_millis(delay), move || {
+                        if let Some(ui) = weak.upgrade() {
+                            ui.set_repaint_flip(!ui.get_repaint_flip());
+                        }
+                    });
+                }
             }
         },
     );
