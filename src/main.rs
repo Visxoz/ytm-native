@@ -77,7 +77,30 @@ fn is_minimized(ui: &AppWindow) -> bool {
     }
 }
 
+/// Fonts Slint tries, character by character, for anything the UI font
+/// lacks. Its own fallback picks one font per writing system, so letters
+/// outside any, as in "𝓙𝓪𝓼𝓹𝓮𝓻", "ⓝⓘⓖⓗⓣⓒⓞⓡⓔ" or "ꜱʟᴏᴡᴇᴅ", drew as boxes. Emoji
+/// come before Segoe UI Symbol, whose emoji are black and white.
+const FALLBACK_FONTS: &[&str] = &["segoeui.ttf", "seguiemj.ttf", "seguisym.ttf", "cambria.ttc"];
+
+fn add_fallback_fonts() {
+    if std::env::var_os("SLINT_FONT_PATH").is_some() {
+        return;
+    }
+    let windir = std::env::var_os("WINDIR").unwrap_or_else(|| "C:\\Windows".into());
+    let fonts = std::path::Path::new(&windir).join("Fonts");
+    let paths = FALLBACK_FONTS
+        .iter()
+        .map(|name| fonts.join(name))
+        .filter(|path| path.exists());
+    if let Ok(list) = std::env::join_paths(paths) {
+        // SAFETY: called first thing in `main`, before any other thread starts.
+        unsafe { std::env::set_var("SLINT_FONT_PATH", list) };
+    }
+}
+
 fn main() {
+    add_fallback_fonts();
     logger::init();
     let Some(_instance) = single_instance::acquire(WINDOW_TITLE) else {
         return;
