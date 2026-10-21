@@ -438,6 +438,8 @@ export component AppWindow inherits Window {
     // Account and settings
     in property <bool> signed-in;
     in property <bool> signing-in;
+    in property <bool> signing-in-browser;
+    in-out property <string> pasted-cookie;
     in property <string> sign-in-error;
     in-out property <bool> settings-open;
     in-out property <bool> sign-in-open;
@@ -474,6 +476,7 @@ export component AppWindow inherits Window {
     callback np-go-artist();
     callback np-go-album();
     callback sign-in(cookie: string);
+    callback sign-in-browser();
     callback sign-out();
     callback set-normalise(value: bool);
     callback set-discord(value: bool);
@@ -1295,20 +1298,30 @@ export component AppWindow inherits Window {
             }
         }
 
-        if root.sign-in-open: Dialog {
+        if root.sign-in-open: sign-in-dialog := Dialog {
+            property <bool> pasting;
             title: "Sign in";
             dialog-width: 600px;
             close => { root.sign-in-open = false; }
             Text {
-                text: "Paste the cookies of a signed-in music.youtube.com session: either a cookies.txt export or the Cookie request header from the browser's developer tools (Network tab). Use a private window and close it afterwards, as YouTube rotates cookies of open sessions.";
+                text: root.signing-in-browser
+                    ? "Finish signing in in the Google window. It closes by itself once you're signed in."
+                    : "Sign in with your Google account on Google's own page. Your password goes to Google only.";
                 wrap: word-wrap;
                 font-size: 13px;
                 color: Theme.text-secondary;
             }
-            cookie-input := TextEdit {
+            if sign-in-dialog.pasting: Text {
+                text: "Or paste the cookies of a signed-in music.youtube.com session: either a cookies.txt export or the Cookie request header from the browser's developer tools (Network tab). Use a private window and close it afterwards, as YouTube rotates cookies of open sessions.";
+                wrap: word-wrap;
+                font-size: 13px;
+                color: Theme.text-secondary;
+            }
+            if sign-in-dialog.pasting: TextEdit {
                 height: 160px;
                 font-size: 12px;
                 wrap: char-wrap;
+                edited(text) => { root.pasted-cookie = text; }
             }
             if root.sign-in-error != "": Text {
                 text: root.sign-in-error;
@@ -1319,17 +1332,39 @@ export component AppWindow inherits Window {
             HorizontalLayout {
                 alignment: end;
                 spacing: 12px;
-                if root.signing-in: Spinner { size: 24px; }
+                if root.signing-in || root.signing-in-browser: Spinner { size: 24px; }
+                if !sign-in-dialog.pasting: PillButton {
+                    text: "Paste cookies instead";
+                    clicked => { sign-in-dialog.pasting = true; }
+                }
                 PillButton {
                     text: "Cancel";
                     clicked => { root.sign-in-open = false; }
                 }
+                if sign-in-dialog.pasting: PillButton {
+                    text: "Sign in with cookies";
+                    clicked => { root.sign-in(root.pasted-cookie); }
+                }
                 PillButton {
-                    text: "Sign in";
+                    text: "Sign in with Google";
                     primary: true;
-                    clicked => { root.sign-in(cookie-input.text); }
+                    clicked => { root.sign-in-browser(); }
                 }
             }
         }
     }
+}
+
+/// Holds Google's sign-in page, which the app places over it.
+export component SignInWindow inherits Window {
+    title: "Sign in to YouTube Music";
+    icon: @image-url("../app-icon.png");
+    background: Theme.background;
+    preferred-width: 480px;
+    preferred-height: 700px;
+    min-width: 400px;
+    min-height: 560px;
+    callback resized();
+    changed width => { root.resized(); }
+    changed height => { root.resized(); }
 }

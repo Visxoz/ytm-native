@@ -21,6 +21,7 @@ use crate::{
     Api as ApiGlobal, AppWindow, CardItem, QueueItem, RowItem, RowKind, TrackItem,
     api::{self, Api, Card, CardKind, CardLayout, Page, QueueMode, Route, Section, Track},
     audio::{Player, PlayerEvent, StreamSpec},
+    google_sign_in::GoogleSignIn,
     images,
     media_controls::{Action, Controls},
     premium,
@@ -106,6 +107,8 @@ pub struct App {
     premium_shown: std::cell::Cell<u8>,
     toast_timer: Timer,
     suggest_timer: Timer,
+    google_sign_in: RefCell<Option<GoogleSignIn>>,
+    sign_in_timer: Timer,
 }
 
 fn s(text: impl AsRef<str>) -> SharedString {
@@ -226,6 +229,8 @@ impl App {
             premium_shown: std::cell::Cell::new(u8::MAX),
             toast_timer: Timer::default(),
             suggest_timer: Timer::default(),
+            google_sign_in: RefCell::new(None),
+            sign_in_timer: Timer::default(),
         });
         app.bind(ui);
         app.apply_settings_to_ui(ui);
@@ -525,6 +530,7 @@ impl App {
             }
         });
         on!(on_sign_in, |app, cookie| app.sign_in(cookie.to_string()));
+        on!(on_sign_in_browser, |app| app.sign_in_with_google());
         on!(on_sign_out, |app| app.sign_out());
         on!(on_set_normalise, |app, value| {
             app.update_settings(|s| s.normalise = value);
@@ -1916,6 +1922,101 @@ impl App {
                 }
             },
         );
+    }
+
+    fn sign_in_with_google(self: &Rc<Self>) {
+        if let Some(open) = self.google_sign_in.borrow().as_ref() {
+            let _ = open.window().show();
+            return;
+        }
+        // Each step is deferred: WebView2 calls back from inside its own
+        // events, and the window must not be dropped from its own handler.
+        let weak = Rc::downgrade(self);
+        let on_page = move || {
+            let weak = weak.clone();
+            Timer::single_shot(Duration::ZERO, move || {
+                if let Some(app) = weak.upgrade() {
+                    app.check_google_sign_in();
+                }
+            });
+        };
+        let open = match GoogleSignIn::open() {
+            Ok(open) => open,
+            Err(e) => return self.google_sign_in_failed(&e),
+        };
+        let weak = Rc::downgrade(self);
+        open.window().on_resized(move || {
+            if let Some(app) = weak.upgrade()
+                && let Some(open) = app.google_sign_in.borrow().as_ref()
+            {
+                open.fit();
+            }
+        });
+        let weak = Rc::downgrade(self);
+        open.window().window().on_close_requested(move || {
+            let weak = weak.clone();
+            Timer::single_shot(Duration::ZERO, move || {
+                if let Some(app) = weak.upgrade() {
+                    app.close_google_sign_in();
+                }
+            });
+            slint::CloseRequestResponse::HideWindow
+        });
+        *self.google_sign_in.borrow_mut() = Some(open);
+        let ui = self.ui();
+        ui.set_sign_in_error(SharedString::new());
+        ui.set_signing_in_browser(true);
+
+        // Windows creates the window a moment after it is shown. The page is
+        // attached with the window out of its cell, as WebView2 pumps
+        // messages meanwhile, which may call back into the app.
+        let weak = Rc::downgrade(self);
+        let attempts = std::cell::Cell::new(0);
+        self.sign_in_timer
+            .start(TimerMode::Repeated, Duration::from_millis(50), move || {
+                let Some(app) = weak.upgrade() else { return };
+                let Some(mut open) = app.google_sign_in.borrow_mut().take() else {
+                    app.sign_in_timer.stop();
+                    return;
+                };
+                let result = open.attach(on_page.clone());
+                *app.google_sign_in.borrow_mut() = Some(open);
+                attempts.set(attempts.get() + 1);
+                match result {
+                    Ok(false) if attempts.get() < 100 => return,
+                    Ok(false) => app.google_sign_in_failed("the sign-in window did not open"),
+                    Ok(true) => {}
+                    Err(e) => app.google_sign_in_failed(&e),
+                }
+                app.sign_in_timer.stop();
+            });
+    }
+
+    fn google_sign_in_failed(&self, error: &str) {
+        log::warn!("{error}");
+        self.close_google_sign_in();
+        self.ui().set_sign_in_error(
+            format!("Couldn't sign in with Google: {error}. You can paste cookies instead.").into(),
+        );
+    }
+
+    fn check_google_sign_in(self: &Rc<Self>) {
+        let cookie = self
+            .google_sign_in
+            .borrow()
+            .as_ref()
+            .and_then(GoogleSignIn::cookie);
+        if let Some(cookie) = cookie {
+            self.close_google_sign_in();
+            self.sign_in(cookie);
+        }
+    }
+
+    fn close_google_sign_in(&self) {
+        if let Some(open) = self.google_sign_in.borrow_mut().take() {
+            let _ = open.window().hide();
+        }
+        self.ui().set_signing_in_browser(false);
     }
 
     /// Prepares the Premium player script in the background, so the first

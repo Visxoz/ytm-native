@@ -34,6 +34,7 @@ tokio = { version = "1.54.0", features = ["rt-multi-thread", "macros", "sync", "
 unsafe-libopus = "0.2.0"
 url = "2.5"
 windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging", "Win32_Security", "Win32_Security_Cryptography", "Win32_System_SystemInformation"] }
+wry = { version = "0.57", default-features = false }
 
 [profile.release]
 # Small by default; the crates on the audio and drawing paths keep full speed.

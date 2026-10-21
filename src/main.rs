@@ -3,6 +3,7 @@
 mod api;
 mod app;
 mod audio;
+mod google_sign_in;
 mod home_feed;
 mod http;
 mod images;
