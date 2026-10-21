@@ -195,6 +195,7 @@ impl App {
                         .filter(|c| !c.trim().is_empty()),
                 ),
                 status: AtomicU8::new(PREMIUM_UNKNOWN),
+                misses: AtomicU8::new(0),
             }),
             premium_shown: std::cell::Cell::new(u8::MAX),
             toast_timer: Timer::default(),
@@ -1139,14 +1140,22 @@ impl App {
                         match premium::resolve(&video_id, Some(&cookie), &visitor, &player).await {
                             Ok(premium::Outcome::Premium(stream)) => {
                                 premium.status.store(PREMIUM_YES, Ordering::Relaxed);
+                                premium.misses.store(0, Ordering::Relaxed);
                                 log::info!(
                                     "{video_id}: Premium stream resolved in {} ms",
                                     started.elapsed().as_millis()
                                 );
                                 return Ok(stream);
                             }
-                            Ok(premium::Outcome::NotPremium) => {
-                                premium.status.store(PREMIUM_NO, Ordering::Relaxed);
+                            Ok(premium::Outcome::NoPremiumFormats) => {
+                                // Only an account that never got Premium formats, over
+                                // several songs in a row, is taken as not Premium.
+                                let misses = premium.misses.fetch_add(1, Ordering::Relaxed) + 1;
+                                if misses >= NOT_PREMIUM_AFTER
+                                    && premium.status.load(Ordering::Relaxed) != PREMIUM_YES
+                                {
+                                    premium.status.store(PREMIUM_NO, Ordering::Relaxed);
+                                }
                             }
                             Err(e) => premium::diag(format!(
                                 "{video_id}: Premium path failed, using the free stream: {e}"
@@ -1652,6 +1661,7 @@ impl App {
                         }
                         *app.premium.cookie.write().unwrap() = Some(header);
                         app.premium.status.store(PREMIUM_UNKNOWN, Ordering::Relaxed);
+                        app.premium.misses.store(0, Ordering::Relaxed);
                         app.warm_premium();
                         ui.set_signed_in(true);
                         ui.set_sign_in_open(false);
@@ -1716,6 +1726,7 @@ impl App {
             let _ = std::fs::remove_file(settings::cookie_path());
             *app.premium.cookie.write().unwrap() = None;
             app.premium.status.store(PREMIUM_UNKNOWN, Ordering::Relaxed);
+            app.premium.misses.store(0, Ordering::Relaxed);
             let ui = app.ui();
             ui.set_signed_in(false);
             ui.set_settings_open(false);
@@ -1755,6 +1766,9 @@ fn route_tint(route: &Route) -> slint::Color {
 const PREMIUM_UNKNOWN: u8 = 0;
 const PREMIUM_YES: u8 = 1;
 const PREMIUM_NO: u8 = 2;
+/// Songs in a row without Premium formats before the account counts as not
+/// Premium, as some songs simply have no Premium version.
+const NOT_PREMIUM_AFTER: u8 = 3;
 
 /// Premium audio state shared with background tasks.
 struct PremiumShared {
@@ -1762,6 +1776,8 @@ struct PremiumShared {
     player: tokio::sync::Mutex<Option<Arc<premium::Player>>>,
     cookie: std::sync::RwLock<Option<String>>,
     status: AtomicU8,
+    /// Songs in a row that offered no Premium formats.
+    misses: AtomicU8,
 }
 
 /// `YTM_PREMIUM_DRYRUN=1` times the Premium path while playing free streams.

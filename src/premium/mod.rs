@@ -63,8 +63,9 @@ pub struct Player {
 
 pub enum Outcome {
     Premium(ResolvedStream),
-    /// The account is signed in but gets no Premium formats.
-    NotPremium,
+    /// No Premium version of this song: music videos and uploads often
+    /// have none, so this says nothing about the account on its own.
+    NoPremiumFormats,
 }
 
 fn http() -> &'static reqwest::Client {
@@ -382,10 +383,10 @@ pub async fn resolve(
         let premium = itags.iter().any(|i| PREMIUM_ITAGS.contains(i));
         if !premium && cookie.is_some() {
             diag(format!(
-                "{video_id}: {} offered no Premium formats ({itags:?})",
+                "{video_id}: {} has no Premium version ({itags:?}); playing the free stream",
                 client.name
             ));
-            return Ok(Outcome::NotPremium);
+            return Ok(Outcome::NoPremiumFormats);
         }
         let Some(format) = streams::best_audio(response.audio_formats()).cloned() else {
             last_error = "no audio formats".into();
