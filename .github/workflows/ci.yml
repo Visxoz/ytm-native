@@ -1,0 +1,24 @@
+name: CI
+
+on:
+  push:
+    branches: [native]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    uses: ./.github/workflows/check.yml
+
+  build:
+    needs: check
+    # The exe is built for release tags (release.yml); here only on demand.
+    if: github.event_name == 'workflow_dispatch'
+    uses: ./.github/workflows/build.yml
