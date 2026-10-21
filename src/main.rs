@@ -4,6 +4,7 @@ mod api;
 mod app;
 mod audio;
 mod home_feed;
+mod http;
 mod images;
 mod logger;
 mod media_controls;

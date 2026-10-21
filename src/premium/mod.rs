@@ -10,8 +10,8 @@ mod trim;
 
 use std::{
     io::Write,
-    sync::{Arc, OnceLock},
-    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+    sync::Arc,
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use rquickjs::{Context, Runtime};
@@ -68,17 +68,6 @@ pub enum Outcome {
     NoPremiumFormats,
 }
 
-fn http() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .user_agent(WEB_USER_AGENT)
-            .timeout(Duration::from_secs(15))
-            .build()
-            .expect("HTTP client builds")
-    })
-}
-
 fn cache_path() -> std::path::PathBuf {
     crate::settings::data_dir().join("player.json")
 }
@@ -131,8 +120,9 @@ fn signature_timestamp(player: &str) -> Option<u32> {
 }
 
 async fn text(url: &str) -> Result<String, String> {
-    http()
+    crate::http::client()
         .get(url)
+        .header(reqwest::header::USER_AGENT, WEB_USER_AGENT)
         .send()
         .await
         .and_then(|r| r.error_for_status())
@@ -279,8 +269,9 @@ async fn player_request(
         "contentCheckOk": true,
         "racyCheckOk": true,
     });
-    let mut request = http()
+    let mut request = crate::http::client()
         .post(format!("{origin}/youtubei/v1/player?prettyPrint=false"))
+        .header(reqwest::header::USER_AGENT, WEB_USER_AGENT)
         .header("Content-Type", "application/json")
         .header("Origin", &origin)
         .header("X-Origin", &origin)

@@ -430,7 +430,7 @@ impl App {
         ui.set_np_position(session.position as f32);
         self.show_playing(false);
         ui.global::<ApiGlobal>().set_playing_id(s(&track.id));
-        self.load_image(track.large_thumb(), images::PLAYER, |app, image| {
+        self.load_image(track.thumb.clone(), images::PLAYER, |app, image| {
             app.ui().set_np_art(image);
         });
         self.refresh_queue();
@@ -1284,8 +1284,8 @@ impl App {
         );
         ui.global::<ApiGlobal>().set_playing_id(s(&track.id));
         let id = track.id.clone();
-        let large = track.large_thumb();
-        self.load_image(large.clone(), images::PLAYER, move |app, image| {
+        let art = track.thumb.clone();
+        self.load_image(art.clone(), images::PLAYER, move |app, image| {
             if !app
                 .state
                 .borrow()
@@ -1297,7 +1297,7 @@ impl App {
             }
             let ui = app.ui();
             ui.set_np_art(image);
-            if let Some(color) = large
+            if let Some(color) = art
                 .as_deref()
                 .and_then(|url| images::accent(url, images::PLAYER))
             {

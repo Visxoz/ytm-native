@@ -72,16 +72,6 @@ impl Cache {
     }
 }
 
-fn http() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .timeout(Duration::from_secs(20))
-            .build()
-            .expect("HTTP client builds")
-    })
-}
-
 fn permits() -> &'static Arc<Semaphore> {
     static PERMITS: OnceLock<Arc<Semaphore>> = OnceLock::new();
     PERMITS.get_or_init(|| Arc::new(Semaphore::new(PARALLEL_FETCHES)))
@@ -160,8 +150,9 @@ async fn fetch(
 ) -> Option<(SharedPixelBuffer<Rgba8Pixel>, Option<Color>)> {
     rt.spawn(async move {
         let _permit = permits().acquire().await.ok()?;
-        let bytes = http()
+        let bytes = crate::http::client()
             .get(&url)
+            .timeout(Duration::from_secs(20))
             .send()
             .await
             .and_then(|r| r.error_for_status())

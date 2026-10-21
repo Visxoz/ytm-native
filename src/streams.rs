@@ -4,8 +4,6 @@
 //! unlock. The visionOS client gets plain URLs, so asking as that client keeps
 //! the whole pipeline native. Premium streams go through `crate::premium`.
 
-use std::{sync::OnceLock, time::Duration};
-
 use serde::Deserialize;
 use serde_json::json;
 
@@ -153,17 +151,6 @@ impl PlayerResponse {
     }
 }
 
-fn http() -> &'static reqwest::Client {
-    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
-            .user_agent(USER_AGENT)
-            .timeout(Duration::from_secs(15))
-            .build()
-            .expect("HTTP client builds")
-    })
-}
-
 /// Fetches the player response and picks the best audio stream.
 pub async fn resolve(video_id: &str, visitor_data: &str) -> Result<ResolvedStream, String> {
     let body = json!({
@@ -184,8 +171,9 @@ pub async fn resolve(video_id: &str, visitor_data: &str) -> Result<ResolvedStrea
         "contentCheckOk": true,
         "racyCheckOk": true,
     });
-    let text = http()
+    let text = crate::http::client()
         .post(PLAYER_URL)
+        .header(reqwest::header::USER_AGENT, USER_AGENT)
         .header("Content-Type", "application/json")
         .header("Origin", "https://www.youtube.com")
         .header("X-YouTube-Client-Name", CLIENT_ID)
