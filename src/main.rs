@@ -3,6 +3,7 @@
 mod api;
 mod app;
 mod audio;
+mod home_feed;
 mod images;
 mod logger;
 mod media_controls;
@@ -144,6 +145,29 @@ fn main() {
             }
             if let Some(timer) = timer.upgrade() {
                 timer.stop();
+            }
+        },
+    );
+
+    // Some drivers show a blank window after restoring from minimised until
+    // something repaints, so repaint on restore, and once more shortly after.
+    let restore_timer = slint::Timer::default();
+    let weak = ui.as_weak();
+    let was_minimized = std::cell::Cell::new(false);
+    restore_timer.start(
+        slint::TimerMode::Repeated,
+        Duration::from_millis(100),
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let minimized = ui.window().is_minimized();
+            if was_minimized.replace(minimized) && !minimized {
+                ui.window().request_redraw();
+                let weak = ui.as_weak();
+                slint::Timer::single_shot(Duration::from_millis(150), move || {
+                    if let Some(ui) = weak.upgrade() {
+                        ui.window().request_redraw();
+                    }
+                });
             }
         },
     );

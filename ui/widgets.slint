@@ -66,6 +66,7 @@ export component PlayButton {
     in property <bool> playing;
     in property <color> color: Theme.accent;
     in property <color> icon-color: Theme.text;
+    out property <bool> has-hover: touch.has-hover;
     callback clicked();
     width: root.size;
     height: root.size;

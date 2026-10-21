@@ -12,7 +12,6 @@ use tokio::{runtime::Handle, sync::Semaphore};
 
 // Logical sizes artwork is drawn at.
 pub const ROW: u32 = 48;
-pub const TILE: u32 = 56;
 pub const PLAYER: u32 = 64;
 pub const TOP: u32 = 96;
 pub const CARD: u32 = 176;

@@ -28,6 +28,8 @@ pub struct ResolvedStream {
     pub loudness_db: Option<f32>,
     /// Came from the signed-in Premium path.
     pub premium: bool,
+    /// YouTube's format number: 774 and 141 are the Premium ones.
+    pub itag: u32,
 }
 
 #[derive(Deserialize)]
@@ -146,6 +148,7 @@ impl PlayerResponse {
                 .map(|ms| ms / 1000.0),
             loudness_db: format.loudness_db.or_else(|| self.loudness_db()),
             premium,
+            itag: format.itag,
         }
     }
 }

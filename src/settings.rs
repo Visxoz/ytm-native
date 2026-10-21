@@ -82,6 +82,50 @@ impl Settings {
     }
 }
 
+/// The queue and position at exit, restored paused on the next start.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct Session {
+    pub queue: Vec<crate::api::Track>,
+    pub index: usize,
+    pub position: f64,
+    /// Length of the current track, which feed cards do not carry.
+    #[serde(default)]
+    pub duration: f64,
+}
+
+/// Longest queue kept between runs.
+const SESSION_QUEUE_LIMIT: usize = 500;
+
+fn session_path() -> PathBuf {
+    data_dir().join("session.json")
+}
+
+impl Session {
+    pub fn load() -> Option<Self> {
+        let bytes = std::fs::read(session_path()).ok()?;
+        let session: Self = serde_json::from_slice(&bytes).ok()?;
+        (session.index < session.queue.len()).then_some(session)
+    }
+
+    pub fn save(mut self) {
+        // Keep the window around the current track if the queue is long.
+        if self.queue.len() > SESSION_QUEUE_LIMIT {
+            let start = self.index.saturating_sub(SESSION_QUEUE_LIMIT / 2);
+            let end = (start + SESSION_QUEUE_LIMIT).min(self.queue.len());
+            self.queue = self.queue[start..end].to_vec();
+            self.index -= start;
+        }
+        match serde_json::to_vec(&self) {
+            Ok(json) => {
+                if let Err(e) = std::fs::write(session_path(), json) {
+                    log::warn!("could not save the session: {e}");
+                }
+            }
+            Err(e) => log::warn!("could not save the session: {e}"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

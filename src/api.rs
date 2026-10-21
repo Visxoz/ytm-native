@@ -18,13 +18,13 @@ const HOME_SHELF: usize = 20;
 
 pub type Result<T> = std::result::Result<T, String>;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ArtistRef {
     pub id: Option<String>,
     pub name: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Track {
     pub id: String,
     pub title: String,
@@ -58,6 +58,8 @@ pub enum CardKind {
     Playlist,
     Artist,
     Genre,
+    /// A single song, played with a radio after it.
+    Song,
 }
 
 impl CardKind {
@@ -67,6 +69,7 @@ impl CardKind {
             CardKind::Playlist => "playlist",
             CardKind::Artist => "artist",
             CardKind::Genre => "genre",
+            CardKind::Song => "song",
         }
     }
 }
@@ -80,6 +83,8 @@ pub struct Card {
     pub thumb: Option<String>,
     /// Genre chips carry YouTube's accent colour.
     pub color: Option<u32>,
+    /// The song a song card plays.
+    pub track: Option<Track>,
 }
 
 /// How a click on one track of a section fills the queue.
@@ -96,8 +101,6 @@ pub enum CardLayout {
     Carousel,
     Grid,
     Chips,
-    /// Compact shortcuts, as at the top of Spotify's home.
-    Tiles,
     /// One large card for the best search match.
     Top,
 }
@@ -143,7 +146,7 @@ pub struct Page {
     pub sections: Vec<Section>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Route {
     Home,
     Explore,
@@ -252,6 +255,7 @@ fn album_card(a: AlbumItem) -> Card {
         title: a.name,
         subtitle: subtitle.join(" • "),
         color: None,
+        track: None,
     }
 }
 
@@ -266,6 +270,7 @@ fn artist_card(a: ArtistItem) -> Card {
             |n| format!("{} subscribers", compact(n)),
         ),
         color: None,
+        track: None,
     }
 }
 
@@ -284,6 +289,7 @@ fn playlist_card(p: MusicPlaylistItem) -> Card {
         title: p.name,
         subtitle: subtitle.join(" • "),
         color: None,
+        track: None,
     }
 }
 
@@ -389,18 +395,33 @@ impl Api {
 
     async fn home(&self, signed_in: bool) -> Result<Page> {
         let q = self.q();
-        let (history, charts, new_albums, genres) = tokio::join!(
-            async {
-                if signed_in {
-                    q.music_history().await.ok()
-                } else {
-                    None
+        // Signed in: YouTube Music's own personal home feed.
+        if signed_in {
+            let (feed, genres) = tokio::join!(crate::home_feed::fetch(&q), q.music_genres());
+            match feed {
+                Ok(mut sections) if !sections.is_empty() => {
+                    sections.extend(card_section(
+                        "Browse moods & genres",
+                        genres
+                            .unwrap_or_default()
+                            .into_iter()
+                            .take(12)
+                            .map(genre_card)
+                            .collect(),
+                        CardLayout::Chips,
+                    ));
+                    return Ok(Page {
+                        header: None,
+                        sections,
+                    });
                 }
-            },
-            q.music_charts(None),
-            q.music_new_albums(),
-            q.music_genres(),
-        );
+                Ok(_) => log::warn!("the personal home feed was empty"),
+                Err(e) => log::warn!("could not load the personal home feed: {e}"),
+            }
+        }
+
+        let (charts, new_albums, genres) =
+            tokio::join!(q.music_charts(None), q.music_new_albums(), q.music_genres());
         let charts = charts.map_err(err)?;
 
         // Chart track lists are empty nowadays; the Trending playlist has them.
@@ -417,33 +438,7 @@ impl Api {
             None => tracks(charts.trending_tracks.clone()),
         };
 
-        let new_albums = new_albums.unwrap_or_default();
         let mut sections = Vec::new();
-        let mut tiles: Vec<Card> = charts
-            .playlists
-            .iter()
-            .cloned()
-            .map(playlist_card)
-            .collect();
-        tiles.extend(
-            new_albums
-                .iter()
-                .take(8 - tiles.len().min(8))
-                .cloned()
-                .map(album_card),
-        );
-        sections.extend(card_section("", tiles, CardLayout::Tiles));
-        if let Some(history) = history {
-            let mut seen = std::collections::HashSet::new();
-            let recent = history
-                .items
-                .into_iter()
-                .map(|h| track(h.item))
-                .filter(|t| seen.insert(t.id.clone()))
-                .take(HOME_SHELF)
-                .collect();
-            sections.extend(track_section("Listen again", recent, QueueMode::Section));
-        }
         sections.extend(track_section(
             "Trending",
             trending.into_iter().take(10).collect(),
@@ -452,8 +447,8 @@ impl Api {
         sections.extend(card_section(
             "New releases",
             new_albums
+                .unwrap_or_default()
                 .into_iter()
-                .skip(8 - charts.playlists.len().min(8))
                 .take(HOME_SHELF)
                 .map(album_card)
                 .collect(),
@@ -578,6 +573,7 @@ impl Api {
                 ),
                 thumb: pick_thumb(&liked.thumbnail, CARD_THUMB),
                 color: None,
+                track: None,
             });
         }
         cards.extend(
@@ -850,7 +846,7 @@ impl Api {
             CardKind::Album => self.album(id).await?,
             CardKind::Playlist => self.playlist(id).await?,
             CardKind::Artist => self.artist(id).await?,
-            CardKind::Genre => return Ok(Vec::new()),
+            CardKind::Genre | CardKind::Song => return Ok(Vec::new()),
         };
         Ok(page.header.map(|h| h.tracks).unwrap_or_default())
     }
@@ -932,6 +928,7 @@ fn genre_card(g: rustypipe::model::MusicGenreItem) -> Card {
         subtitle: String::new(),
         thumb: None,
         color: Some(g.color),
+        track: None,
     }
 }
 

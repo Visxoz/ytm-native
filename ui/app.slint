@@ -239,9 +239,11 @@ component QueueRow inherits Rectangle {
     in property <QueueItem> item;
     callback clicked();
     callback remove();
+    // The remove button counts as hovering the row, or they would flicker.
+    property <bool> hot: touch.has-hover || remove-button.has-hover;
     height: 60px;
     border-radius: 6px;
-    background: touch.has-hover ? Theme.hover : transparent;
+    background: root.hot ? Theme.hover : transparent;
     animate background { duration: Theme.fast; }
     touch := TouchArea {
         mouse-cursor: pointer;
@@ -283,14 +285,16 @@ component QueueRow inherits Rectangle {
             color: Theme.text-secondary;
         }
     }
-    if touch.has-hover && !root.item.current: IconButton {
+    remove-button := IconButton {
         x: parent.width - self.width - 8px;
         icon: Icons.close;
         size: 32px;
         icon-size: 18px;
+        enabled: root.hot && !root.item.current;
+        opacity: self.enabled ? 1 : 0;
         clicked => { root.remove(); }
     }
-    if !touch.has-hover || root.item.current: Text {
+    if !root.hot || root.item.current: Text {
         x: parent.width - 52px;
         width: 40px;
         height: 100%;
@@ -411,6 +415,7 @@ export component AppWindow inherits Window {
     in property <float> np-buffered;
     in property <bool> np-playing;
     in property <bool> np-loading;
+    in property <bool> np-premium;
     in property <string> np-quality;
     in property <bool> np-has-artist;
     in property <bool> np-has-album;
@@ -1120,19 +1125,37 @@ export component AppWindow inherits Window {
                     x: parent.width - self.width - 8px;
                     width: self.preferred-width;
                     spacing: 4px;
+                    // Quality badge; Premium streams get a red PREMIUM tag.
                     if root.np-quality != "": Rectangle {
                         y: (parent.height - self.height) / 2;
-                        width: quality.preferred-width + 14px;
+                        width: badge.preferred-width;
                         height: 20px;
                         border-radius: 4px;
                         border-width: 1px;
-                        border-color: #ffffff30;
-                        quality := Text {
-                            text: root.np-quality;
-                            font-size: 10px;
-                            font-weight: 700;
-                            letter-spacing: 0.5px;
-                            color: Theme.text-secondary;
+                        border-color: root.np-premium ? Theme.accent : #ffffff30;
+                        clip: true;
+                        badge := HorizontalLayout {
+                            if root.np-premium: Rectangle {
+                                width: tag.preferred-width + 12px;
+                                background: Theme.accent;
+                                tag := Text {
+                                    text: "PREMIUM";
+                                    font-size: 10px;
+                                    font-weight: 800;
+                                    letter-spacing: 0.5px;
+                                    color: Theme.text;
+                                }
+                            }
+                            Rectangle {
+                                width: quality.preferred-width + 14px;
+                                quality := Text {
+                                    text: root.np-quality;
+                                    font-size: 10px;
+                                    font-weight: 700;
+                                    letter-spacing: 0.5px;
+                                    color: root.np-premium ? Theme.text : Theme.text-secondary;
+                                }
+                            }
                         }
                     }
                     Rectangle { width: 4px; }

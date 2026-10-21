@@ -39,6 +39,9 @@ const RESTART_AFTER_SECS: f64 = 3.0;
 /// Stream URLs last about six hours; refresh well before.
 const PREFETCH_FRESH: Duration = Duration::from_secs(60 * 60);
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
+/// How long a loaded page is reused when navigating back to it.
+const PAGE_CACHE_FOR: Duration = Duration::from_secs(5 * 60);
+const PAGE_CACHE_SIZE: usize = 12;
 const SUGGEST_DELAY: Duration = Duration::from_millis(150);
 
 type CardArt = (Rc<VecModel<CardItem>>, Vec<Option<String>>, u32);
@@ -63,6 +66,8 @@ struct Playback {
     current_premium: bool,
     /// A track whose Premium stream failed and plays the free one instead.
     force_free: Option<String>,
+    /// Track and position restored from the last run, used on its first play.
+    resume: Option<(String, f64)>,
 }
 
 struct State {
@@ -79,6 +84,8 @@ struct State {
     playback: Playback,
     lyrics_for: Option<String>,
     suggest_generation: u64,
+    /// Recently loaded pages, so going back does not fetch them again.
+    page_cache: HashMap<Route, (Page, Instant)>,
 }
 
 pub struct App {
@@ -181,6 +188,7 @@ impl App {
                 playback: Playback::default(),
                 lyrics_for: None,
                 suggest_generation: 0,
+                page_cache: HashMap::new(),
             }),
             rows: Rc::new(VecModel::default()),
             library: Rc::new(VecModel::default()),
@@ -196,6 +204,9 @@ impl App {
                 ),
                 status: AtomicU8::new(PREMIUM_UNKNOWN),
                 misses: AtomicU8::new(0),
+                errors: AtomicU8::new(0),
+                load_failed: std::sync::Mutex::new(None),
+                paused_until: std::sync::Mutex::new(None),
             }),
             premium_shown: std::cell::Cell::new(u8::MAX),
             toast_timer: Timer::default(),
@@ -290,6 +301,7 @@ impl App {
     /// Starts background work once the event loop runs.
     pub fn start(self: &Rc<Self>) {
         images::set_scale(self.ui().window().scale_factor());
+        self.restore_session();
         let app = Rc::clone(self);
         self.tick
             .start(TimerMode::Repeated, TICK, move || app.on_tick());
@@ -335,7 +347,69 @@ impl App {
         *self.media.borrow_mut() = controls;
     }
 
+    /// The restored position, if the current track is the restored one.
+    fn take_resume_position(&self) -> f64 {
+        let mut state = self.state.borrow_mut();
+        let current = state.queue.current().map(|t| t.id.clone());
+        match state.playback.resume.take() {
+            Some((id, position)) if Some(&id) == current.as_ref() => position,
+            _ => 0.0,
+        }
+    }
+
+    /// Saves the queue and position so the next start can resume.
+    fn save_session(&self) {
+        let state = self.state.borrow();
+        let Some(index) = state.queue.current_index() else {
+            return;
+        };
+        let current = state.queue.current().map(|t| t.id.as_str());
+        let position = match &state.playback.resume {
+            Some((id, position)) if Some(id.as_str()) == current => *position,
+            _ if state.playback.started => self.player.position(),
+            _ => 0.0,
+        };
+        settings::Session {
+            queue: state.queue.items().cloned().collect(),
+            index,
+            position,
+            duration: state.playback.duration,
+        }
+        .save();
+    }
+
+    /// Shows the last run's track, paused, ready to resume where it was.
+    fn restore_session(self: &Rc<Self>) {
+        let Some(session) = settings::Session::load() else {
+            return;
+        };
+        let track = session.queue[session.index].clone();
+        {
+            let mut state = self.state.borrow_mut();
+            state.queue.set(session.queue, session.index, false);
+            state.playback.resume = Some((track.id.clone(), session.position));
+            state.playback.duration = track.duration.map_or(session.duration, f64::from);
+        }
+        let duration = self.state.borrow().playback.duration;
+        let ui = self.ui();
+        ui.set_has_track(true);
+        ui.set_np_title(s(&track.title));
+        ui.set_np_artists(s(track.artist_names()));
+        ui.set_np_album(s(track.album.as_ref().map_or("", |(_, n)| n.as_str())));
+        ui.set_np_has_artist(track.first_artist_id().is_some());
+        ui.set_np_has_album(track.album.is_some());
+        ui.set_np_duration(duration as f32);
+        ui.set_np_position(session.position as f32);
+        self.show_playing(false);
+        ui.global::<ApiGlobal>().set_playing_id(s(&track.id));
+        self.load_image(track.large_thumb(), images::PLAYER, |app, image| {
+            app.ui().set_np_art(image);
+        });
+        self.refresh_queue();
+    }
+
     pub fn shutdown(&self) {
+        self.save_session();
         self.player.stop();
         self.presence.shutdown();
     }
@@ -472,6 +546,10 @@ impl App {
         }
         on_api!(on_navigate, |app, kind, id, title| {
             let id = id.to_string();
+            if kind == "song" {
+                app.play_song_card(&id);
+                return;
+            }
             let route = match kind.as_str() {
                 "album" => Route::Album(id),
                 "playlist" => Route::Playlist(id),
@@ -545,9 +623,22 @@ impl App {
             return;
         }
 
+        let cached = self
+            .state
+            .borrow()
+            .page_cache
+            .get(&route)
+            .filter(|(_, at)| at.elapsed() < PAGE_CACHE_FOR)
+            .map(|(page, _)| page.clone());
+        if let Some(page) = cached {
+            ui.set_page_loading(false);
+            self.show_page(page);
+            return;
+        }
+
         let api = self.api.clone();
         self.spawn(
-            async move { api.page(&route, signed_in).await },
+            async move { api.page(&route, signed_in).await.map(|page| (route, page)) },
             move |app, result| {
                 if app.state.borrow().page_generation != generation {
                     return;
@@ -555,7 +646,10 @@ impl App {
                 let ui = app.ui();
                 ui.set_page_loading(false);
                 match result {
-                    Ok(page) => app.show_page(page),
+                    Ok((route, page)) => {
+                        app.cache_page(route, page.clone());
+                        app.show_page(page);
+                    }
                     Err(e) => {
                         log::warn!("page failed: {e}");
                         ui.set_page_error(e.into());
@@ -565,8 +659,24 @@ impl App {
         );
     }
 
+    fn cache_page(&self, route: Route, page: Page) {
+        let mut state = self.state.borrow_mut();
+        let cache = &mut state.page_cache;
+        cache.retain(|_, (_, at)| at.elapsed() < PAGE_CACHE_FOR);
+        if cache.len() >= PAGE_CACHE_SIZE
+            && let Some(oldest) = cache
+                .iter()
+                .min_by_key(|(_, (_, at))| *at)
+                .map(|(r, _)| r.clone())
+        {
+            cache.remove(&oldest);
+        }
+        cache.insert(route, (page, Instant::now()));
+    }
+
     fn reload(self: &Rc<Self>) {
         let route = self.state.borrow().route.clone();
+        self.state.borrow_mut().page_cache.remove(&route);
         self.navigate(route, false);
     }
 
@@ -703,7 +813,6 @@ impl App {
                 }
                 Section::Cards { cards, layout, .. } => {
                     let edge = match layout {
-                        CardLayout::Tiles => images::TILE,
                         CardLayout::Top => images::TOP,
                         _ => images::CARD,
                     };
@@ -720,7 +829,6 @@ impl App {
                             CardLayout::Carousel => RowKind::Carousel,
                             CardLayout::Grid => RowKind::Grid,
                             CardLayout::Chips => RowKind::Chips,
-                            CardLayout::Tiles => RowKind::Tiles,
                             CardLayout::Top => RowKind::Top,
                         },
                         cards: ModelRc::from(model),
@@ -940,7 +1048,31 @@ impl App {
         }
     }
 
+    /// Plays a song card from the current page, with a radio after it.
+    fn play_song_card(self: &Rc<Self>, id: &str) {
+        let track = self
+            .state
+            .borrow()
+            .page
+            .sections
+            .iter()
+            .find_map(|section| match section {
+                Section::Cards { cards, .. } => cards
+                    .iter()
+                    .find(|c| c.id == id)
+                    .and_then(|c| c.track.clone()),
+                Section::Tracks { .. } => None,
+            });
+        if let Some(track) = track {
+            self.play_with_radio(track);
+        }
+    }
+
     fn play_card(self: &Rc<Self>, kind: &str, id: String, radio: bool) {
+        if kind == "song" {
+            self.play_song_card(&id);
+            return;
+        }
         let kind = match kind {
             "album" => CardKind::Album,
             "playlist" => CardKind::Playlist,
@@ -1037,11 +1169,16 @@ impl App {
         ui.set_np_has_artist(track.first_artist_id().is_some());
         ui.set_np_has_album(track.album.is_some());
         ui.set_np_duration(track.duration.unwrap_or(0) as f32);
-        ui.set_np_position(0.0);
+        let resume = match &self.state.borrow().playback.resume {
+            Some((id, position)) if *id == track.id => *position,
+            _ => 0.0,
+        };
+        ui.set_np_position(resume as f32);
         ui.set_np_buffered(0.0);
         self.show_playing(true);
         ui.set_np_loading(true);
         ui.set_np_quality(SharedString::new());
+        ui.set_np_premium(false);
         ui.set_np_art(
             track
                 .thumb
@@ -1083,6 +1220,7 @@ impl App {
             );
         }
         self.refresh_queue();
+        self.save_session();
         self.update_presence();
         self.state.borrow_mut().lyrics_for = None;
         if ui.get_panel_open() && ui.get_panel_tab() == 1 {
@@ -1133,7 +1271,8 @@ impl App {
             let started = Instant::now();
             let visitor = api.visitor_data(false).await?;
             let cookie = premium.cookie.read().unwrap().clone();
-            let not_premium = premium.status.load(Ordering::Relaxed) == PREMIUM_NO;
+            let not_premium =
+                premium.status.load(Ordering::Relaxed) == PREMIUM_NO || premium.paused();
             if let Some(cookie) = cookie.filter(|_| want_premium && !not_premium) {
                 match premium_player(&premium).await {
                     Ok(player) => {
@@ -1141,6 +1280,7 @@ impl App {
                             Ok(premium::Outcome::Premium(stream)) => {
                                 premium.status.store(PREMIUM_YES, Ordering::Relaxed);
                                 premium.misses.store(0, Ordering::Relaxed);
+                                premium.errors.store(0, Ordering::Relaxed);
                                 log::info!(
                                     "{video_id}: Premium stream resolved in {} ms",
                                     started.elapsed().as_millis()
@@ -1157,9 +1297,12 @@ impl App {
                                     premium.status.store(PREMIUM_NO, Ordering::Relaxed);
                                 }
                             }
-                            Err(e) => premium::diag(format!(
-                                "{video_id}: Premium path failed, using the free stream: {e}"
-                            )),
+                            Err(e) => {
+                                premium::diag(format!(
+                                    "{video_id}: Premium path failed, using the free stream: {e}"
+                                ));
+                                premium.record_error();
+                            }
                         }
                     }
                     Err(e) => premium::diag(format!("could not prepare the player: {e}")),
@@ -1194,10 +1337,8 @@ impl App {
     }
 
     fn load_stream(self: &Rc<Self>, stream: ResolvedStream) {
-        let quality = match stream.bitrate_kbps {
-            Some(kbps) => format!("{} {}", stream.codec.to_uppercase(), kbps.round()),
-            None => stream.codec.to_uppercase(),
-        };
+        let quality = quality_label(&stream);
+        self.ui().set_np_premium(stream.premium);
         if let Some(duration) = stream.duration {
             let mut state = self.state.borrow_mut();
             if state.playback.duration <= 0.0 {
@@ -1214,6 +1355,7 @@ impl App {
             mime: stream.mime,
             headers: stream.headers,
             loudness_db: stream.loudness_db,
+            start_at: self.take_resume_position(),
         });
     }
 
@@ -1655,6 +1797,7 @@ impl App {
                 match result {
                     Ok(()) => {
                         app.state.borrow_mut().signed_in = true;
+                        app.state.borrow_mut().page_cache.clear();
                         app.load_library();
                         if let Err(e) = std::fs::write(settings::cookie_path(), &header) {
                             log::warn!("could not save the session for Premium audio: {e}");
@@ -1722,6 +1865,7 @@ impl App {
         let api = self.api.clone();
         self.spawn(async move { api.sign_out().await }, |app, ()| {
             app.state.borrow_mut().signed_in = false;
+            app.state.borrow_mut().page_cache.clear();
             app.library.set_vec(Vec::new());
             let _ = std::fs::remove_file(settings::cookie_path());
             *app.premium.cookie.write().unwrap() = None;
@@ -1744,10 +1888,15 @@ fn greeting() -> &'static str {
         windows_sys::Win32::System::SystemInformation::GetLocalTime(&mut time);
         time.wHour
     };
+    greeting_for(hour)
+}
+
+fn greeting_for(hour: u16) -> &'static str {
     match hour {
-        5..12 => "Good morning",
+        4..12 => "Good morning",
         12..18 => "Good afternoon",
-        _ => "Good evening",
+        18..23 => "Good evening",
+        _ => "Good night",
     }
 }
 
@@ -1778,6 +1927,33 @@ struct PremiumShared {
     status: AtomicU8,
     /// Songs in a row that offered no Premium formats.
     misses: AtomicU8,
+    /// Premium requests in a row that failed outright.
+    errors: AtomicU8,
+    /// When preparing the player last failed, to avoid refetching it per song.
+    load_failed: std::sync::Mutex<Option<Instant>>,
+    /// The Premium path is skipped until then, after repeated errors.
+    paused_until: std::sync::Mutex<Option<Instant>>,
+}
+
+/// Cool-off after the player fails to prepare or Premium keeps failing.
+const PREMIUM_BACKOFF: Duration = Duration::from_secs(10 * 60);
+const PREMIUM_MAX_ERRORS: u8 = 3;
+
+impl PremiumShared {
+    fn paused(&self) -> bool {
+        self.paused_until
+            .lock()
+            .unwrap()
+            .is_some_and(|until| Instant::now() < until)
+    }
+
+    fn record_error(&self) {
+        if self.errors.fetch_add(1, Ordering::Relaxed) + 1 >= PREMIUM_MAX_ERRORS {
+            self.errors.store(0, Ordering::Relaxed);
+            *self.paused_until.lock().unwrap() = Some(Instant::now() + PREMIUM_BACKOFF);
+            premium::diag("Premium requests keep failing; using free streams for 10 minutes");
+        }
+    }
 }
 
 /// `YTM_PREMIUM_DRYRUN=1` times the Premium path while playing free streams.
@@ -1790,7 +1966,67 @@ async fn premium_player(shared: &PremiumShared) -> Result<Arc<premium::Player>, 
     if let Some(player) = slot.as_ref() {
         return Ok(Arc::clone(player));
     }
-    let player = Arc::new(premium::load_player().await?);
-    *slot = Some(Arc::clone(&player));
-    Ok(player)
+    if shared
+        .load_failed
+        .lock()
+        .unwrap()
+        .is_some_and(|at| at.elapsed() < PREMIUM_BACKOFF)
+    {
+        return Err("waiting before preparing the player again".into());
+    }
+    match premium::load_player().await {
+        Ok(player) => {
+            let player = Arc::new(player);
+            *slot = Some(Arc::clone(&player));
+            Ok(player)
+        }
+        Err(e) => {
+            *shared.load_failed.lock().unwrap() = Some(Instant::now());
+            Err(e)
+        }
+    }
+}
+
+/// The player-bar badge text. Premium formats show YouTube's nominal 256
+/// kbps; others show the stream's bitrate.
+fn quality_label(stream: &ResolvedStream) -> String {
+    let codec = stream.codec.to_uppercase();
+    match (stream.itag, stream.bitrate_kbps) {
+        (774 | 141, _) => format!("{codec} 256"),
+        (_, Some(kbps)) => format!("{codec} {}", kbps.round()),
+        (_, None) => codec,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn greets_by_hour() {
+        assert_eq!(greeting_for(4), "Good morning");
+        assert_eq!(greeting_for(11), "Good morning");
+        assert_eq!(greeting_for(12), "Good afternoon");
+        assert_eq!(greeting_for(18), "Good evening");
+        assert_eq!(greeting_for(23), "Good night");
+        assert_eq!(greeting_for(2), "Good night");
+    }
+
+    #[test]
+    fn labels_premium_formats_with_their_nominal_bitrate() {
+        let stream = |itag, kbps| ResolvedStream {
+            url: String::new(),
+            size: 0,
+            mime: String::new(),
+            headers: Vec::new(),
+            codec: "Opus".into(),
+            bitrate_kbps: Some(kbps),
+            duration: None,
+            loudness_db: None,
+            premium: itag == 774,
+            itag,
+        };
+        assert_eq!(quality_label(&stream(774, 284.6)), "OPUS 256");
+        assert_eq!(quality_label(&stream(251, 146.4)), "OPUS 146");
+    }
 }

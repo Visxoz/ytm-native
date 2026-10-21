@@ -10,8 +10,6 @@ export global Layout {
     out property <length> chip-min-width: 190px;
     out property <length> chip-height: 96px;
     out property <length> chip-gap: 16px;
-    out property <length> tile-height: 56px;
-    out property <length> tile-gap: 8px;
     out property <length> header-height: 300px;
     out property <length> banner-height: 340px;
     out property <length> actions-height: 96px;
@@ -92,15 +90,11 @@ export component TrackRow inherits Rectangle {
                 if root.playing && !root.hot: Equalizer {
                     active: Api.is-playing;
                 }
-                if root.hot: Rectangle {
-                    Icon {
-                        path: root.playing && Api.is-playing ? Icons.pause : Icons.play;
-                        size: 18px;
-                    }
-                    TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { Api.play-track(root.section, root.index); }
-                    }
+                // No touch area of its own: one would steal the row's hover and
+                // make the row flicker between states. The row click plays.
+                if root.hot: Icon {
+                    path: root.playing && Api.is-playing ? Icons.pause : Icons.play;
+                    size: 18px;
                 }
                 if !root.playing && !root.hot: Text {
                     text: root.track.number;
@@ -244,7 +238,7 @@ export component Card {
     width: Layout.card-width;
     height: Layout.card-height(self.width);
     property <length> art-size: root.width - 2 * Layout.card-padding;
-    property <bool> hot: touch.has-hover || play.has-hover;
+    property <bool> hot: touch.has-hover || play-button.has-hover;
 
     ContextMenuArea {
         Menu {
@@ -279,19 +273,16 @@ export component Card {
             drop-shadow-offset-y: 6px;
             drop-shadow-color: #00000060;
         }
-        play := Rectangle {
-            property <bool> has-hover: play-button.has-hover;
+        Rectangle {
             x: Layout.card-padding + root.art-size - self.width - 8px;
             y: Layout.card-padding + root.art-size - self.height - (root.hot ? 8px : 0px);
             width: 48px;
             height: 48px;
             opacity: root.hot ? 1 : 0;
             animate y, opacity { duration: Theme.normal; easing: ease-out; }
-            play-button := TouchArea {
-                PlayButton {
-                    size: 48px;
-                    clicked => { Api.play-card(root.card.kind, root.card.id); }
-                }
+            play-button := PlayButton {
+                size: 48px;
+                clicked => { Api.play-card(root.card.kind, root.card.id); }
             }
         }
         VerticalLayout {
@@ -314,50 +305,6 @@ export component Card {
                 font-size: 13px;
                 color: Theme.text-secondary;
             }
-        }
-    }
-}
-
-/// A compact shortcut: artwork on the left, title on the right.
-component Tile inherits Rectangle {
-    in property <CardItem> card;
-    height: Layout.tile-height;
-    border-radius: 6px;
-    clip: true;
-    background: touch.has-hover ? #ffffff2a : #ffffff17;
-    animate background { duration: Theme.normal; }
-    touch := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { Api.navigate(root.card.kind, root.card.id, root.card.title); }
-    }
-    Art {
-        x: 0;
-        width: root.height;
-        height: root.height;
-        source: root.card.art;
-        radius: 0;
-        drop-shadow-blur: 8px;
-        drop-shadow-color: #00000080;
-    }
-    Text {
-        x: root.height + 12px;
-        width: root.width - root.height - (touch.has-hover ? 64px : 24px);
-        text: root.card.title;
-        overflow: elide;
-        font-size: 14px;
-        font-weight: 700;
-        color: Theme.text;
-        vertical-alignment: center;
-    }
-    Rectangle {
-        x: root.width - self.width - 8px;
-        width: 40px;
-        height: 40px;
-        opacity: touch.has-hover ? 1 : 0;
-        animate opacity { duration: Theme.normal; }
-        PlayButton {
-            size: 40px;
-            clicked => { Api.play-card(root.card.kind, root.card.id); }
         }
     }
 }
@@ -408,7 +355,6 @@ export component Carousel {
     property <length> offset;
     height: Layout.card-height(Layout.card-width);
 
-    hover := TouchArea { }
     Rectangle {
         x: -Layout.card-padding;
         width: root.width + 2 * Layout.card-padding;
@@ -432,8 +378,6 @@ export component Carousel {
         color: Theme.text;
         background: #000000b0;
         hover-background: #000000e0;
-        opacity: hover.has-hover || self.has-hover ? 1 : 0;
-        animate opacity { duration: Theme.normal; }
         clicked => { root.offset = max(0px, root.offset - max(1, floor(root.width / root.step)) * root.step); }
     }
     if root.offset < root.max-offset: IconButton {
@@ -445,8 +389,6 @@ export component Carousel {
         color: Theme.text;
         background: #000000b0;
         hover-background: #000000e0;
-        opacity: hover.has-hover || self.has-hover ? 1 : 0;
-        animate opacity { duration: Theme.normal; }
         clicked => { root.offset = min(root.max-offset, root.offset + max(1, floor(root.width / root.step)) * root.step); }
     }
 }
@@ -475,24 +417,13 @@ export component GenreGrid {
     }
 }
 
-export component TileGrid {
-    in property <[CardItem]> cards;
-    property <int> columns: root.width >= 880px ? 4 : 2;
-    property <length> cell: (root.width - (root.columns - 1) * Layout.tile-gap) / root.columns;
-    for card[i] in root.cards: Tile {
-        x: mod(i, root.columns) * (root.cell + Layout.tile-gap);
-        y: floor(i / root.columns) * (Layout.tile-height + Layout.tile-gap);
-        width: root.cell;
-        card: card;
-    }
-}
-
 /// The best search match, shown large.
 component TopResult inherits Rectangle {
     in property <CardItem> card;
+    property <bool> hot: touch.has-hover || top-play.has-hover;
     height: Layout.top-height - 36px;
     border-radius: 8px;
-    background: touch.has-hover ? Theme.highlight : #181818;
+    background: root.hot ? Theme.highlight : #181818;
     animate background { duration: Theme.normal; }
     touch := TouchArea {
         mouse-cursor: pointer;
@@ -531,12 +462,12 @@ component TopResult inherits Rectangle {
     }
     Rectangle {
         x: parent.width - self.width - 20px;
-        y: parent.height - self.height - (touch.has-hover ? 20px : 12px);
+        y: parent.height - self.height - (root.hot ? 20px : 12px);
         width: 52px;
         height: 52px;
-        opacity: touch.has-hover ? 1 : 0;
+        opacity: root.hot ? 1 : 0;
         animate y, opacity { duration: Theme.normal; easing: ease-out; }
-        PlayButton {
+        top-play := PlayButton {
             size: 52px;
             clicked => { Api.play-card(root.card.kind, root.card.id); }
         }
@@ -683,10 +614,6 @@ export global Rows {
         if row.kind == RowKind.top {
             return Layout.top-height;
         }
-        if row.kind == RowKind.tiles {
-            let columns = inner >= 880px ? 4 : 2;
-            return ceil(row.cards.length / columns) * (Layout.tile-height + Layout.tile-gap) + 16px;
-        }
         if row.kind == RowKind.grid {
             let columns = max(1, floor((inner + Layout.card-gap) / (Layout.card-width + Layout.card-gap)));
             let cell = (inner + 2 * Layout.card-padding - (columns - 1) * Layout.card-gap) / columns;
@@ -765,13 +692,6 @@ export component PageRow {
         y: 0;
         width: root.inner;
         height: root.height;
-        cards: root.data.cards;
-    }
-    if root.data.kind == RowKind.tiles: TileGrid {
-        x: Theme.page-padding;
-        y: 8px;
-        width: root.inner;
-        height: root.height - 8px;
         cards: root.data.cards;
     }
     if root.data.kind == RowKind.top: TopResult {

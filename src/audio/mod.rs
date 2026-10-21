@@ -33,6 +33,8 @@ pub struct StreamSpec {
     pub headers: Vec<(String, String)>,
     /// Integrated loudness YouTube measured, used to even out volume.
     pub loudness_db: Option<f32>,
+    /// Where to start, in seconds, when resuming a track.
+    pub start_at: f64,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -285,7 +287,7 @@ impl Engine {
             .store(loudness_gain.to_bits(), Ordering::Relaxed);
         self.shared.update_gain();
 
-        let decoder = match Decoder::open(download.reader(), &spec.mime) {
+        let mut decoder = match Decoder::open(download.reader(), &spec.mime) {
             Ok(decoder) => decoder,
             Err(e) => {
                 // A newer load cancelled this one; stay quiet.
@@ -306,6 +308,12 @@ impl Engine {
             decoder.rate,
             decoder.channels
         );
+        if spec.start_at > 0.0 {
+            match decoder.seek(spec.start_at) {
+                Ok(reached) => self.shared.output.lock().unwrap().reset(reached),
+                Err(e) => log::warn!("could not resume at {:.0} s: {e}", spec.start_at),
+            }
+        }
         self.track = Some(Track {
             decoder,
             download,
@@ -371,8 +379,15 @@ impl Engine {
             return;
         };
         if track.finished && self.shared.output.lock().unwrap().samples.is_empty() {
+            // A stream that ends without a sound is broken, not finished: as
+            // "ended" it would skip through the queue fetching every track.
+            let event = if track.started {
+                PlayerEvent::Ended
+            } else {
+                PlayerEvent::Error("the stream ended before playing".into())
+            };
             self.track = None;
-            (self.on_event)(PlayerEvent::Ended);
+            (self.on_event)(event);
         }
     }
 
