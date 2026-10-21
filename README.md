@@ -1,89 +1,196 @@
 <div align="center">
 
-<img src="app-icon.png" width="96" alt="ytm-native icon">
+<img src="docs/banner.svg" width="100%" alt="ytm-native: YouTube Music, as a real Windows app">
 
-# ytm-native
+<br>
 
-**A fully native YouTube Music client for Windows, written in Rust.**<br>
-No browser engine runs the app: the UI, the player and the audio pipeline are all native.
+**Fast, light and fully native: no browser tab, no Electron, just music.**
 
-![Rust](https://img.shields.io/badge/Rust-2024-B7410E?logo=rust&logoColor=white)
-![Slint](https://img.shields.io/badge/UI-Slint-2379F4)
-![Windows](https://img.shields.io/badge/platform-Windows-0078D4)
+<br>
 
-<img src="docs/screenshot.png" width="820" alt="ytm-native playing a song with the queue open">
+[![Latest release](https://img.shields.io/github/v/release/Visxoz/ytm-native?style=for-the-badge&label=release&color=FF0033)](https://github.com/Visxoz/ytm-native/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/Visxoz/ytm-native/total?style=for-the-badge&color=FF0033)](https://github.com/Visxoz/ytm-native/releases)
+[![Windows](https://img.shields.io/badge/platform-Windows-0078D4?style=for-the-badge&logo=windows11&logoColor=white)](#install)
+[![Built with Rust](https://img.shields.io/badge/Built%20with-Rust-B7410E?style=for-the-badge&logo=rust&logoColor=white)](#under-the-hood)
+
+<br>
+
+<a href="https://github.com/Visxoz/ytm-native/releases/latest">
+  <img src="https://img.shields.io/badge/Download%20for%20Windows-FF0033?style=for-the-badge&logo=windows11&logoColor=white" alt="Download for Windows" height="44">
+</a>
+
+<br><br>
+
+<img src="docs/screenshot.png" width="900" alt="ytm-native showing an artist page, with the queue open and a song playing">
 
 </div>
 
-## Why
+<br>
 
-[ytm-lite](https://github.com/Visxoz/ytm-lite) is a Tauri window around music.youtube.com. ytm-native goes the other way: it rebuilds the client itself, talking to YouTube's unofficial API, with its own interface.
+## Why ytm-native
 
-## What it does
+<table>
+<tr>
+<td width="50%" valign="top">
 
-- **A Spotify-style interface in YouTube Music red.** Rounded panels, a collapsible Your Library sidebar with your playlists, page headers tinted from the artwork, a sticky title bar, quick picks on Home, and animated hover, press, panel and page transitions.
-- **Browse and search.** Home (trending, new releases, top artists, charts, moods), Explore (moods, genres, new albums and videos), search with suggestions, and artist, album, playlist and genre pages.
-- **Plays like YouTube Music.** Playing a song from search starts a radio after it, and autoplay keeps going when the queue ends. Up Next supports play next, add to queue, remove and clear; shuffle reorders what's coming and restores the order when turned off; repeat all and repeat one.
-- **Lyrics** in the side panel when YouTube has them.
-- **Native audio.** Streams are downloaded in ranges, demuxed and decoded in-process and played through WASAPI. It always picks the best stream YouTube offers: Opus at about 160 kbps, or 256 kbps with YouTube Premium. The next track's stream is resolved ahead of time, and YouTube's loudness normalisation is applied.
-- **Windows integration.** Media keys and the Windows media overlay, a single instance, and the window's size and position are remembered.
-- **Discord Rich Presence**, ported from ytm-lite.
-- **Your library.** Sign in on Google's own page to see your playlists, albums, artists and listening history.
+### Light as a feather
+A single portable exe that starts in a moment and stays around 160 MB while you browse. No runtime to install, nothing running in the background.
 
-Keyboard: <kbd>Space</kbd> play/pause, <kbd>Ctrl</kbd>+<kbd>K</kbd> search, <kbd>Ctrl</kbd>+<kbd>B</kbd> sidebar, <kbd>Ctrl</kbd>+<kbd>←</kbd>/<kbd>→</kbd> previous/next, <kbd>Alt</kbd>+<kbd>←</kbd> back. Right-click a song for more actions.
+</td>
+<td width="50%" valign="top">
 
-## How it works
+### Sounds better
+Always the best stream YouTube offers, and **256 kbps Opus** with YouTube Premium. Volume levels out between songs, like on YouTube Music.
 
-| Part | Crate or tool |
-| --- | --- |
-| YouTube Music data (search, pages, radio, lyrics, library) | [`rustypipe`](https://codeberg.org/ThetaDev/rustypipe) |
-| Stream URLs | YouTube's player endpoint, called directly (`src/streams.rs`) |
-| Demuxing and AAC | [`symphonia`](https://github.com/pdeljanov/Symphonia) |
-| Opus | libopus 1.3.1, as Rust ([`unsafe-libopus`](https://crates.io/crates/unsafe-libopus)) |
-| Audio output | [`cpal`](https://github.com/RustAudio/cpal) (WASAPI) |
-| UI | [Slint](https://slint.dev) with Skia drawing on the GPU (Direct3D 12) |
-| HTTPS | Windows SChannel through `reqwest`, over HTTP/2 |
-| Google sign-in | WebView2 through [`wry`](https://github.com/tauri-apps/wry), only while signing in |
-| Media keys | [`souvlaki`](https://github.com/Sinono3/souvlaki) |
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
 
-Most YouTube clients get stream URLs scrambled by YouTube's player JavaScript. The visionOS client gets plain ones, so the app asks as that client and needs no JavaScript engine or external tool. When YouTube changes this, `src/streams.rs` is the one place to update.
+### Feels at home
+A clean dark interface with headers tinted from the artwork, a collapsible library, smooth animations, and lyrics and the queue a click away.
 
-## Footprint
+</td>
+<td width="50%" valign="top">
 
-Measured on the release build while playing Opus:
+### Made for Windows
+Media keys, the Windows media overlay, Discord status, and a window that remembers where you left it, down to the song and position.
 
-| | |
-| --- | --- |
-| CPU | about 1% of one core |
-| Memory | about 100 MB in Task Manager, 165 MB working set |
-| Download | one 22 MB exe, no runtime to install |
+</td>
+</tr>
+<tr>
+<td width="50%" valign="top">
 
-Skia draws on the GPU through Direct3D 12, so scrolling takes about a quarter of one core rather than all of it; the graphics driver accounts for about 50 MB of the memory. Without a usable GPU, Skia draws into a CPU buffer instead. Animations run only while something changes; the equaliser steps at 8 frames a second rather than repainting continuously. libopus decodes about 700 times faster than real time.
+### Plays like YouTube Music
+Search starts a radio after the song you pick, autoplay keeps going, and shuffle, repeat, play next and the queue all work as you'd expect.
 
-## Build
+</td>
+<td width="50%" valign="top">
 
-You need Rust (the MSVC toolchain).
+### Your library, safely
+Sign in on Google's own page to get your playlists, albums, artists and Liked music. Your sign-in is stored encrypted, for your Windows account only.
 
-```sh
-cargo run             # debug build with logging
-cargo build --release # target/release/ytm-native.exe
-cargo test
-```
+</td>
+</tr>
+</table>
 
-Settings, the rustypipe cache and your sign-in live in `%APPDATA%\ytm-native`; the sign-in is encrypted for your Windows account.
+## Take a look
 
-Three crates are built from `vendor/` with a patch from `patches/` applied:
+<table>
+<tr>
+<td width="62%" align="center" valign="top">
+<img src="docs/artist.png" alt="An artist page with its header tinted from the artwork">
+<br><sub><b>Pages that feel alive.</b> Headers take their colour from the artwork.</sub>
+</td>
+<td width="38%" align="center" valign="top">
+<img src="docs/queue.png" alt="The queue panel, with the playing song highlighted">
+<br><sub><b>Up next and lyrics</b>, one click away.</sub>
+</td>
+</tr>
+<tr>
+<td colspan="2" align="center">
+<img src="docs/player.png" alt="The player bar, showing an Opus stream">
+<br><sub><b>Always the best stream</b>, with the codec and bitrate right there.</sub>
+</td>
+</tr>
+</table>
 
-- `i-slint-common` memory-maps the fallback fonts in `SLINT_FONT_PATH` instead of reading them into memory, about 18 MB.
-- `i-slint-renderer-skia`, Slint's Skia renderer, reads fallback fonts for CJK and emoji from their memory-mapped files rather than copying them, which saves 40 to 70 MB.
-- `rustypipe` opens playlists the signed-in user owns, whose page YouTube sends with an editable header, and returns an error instead of crashing when YouTube refuses a visitor ID.
+## Install
 
-The folder is not checked in: run `scripts/vendor-patched.ps1` once after cloning, and again after updating Slint or rustypipe (pinned with `=` in `Cargo.toml`) to vendor the matching versions; the build fails until you do.
+1. Download `ytm-native_<version>_x64-portable.exe` from the [latest release](https://github.com/Visxoz/ytm-native/releases/latest).
+2. Put it wherever you like and run it. There's nothing to install.
+3. Optionally, choose **Sign in** and then **Sign in with Google** to bring your library over.
+
+> [!NOTE]
+> The exe isn't code-signed yet, so Windows SmartScreen may say it "protected your PC". Choose **More info**, then **Run anyway**.
+
+> [!TIP]
+> Signing in uses Microsoft Edge WebView2, which comes with Windows 11 and most Windows 10 PCs. If it's missing, you can paste cookies instead; see [Signing in](#signing-in).
+
+## Shortcuts
+
+| Keys | Action |
+| :-- | :-- |
+| <kbd>Space</kbd> | Play or pause |
+| <kbd>Ctrl</kbd> + <kbd>K</kbd> | Search |
+| <kbd>Ctrl</kbd> + <kbd>B</kbd> | Show or hide the library |
+| <kbd>Ctrl</kbd> + <kbd>←</kbd> / <kbd>→</kbd> | Previous or next song |
+| <kbd>Alt</kbd> + <kbd>←</kbd> | Back |
+| Right-click a song | Play next, add to queue, radio, go to artist or album |
 
 ## Signing in
 
-Choose **Sign in**, then **Sign in with Google**, and sign in on Google's page as usual. The window closes by itself once you're signed in. It runs in private mode, so Google's cookies stay in memory; the app keeps only the session cookie, encrypted.
+Choose **Sign in**, then **Sign in with Google**, and sign in on Google's page as usual. The window closes by itself once you're in.
 
-You can paste cookies instead: open music.youtube.com in a private browser window and sign in, copy either a cookies.txt export or the `Cookie` request header from the developer tools (Network tab), paste it under **Paste cookies instead**, and close the private window. YouTube rotates the cookies of sessions that stay open.
+<details>
+<summary><b>Prefer pasting cookies?</b></summary>
+<br>
 
-This is an unofficial client using undocumented APIs, against YouTube's terms of service. Google could ask you to confirm you're not a bot or revoke the session, and could in principle restrict the account; a dedicated account is the safer choice.
+Open music.youtube.com in a private browser window and sign in. Copy either a cookies.txt export or the `Cookie` request header from the developer tools (Network tab), paste it under **Paste cookies instead**, and close the private window. YouTube rotates the cookies of sessions that stay open.
+
+</details>
+
+> [!WARNING]
+> ytm-native is an unofficial client. It uses YouTube's undocumented API, which is against YouTube's terms of service. Google could ask you to confirm you're not a bot or sign the session out, and could in principle restrict the account. A separate account is the safest choice.
+
+<br>
+
+## Under the hood
+
+<details>
+<summary><b>How it works</b></summary>
+<br>
+
+The interface, the player and the audio pipeline are all native Rust. A browser engine only appears while you sign in, to show Google's page.
+
+| Part | Built on |
+| :-- | :-- |
+| YouTube Music data: search, pages, radio, lyrics, library | [`rustypipe`](https://codeberg.org/ThetaDev/rustypipe) |
+| Stream URLs | YouTube's player endpoint, called directly (`src/streams.rs`) |
+| Demuxing and AAC | [`symphonia`](https://github.com/pdeljanov/Symphonia) |
+| Opus | libopus 1.3.1, as Rust ([`unsafe-libopus`](https://crates.io/crates/unsafe-libopus)) |
+| Audio output | [`cpal`](https://github.com/RustAudio/cpal), through WASAPI |
+| Interface | [Slint](https://slint.dev), drawn by Skia on the GPU through Direct3D 12 |
+| Networking | `reqwest` over Windows SChannel and HTTP/2 |
+| Google sign-in | WebView2 through [`wry`](https://github.com/tauri-apps/wry), only while signing in |
+| Media keys | [`souvlaki`](https://github.com/Sinono3/souvlaki) |
+
+Most YouTube clients get stream URLs scrambled by YouTube's player JavaScript. The visionOS client gets plain ones, so the app asks as that client and needs no JavaScript engine. With Premium, the app unscrambles the web player's URLs itself, in a short-lived QuickJS context with a cut-down copy of the player. When YouTube changes this, `src/streams.rs` and `src/premium` are the places to update.
+
+Streams download in ranges and are decoded in the app; the next song's stream is looked up ahead of time. Skia draws on the GPU, so scrolling costs little CPU, and animations only run while something changes.
+
+</details>
+
+<details>
+<summary><b>Building from source</b></summary>
+<br>
+
+You need Rust with the MSVC toolchain. Three crates are built from `vendor/` with a patch from `patches/` applied, so vendor them once after cloning, and again after updating Slint or rustypipe:
+
+```powershell
+./scripts/vendor-patched.ps1
+```
+
+```powershell
+cargo run              # debug build with logging
+cargo build --release  # target/release/ytm-native.exe
+cargo test
+```
+
+The patches:
+
+- `i-slint-common` memory-maps the fallback fonts instead of reading them into memory, which saves about 18 MB.
+- `i-slint-renderer-skia` draws fallback fonts for CJK and emoji from those mappings instead of private copies.
+- `rustypipe` opens playlists the signed-in user owns, and returns an error instead of crashing when YouTube refuses a visitor ID.
+
+Settings, caches and your sign-in live in `%APPDATA%\ytm-native`; the sign-in is encrypted with Windows' DPAPI. `YTM_LOG=info` turns on logging in release builds.
+
+</details>
+
+<br>
+
+<div align="center">
+
+<sub>Not affiliated with, endorsed by or connected to YouTube or Google. YouTube Music is a trademark of Google LLC.</sub>
+
+</div>
