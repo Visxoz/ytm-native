@@ -71,7 +71,12 @@ cargo test
 
 Settings, the rustypipe cache and your sign-in live in `%APPDATA%\ytm-native`.
 
-`vendor/i-slint-renderer-skia` is Slint's Skia renderer with `patches/slint-renderer-skia-fonts.patch` applied, so fallback fonts for CJK and emoji are read from their memory-mapped files rather than copied, which saves 40 to 70 MB. The folder is not checked in: run `scripts/update-slint-patch.ps1` once after cloning, and again after updating Slint to vendor the matching version; the build fails until you do.
+Two crates are built from `vendor/` with a patch from `patches/` applied:
+
+- `i-slint-renderer-skia`, Slint's Skia renderer, reads fallback fonts for CJK and emoji from their memory-mapped files rather than copying them, which saves 40 to 70 MB.
+- `rustypipe` opens playlists the signed-in user owns, whose page YouTube sends with an editable header, and returns an error instead of crashing when YouTube refuses a visitor ID.
+
+The folder is not checked in: run `scripts/vendor-patched.ps1` once after cloning, and again after updating Slint or rustypipe (pinned with `=` in `Cargo.toml`) to vendor the matching versions; the build fails until you do.
 
 ## Signing in
 

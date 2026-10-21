@@ -17,7 +17,7 @@ jobs:
 
       - name: Compare tag with Cargo.toml
         run: |
-          # Read directly: cargo would need the vendored Slint renderer first.
+          # Read directly: cargo would need the vendored crates first.
           version=$(grep -m 1 '^version = ' Cargo.toml | cut -d '"' -f 2)
           if [ "native-v$version" != "$GITHUB_REF_NAME" ]; then
             echo "::error::Tag $GITHUB_REF_NAME does not match Cargo.toml version $version"

@@ -23,7 +23,7 @@ oxc_span = "0.155"
 raw-window-handle = "0.6.2"
 reqwest = { version = "0.12", default-features = false, features = ["default-tls", "blocking"] }
 rquickjs = "0.9"
-rustypipe = { version = "0.11.4", features = ["userdata"] }
+rustypipe = { version = "=0.11.4", features = ["userdata"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0"
 sha1 = "0.10"
@@ -62,7 +62,9 @@ opt-level = 2
 [profile.dev.package.unsafe-libopus]
 overflow-checks = false
 
-# Slint's Skia renderer with fonts drawn from their memory-mapped files instead
-# of private copies; see vendor/i-slint-renderer-skia/font_cache.rs.
+# Crates with patches/<crate>.patch applied; scripts/vendor-patched.ps1 makes
+# them. Slint's Skia renderer draws fonts from their memory-mapped files instead
+# of private copies; rustypipe opens the signed-in user's own playlists.
 [patch.crates-io]
 i-slint-renderer-skia = { path = "vendor/i-slint-renderer-skia" }
+rustypipe = { path = "vendor/rustypipe" }

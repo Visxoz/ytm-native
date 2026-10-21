@@ -1,10 +1,10 @@
 //! YouTube Music data through rustypipe, shaped into the pages the UI shows.
 
 use rustypipe::{
-    client::{RustyPipe, RustyPipeQuery},
+    client::{ClientType, RustyPipe, RustyPipeQuery},
     model::{
-        AlbumItem, AlbumType, ArtistId, ArtistItem, MusicItem, MusicPlaylistItem, Thumbnail,
-        TrackItem, paginator::Paginator, richtext::ToPlaintext,
+        AlbumItem, AlbumType, ArtistId, ArtistItem, MusicItem, MusicPlaylist, MusicPlaylistItem,
+        Thumbnail, TrackItem, paginator::Paginator, richtext::ToPlaintext,
     },
 };
 
@@ -380,6 +380,36 @@ impl Api {
         self.rp.query()
     }
 
+    /// A query that sends the sign-in cookie when there is one: private
+    /// playlists, Liked music and radios made from them exist only for their
+    /// owner.
+    fn user_q(&self) -> RustyPipeQuery {
+        let q = self.q();
+        if q.auth_enabled(ClientType::DesktopMusic) {
+            q.authenticated()
+        } else {
+            q
+        }
+    }
+
+    /// A playlist with up to `PLAYLIST_LIMIT` tracks, as its owner sees it.
+    /// Should the cookie have gone stale, public playlists still open signed
+    /// out.
+    async fn fetch_playlist(&self, id: &str) -> Result<MusicPlaylist> {
+        let fetch = |q: RustyPipeQuery| async move {
+            let mut playlist = q.music_playlist(id).await?;
+            let _ = playlist.tracks.extend_limit(&q, PLAYLIST_LIMIT).await;
+            Ok::<_, rustypipe::error::Error>(playlist)
+        };
+        let q = self.user_q();
+        let signed_in = q.auth_enabled(ClientType::DesktopMusic);
+        match fetch(q).await {
+            Ok(playlist) => Ok(playlist),
+            Err(e) if signed_in => fetch(self.q()).await.map_err(|_| err(e)),
+            Err(e) => Err(err(e)),
+        }
+    }
+
     pub async fn page(&self, route: &Route, signed_in: bool) -> Result<Page> {
         match route {
             Route::Home => self.home(signed_in).await,
@@ -581,6 +611,9 @@ impl Api {
                 .items
                 .into_iter()
                 .filter(|p| liked.as_ref().is_ok_and(|l| l.id != p.id) || liked.is_err())
+                // Episodes for Later is a podcast page, which does not open
+                // as a playlist.
+                .filter(|p| p.id != "SE")
                 .map(playlist_card),
         );
         Ok(cards)
@@ -714,9 +747,7 @@ impl Api {
     }
 
     async fn playlist(&self, id: &str) -> Result<Page> {
-        let q = self.q();
-        let mut playlist = q.music_playlist(id).await.map_err(err)?;
-        let _ = playlist.tracks.extend_limit(&q, PLAYLIST_LIMIT).await;
+        let playlist = self.fetch_playlist(id).await?;
         let tracks = tracks(playlist.tracks.items);
 
         let mut meta = Vec::new();
@@ -852,14 +883,12 @@ impl Api {
     }
 
     pub async fn playlist_tracks(&self, id: &str) -> Result<Vec<Track>> {
-        let q = self.q();
-        let mut playlist = q.music_playlist(id).await.map_err(err)?;
-        let _ = playlist.tracks.extend_limit(&q, PLAYLIST_LIMIT).await;
+        let playlist = self.fetch_playlist(id).await?;
         Ok(tracks(playlist.tracks.items))
     }
 
     pub async fn radio(&self, radio_id: &str) -> Result<Vec<Track>> {
-        let items: Paginator<TrackItem> = self.q().music_radio(radio_id).await.map_err(err)?;
+        let items: Paginator<TrackItem> = self.user_q().music_radio(radio_id).await.map_err(err)?;
         Ok(tracks(items.items))
     }
 

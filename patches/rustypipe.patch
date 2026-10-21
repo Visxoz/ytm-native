@@ -1,0 +1,66 @@
+diff --git a/src/client/response/music_playlist.rs b/src/client/response/music_playlist.rs
+index 84202f0..63f2fdb 100644
+--- a/src/client/response/music_playlist.rs
++++ b/src/client/response/music_playlist.rs
+@@ -45,12 +45,46 @@ pub(crate) struct PlSectionList {
+ }
+ 
+ #[derive(Debug, Deserialize)]
+-#[serde(rename_all = "camelCase")]
++#[serde(from = "HeaderWrap")]
+ pub(crate) struct Header {
+-    #[serde(alias = "musicResponsiveHeaderRenderer")]
+     pub music_detail_header_renderer: HeaderRenderer,
+ }
+ 
++/// Playlists owned by the signed-in user wrap their header in an editable one
++#[derive(Debug, Deserialize)]
++#[serde(untagged)]
++enum HeaderWrap {
++    #[serde(rename_all = "camelCase")]
++    Plain {
++        #[serde(alias = "musicResponsiveHeaderRenderer")]
++        music_detail_header_renderer: HeaderRenderer,
++    },
++    #[serde(rename_all = "camelCase")]
++    Editable {
++        music_editable_playlist_detail_header_renderer: EditableHeader,
++    },
++}
++
++#[derive(Debug, Deserialize)]
++struct EditableHeader {
++    header: Box<HeaderWrap>,
++}
++
++impl From<HeaderWrap> for Header {
++    fn from(wrap: HeaderWrap) -> Self {
++        match wrap {
++            HeaderWrap::Plain {
++                music_detail_header_renderer,
++            } => Self {
++                music_detail_header_renderer,
++            },
++            HeaderWrap::Editable {
++                music_editable_playlist_detail_header_renderer,
++            } => (*music_editable_playlist_detail_header_renderer.header).into(),
++        }
++    }
++}
++
+ #[serde_as]
+ #[derive(Debug, Deserialize)]
+ #[serde(rename_all = "camelCase")]
+diff --git a/src/util/visitor_data.rs b/src/util/visitor_data.rs
+index 8bc64c7..2de2cfe 100644
+--- a/src/util/visitor_data.rs
++++ b/src/util/visitor_data.rs
+@@ -110,7 +110,7 @@ impl VisitorDataCache {
+ 
+     /// Fetch a new visitor data ID and store it in the cache
+     pub async fn new_visitor_data(&self) -> Result<String, Error> {
+-        let vd = self.fetch_visitor_data().await.unwrap();
++        let vd = self.fetch_visitor_data().await?;
+ 
+         self.inner
+             .req_counter
