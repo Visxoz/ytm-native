@@ -382,8 +382,10 @@ pub struct Api {
 
 impl Api {
     pub fn new() -> Result<Self> {
+        let dir = crate::settings::data_dir();
         let rp = RustyPipe::builder()
-            .storage_dir(crate::settings::data_dir())
+            .storage(Box::new(crate::secret::EncryptedStorage::new(&dir)))
+            .storage_dir(dir)
             .no_botguard()
             .build()
             .map_err(err)?;

@@ -11,6 +11,7 @@ mod media_controls;
 mod premium;
 mod presence;
 mod queue;
+mod secret;
 mod settings;
 mod single_instance;
 mod streams;

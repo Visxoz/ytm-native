@@ -216,11 +216,7 @@ impl App {
             eq_timer: Timer::default(),
             premium: Arc::new(PremiumShared {
                 player: tokio::sync::Mutex::new(None),
-                cookie: std::sync::RwLock::new(
-                    std::fs::read_to_string(settings::cookie_path())
-                        .ok()
-                        .filter(|c| !c.trim().is_empty()),
-                ),
+                cookie: std::sync::RwLock::new(settings::load_cookie()),
                 status: AtomicU8::new(PREMIUM_UNKNOWN),
                 misses: AtomicU8::new(0),
                 errors: AtomicU8::new(0),
@@ -1906,9 +1902,7 @@ impl App {
                         app.state.borrow_mut().signed_in = true;
                         app.state.borrow_mut().page_cache.clear();
                         app.load_library();
-                        if let Err(e) = std::fs::write(settings::cookie_path(), &header) {
-                            log::warn!("could not save the session for Premium audio: {e}");
-                        }
+                        settings::save_cookie(&header);
                         *app.premium.cookie.write().unwrap() = Some(header);
                         app.premium.status.store(PREMIUM_UNKNOWN, Ordering::Relaxed);
                         app.premium.misses.store(0, Ordering::Relaxed);
@@ -1990,7 +1984,7 @@ impl App {
             app.state.borrow_mut().signed_in = false;
             app.state.borrow_mut().page_cache.clear();
             app.library.set_vec(Vec::new());
-            let _ = std::fs::remove_file(settings::cookie_path());
+            settings::remove_cookie();
             *app.premium.cookie.write().unwrap() = None;
             app.premium.status.store(PREMIUM_UNKNOWN, Ordering::Relaxed);
             app.premium.misses.store(0, Ordering::Relaxed);
