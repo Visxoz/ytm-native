@@ -63,8 +63,10 @@ opt-level = 2
 overflow-checks = false
 
 # Crates with patches/<crate>.patch applied; scripts/vendor-patched.ps1 makes
-# them. Slint's Skia renderer draws fonts from their memory-mapped files instead
-# of private copies; rustypipe opens the signed-in user's own playlists.
+# them. Slint maps the fallback fonts instead of reading them into memory, and
+# its Skia renderer draws fonts from those mappings instead of private copies;
+# rustypipe opens the signed-in user's own playlists.
 [patch.crates-io]
+i-slint-common = { path = "vendor/i-slint-common" }
 i-slint-renderer-skia = { path = "vendor/i-slint-renderer-skia" }
 rustypipe = { path = "vendor/rustypipe" }

@@ -6,18 +6,27 @@ $root = Split-Path $PSScriptRoot -Parent
 $lock = Get-Content (Join-Path $root 'Cargo.lock') -Raw
 $manifest = Get-Content (Join-Path $root 'Cargo.toml') -Raw
 
+$slintVersion = {
+    if ($lock -notmatch 'name = "i-slint-core"\r?\nversion = "([^"]+)"') {
+        throw 'i-slint-core is not in Cargo.lock'
+    }
+    $Matches[1]
+}
+
 $crates = @(
+    @{
+        # The fonts in SLINT_FONT_PATH memory-mapped instead of read whole
+        # into the heap. Pinned to the same version as i-slint-core.
+        Name    = 'i-slint-common'
+        Version = $slintVersion
+        Hint    = 'Slint changed how it loads SLINT_FONT_PATH. Check whether it still reads the files into memory, and update or drop the patch.'
+    },
     @{
         # Slint's fallback fonts read from their memory-mapped files instead of
         # copied. The renderer is pinned to the same version as i-slint-core,
         # which always comes from crates.io, so read the version from there.
         Name    = 'i-slint-renderer-skia'
-        Version = {
-            if ($lock -notmatch 'name = "i-slint-core"\r?\nversion = "([^"]+)"') {
-                throw 'i-slint-core is not in Cargo.lock'
-            }
-            $Matches[1]
-        }
+        Version = $slintVersion
         Hint    = 'Slint changed the renderer. Check whether it still copies font data, and update or drop the patch.'
     },
     @{
