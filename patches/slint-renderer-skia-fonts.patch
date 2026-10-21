@@ -1,0 +1,57 @@
+diff --git a/font_cache.rs b/font_cache.rs
+index 640a0cd..d4705b0 100644
+--- a/font_cache.rs
++++ b/font_cache.rs
+@@ -5,6 +5,7 @@ use clru::CLruCache;
+ use i_slint_common::sharedfontique::HashedBlob;
+ use i_slint_core::textlayout::sharedparley::{fontique, parley};
+ use std::cell::RefCell;
++use std::collections::HashSet;
+ use std::collections::hash_map::DefaultHasher;
+ use std::hash::{Hash, Hasher};
+ use std::num::NonZeroUsize;
+@@ -17,11 +18,17 @@ pub struct FontCache {
+     // preventing eviction from fontique's shared cache (see commit 30a03cf).
+     // The u64 is a hash of variation settings (0 for base typefaces).
+     fonts: CLruCache<(HashedBlob, u32, u64), Option<skia_safe::Typeface>>,
++    /// Blobs leaked so Skia can borrow their bytes; see `load_typeface_internal`.
++    pinned: HashSet<u64>,
+ }
+ 
+ impl Default for FontCache {
+     fn default() -> Self {
+-        Self { font_mgr: skia_safe::FontMgr::new(), fonts: CLruCache::new(FONT_CACHE_CAPACITY) }
++        Self {
++            font_mgr: skia_safe::FontMgr::new(),
++            fonts: CLruCache::new(FONT_CACHE_CAPACITY),
++            pinned: HashSet::new(),
++        }
+     }
+ }
+ 
+@@ -76,11 +83,20 @@ impl FontCache {
+         typeface
+     }
+ 
+-    fn load_typeface_internal(&self, font: &parley::FontData) -> Option<skia_safe::Typeface> {
+-        let typeface = self.font_mgr.new_from_data(
+-            skia_safe::Data::new_copy(font.data.as_ref()),
+-            if font.index > 0 { Some(font.index as _) } else { None },
+-        );
++    fn load_typeface_internal(&mut self, font: &parley::FontData) -> Option<skia_safe::Typeface> {
++        // Patched for ytm-native: system fonts arrive memory-mapped, and a
++        // copy of each made the process privately hold every fallback font
++        // it touched, some 10 to 35 MB apiece for CJK and emoji. The blob is
++        // kept alive for the life of the process instead, so Skia can read
++        // the mapping directly; typefaces may outlive this cache's entries.
++        if self.pinned.insert(font.data.id()) {
++            std::mem::forget(font.data.clone());
++        }
++        // SAFETY: the blob was leaked above, so its bytes are never freed.
++        let data = unsafe { skia_safe::Data::new_bytes(font.data.as_ref()) };
++        let typeface = self
++            .font_mgr
++            .new_from_data(data, if font.index > 0 { Some(font.index as _) } else { None });
+ 
+         // Due to  https://issues.skia.org/issues/310510989, fonts from true type collections
+         // with an index > 0 fail to load on macOS. As a workaround, we manually extract the font from the

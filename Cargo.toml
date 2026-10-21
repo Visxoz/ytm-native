@@ -61,3 +61,8 @@ opt-level = 2
 # The translated libopus relies on wrapping arithmetic, as C does.
 [profile.dev.package.unsafe-libopus]
 overflow-checks = false
+
+# Slint's Skia renderer with fonts drawn from their memory-mapped files instead
+# of private copies; see vendor/i-slint-renderer-skia/font_cache.rs.
+[patch.crates-io]
+i-slint-renderer-skia = { path = "vendor/i-slint-renderer-skia" }

@@ -1,0 +1,2 @@
+# Applied to crates.io sources with LF endings; keep it byte for byte.
+*.patch -text

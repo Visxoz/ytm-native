@@ -71,6 +71,8 @@ cargo test
 
 Settings, the rustypipe cache and your sign-in live in `%APPDATA%\ytm-native`.
 
+`vendor/i-slint-renderer-skia` is Slint's Skia renderer with `patches/slint-renderer-skia-fonts.patch` applied, so fallback fonts for CJK and emoji are read from their memory-mapped files rather than copied, which saves 40 to 70 MB. The folder is not checked in: run `scripts/update-slint-patch.ps1` once after cloning, and again after updating Slint to vendor the matching version; the build fails until you do.
+
 ## Signing in
 
 Open music.youtube.com in a private browser window and sign in. Then copy either a cookies.txt export or the `Cookie` request header from the developer tools (Network tab), paste it into **Sign in**, and close the private window. YouTube rotates the cookies of sessions that stay open.
