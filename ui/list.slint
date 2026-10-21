@@ -1,0 +1,112 @@
+/// A stand-in for the std `ListView` whose scrolling always rests on whole
+/// physical pixels. Skia snaps text to the pixel grid but draws shapes at
+/// fractional positions, so the std wheel animation made text jitter against
+/// the rows behind it. Slint still creates rows lazily for a component named
+/// `ListView` with these `content-*` and `visible-*` properties.
+export component ListView {
+    in-out property <length> content-y;
+    in-out property <length> content-height;
+    in-out property <length> content-width;
+    out property <length> visible-width: flick.width;
+    out property <length> visible-height: flick.height;
+
+    property <length> max-scroll: max(0px, root.content-height - root.visible-height);
+
+    // A wheel notch glides from `glide-from` to `glide-to` with a cubic
+    // ease-out. Further notches extend the target and restart from where the
+    // list is, so a spun wheel keeps moving instead of stopping per notch.
+    property <length> glide-from;
+    property <length> glide-to;
+    property <duration> glide-start;
+    property <bool> gliding;
+    // Reads the frame clock only while gliding, so a resting list draws nothing.
+    property <float> glide-t: root.gliding ? min(1, (animation-tick() - root.glide-start) / 200ms) : 1;
+    property <length> glide-y: root.glide-from + (root.glide-to - root.glide-from) * (1 - pow(1 - root.glide-t, 3));
+    // The offset this component last wrote, to tell it apart from one set
+    // from outside.
+    property <length> written;
+
+    changed glide-t => {
+        if root.gliding {
+            root.written = round(root.glide-y / 1phx) * 1phx;
+            root.content-y = root.written;
+            if root.glide-t >= 1 {
+                root.gliding = false;
+            }
+        }
+    }
+    // Moved from outside: Slint shifts the offset to keep rows in place as it
+    // re-estimates their height, and the app restores scroll positions. Carry
+    // a glide along by the same amount, and put the list back on the grid.
+    changed content-y => {
+        if root.content-y != root.written {
+            if root.gliding {
+                root.glide-from += root.content-y - root.written;
+                root.glide-to += root.content-y - root.written;
+            }
+            root.written = round(root.content-y / 1phx) * 1phx;
+            root.content-y = root.written;
+        }
+    }
+
+    min-height: 50px;
+    min-width: 50px;
+    horizontal-stretch: 1;
+    vertical-stretch: 1;
+    preferred-height: 100%;
+    preferred-width: 100%;
+    accessible-role: list;
+
+    // Rows ignore the wheel and the Flickable has nothing of its own to
+    // scroll, so wheel events reach this TouchArea.
+    TouchArea {
+        scroll-event(ev) => {
+            if ev.delta-y == 0 || root.max-scroll <= 0 {
+                return reject;
+            }
+            root.glide-to = max(-root.max-scroll, min(0px, (root.gliding ? root.glide-to : root.content-y) + ev.delta-y));
+            root.glide-from = root.content-y;
+            root.glide-start = animation-tick();
+            root.gliding = true;
+            accept
+        }
+
+        flick := Flickable {
+            content-width: self.width;
+            content-height: self.height;
+            @children
+        }
+    }
+
+    // Overlay scrollbar: a thin thumb that widens under the pointer.
+    bar := TouchArea {
+        property <length> thumb-height: max(32px, root.height * root.visible-height / max(root.content-height, 1px));
+        property <length> pressed-scroll;
+        x: root.width - self.width;
+        width: 14px;
+        visible: root.max-scroll > 0;
+
+        pointer-event(ev) => {
+            if ev.button == PointerEventButton.left && ev.kind == PointerEventKind.down {
+                self.pressed-scroll = -root.content-y;
+                root.gliding = false;
+            }
+        }
+        moved => {
+            if self.pressed {
+                root.content-y = -round(max(0px, min(root.max-scroll,
+                    self.pressed-scroll + (self.mouse-y - self.pressed-y) * root.max-scroll / max(1px, self.height - self.thumb-height))) / 1phx) * 1phx;
+            }
+        }
+
+        Rectangle {
+            width: bar.has-hover || bar.pressed ? 6px : 2px;
+            height: bar.thumb-height;
+            x: parent.width - 4px - self.width;
+            y: (parent.height - self.height) * (-root.content-y / max(root.max-scroll, 1px));
+            border-radius: self.width / 2;
+            background: bar.has-hover || bar.pressed ? #ffffff8c : #ffffff52;
+            animate width, background { duration: 150ms; easing: ease-out; }
+        }
+    }
+}
