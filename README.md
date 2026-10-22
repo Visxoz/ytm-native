@@ -194,6 +194,10 @@ Settings, caches and your sign-in live in `%APPDATA%\ytm-native`; the sign-in is
 
 </details>
 
+## Licence
+
+ytm-native is free software under the [GNU General Public License, version 3](LICENSE). It builds on [rustypipe](https://codeberg.org/ThetaDev/rustypipe), which is GPL-3.0, and on [Slint](https://slint.dev) under its GPL-3.0 option.
+
 <br>
 
 <div align="center">
