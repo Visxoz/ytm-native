@@ -75,7 +75,8 @@ impl Controls {
             title: Some(title),
             artist: Some(artist),
             album: (!album.is_empty()).then_some(album),
-            cover_url: cover,
+            // Windows fetches the artwork itself, so only from YouTube.
+            cover_url: cover.filter(|url| crate::http::allowed(url)),
             duration: (duration > 0.0).then(|| Duration::from_secs_f64(duration)),
         };
         if let Err(e) = self.inner.set_metadata(metadata) {

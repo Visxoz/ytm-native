@@ -148,6 +148,10 @@ async fn fetch(
     pixels: u32,
     with_accent: bool,
 ) -> Option<(SharedPixelBuffer<Rgba8Pixel>, Option<Color>)> {
+    if !crate::http::allowed(&url) {
+        log::debug!("skipped artwork from a host YouTube does not use");
+        return None;
+    }
     rt.spawn(async move {
         let _permit = permits().acquire().await.ok()?;
         let bytes = crate::http::client()

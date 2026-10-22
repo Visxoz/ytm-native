@@ -3,7 +3,7 @@
 
 use std::{
     io::{self, Read, Seek, SeekFrom},
-    sync::{Arc, Condvar, Mutex, OnceLock},
+    sync::{Arc, Condvar, Mutex},
     thread,
     time::Duration,
 };
@@ -18,16 +18,6 @@ const READ_BUF: usize = 64 * 1024;
 const MAX_RESERVE: u64 = 64 * 1024 * 1024;
 const MAX_RETRIES: u32 = 4;
 const RETRY_DELAY: Duration = Duration::from_millis(500);
-
-fn http() -> &'static reqwest::blocking::Client {
-    static CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
-    CLIENT.get_or_init(|| {
-        reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(30))
-            .build()
-            .expect("HTTP client builds")
-    })
-}
 
 #[derive(Default)]
 struct State {
@@ -88,6 +78,12 @@ impl Download {
     }
 
     fn run(&self, url: &str, headers: &[(String, String)]) {
+        if !crate::http::allowed(url) {
+            log::warn!("refused a stream from a host YouTube does not use");
+            self.state.lock().unwrap().error = Some("unexpected stream host".into());
+            self.changed.notify_all();
+            return;
+        }
         let mut retries = 0;
         loop {
             let (offset, total) = {
@@ -129,7 +125,7 @@ impl Download {
         offset: u64,
         total: u64,
     ) -> Result<bool, Box<dyn std::error::Error>> {
-        let mut request = http().get(url);
+        let mut request = crate::http::blocking_client().get(url);
         for (name, value) in headers {
             request = request.header(name, value);
         }

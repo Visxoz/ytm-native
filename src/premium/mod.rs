@@ -11,7 +11,7 @@ mod trim;
 use std::{
     io::Write,
     sync::Arc,
-    time::{Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
 use rquickjs::{Context, Runtime};
@@ -27,6 +27,9 @@ const WEB_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWeb
 /// Formats only Premium accounts get: 256 kbps Opus and AAC.
 const PREMIUM_ITAGS: &[u32] = &[774, 141];
 const QUICKJS_STACK: usize = 2 * 1024 * 1024;
+/// A solve takes about 25 ms and 1.6 MB.
+const QUICKJS_MEMORY: usize = 32 * 1024 * 1024;
+const QUICKJS_TIME: Duration = Duration::from_secs(2);
 const LOG_LIMIT: u64 = 256 * 1024;
 
 /// Web clients that skip PO tokens for Premium accounts, in order of trial.
@@ -186,6 +189,11 @@ impl Player {
     pub fn solve(&self, n: &str, sig: Option<&str>) -> Result<(String, Option<String>), String> {
         let runtime = Runtime::new().map_err(|e| e.to_string())?;
         runtime.set_max_stack_size(QUICKJS_STACK);
+        // YouTube's code gets about 20 times what a solve needs, so a
+        // broken or hostile player fails instead of hanging or bloating.
+        runtime.set_memory_limit(QUICKJS_MEMORY);
+        let deadline = Instant::now() + QUICKJS_TIME;
+        runtime.set_interrupt_handler(Some(Box::new(move || Instant::now() > deadline)));
         let context = Context::full(&runtime).map_err(|e| e.to_string())?;
         context.with(|ctx| {
             let fail = |e: rquickjs::Error| {
@@ -484,5 +492,26 @@ g.make = function(base, key, value) { marker.mark("alr", "yes"); var u = new Url
         let (n, sig) = player.solve("abc", Some("x/y")).unwrap();
         assert_eq!(n, "cba");
         assert_eq!(sig.as_deref(), Some("y/x"));
+    }
+
+    #[test]
+    fn stops_a_player_that_never_finishes() {
+        let player = |code: &str| Player {
+            id: "test".into(),
+            sts: 1,
+            code: code.into(),
+        };
+        let started = Instant::now();
+        assert!(player("while (true) {}").solve("abc", None).is_err());
+        assert!(
+            started.elapsed() < QUICKJS_TIME * 2,
+            "stopped at the time limit"
+        );
+        assert!(
+            player("var a = []; while (true) a.push(new Array(1e5).fill(1));")
+                .solve("abc", None)
+                .is_err(),
+            "stopped at the memory limit"
+        );
     }
 }
