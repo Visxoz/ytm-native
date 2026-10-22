@@ -52,7 +52,8 @@ const CLIENTS: &[Client] = &[
 ];
 
 pub enum Outcome {
-    Premium(ResolvedStream),
+    /// A Premium stream, or with `any_format` the best the web client has.
+    Stream(ResolvedStream),
     /// No Premium version of this song: music videos and uploads often
     /// have none, so this says nothing about the account on its own.
     NoPremiumFormats,
@@ -218,12 +219,15 @@ fn unscramble(format: &streams::Format, player: &Player) -> Result<String, Strin
 }
 
 /// Resolves a Premium stream. `cookie` is `None` only for dry runs, which
-/// time the path without a Premium account.
+/// time the path without a Premium account. With `any_format`, the best
+/// stream the web client has is taken whether or not it is Premium: the
+/// last resort when no client hands out plain URLs.
 pub async fn resolve(
     video_id: &str,
     cookie: Option<&str>,
     visitor_data: &str,
     player: &Arc<Player>,
+    any_format: bool,
 ) -> Result<Outcome, String> {
     let started = Instant::now();
     let mut last_error = String::from("no clients");
@@ -240,7 +244,7 @@ pub async fn resolve(
         let requested = started.elapsed();
         let itags: Vec<u32> = response.audio_formats().iter().map(|f| f.itag).collect();
         let premium = itags.iter().any(|i| PREMIUM_ITAGS.contains(i));
-        if !premium && cookie.is_some() {
+        if !premium && cookie.is_some() && !any_format {
             diag(format!(
                 "{video_id}: {} has no Premium version ({itags:?}); playing the free stream",
                 client.name
@@ -265,11 +269,12 @@ pub async fn resolve(
             requested.as_millis(),
             solve_started.elapsed().as_millis()
         ));
-        return Ok(Outcome::Premium(response.stream(
+        let is_premium = PREMIUM_ITAGS.contains(&format.itag);
+        return Ok(Outcome::Stream(response.stream(
             &format,
             url,
             WEB_USER_AGENT,
-            true,
+            is_premium,
         )));
     }
     Err(last_error)

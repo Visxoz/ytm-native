@@ -156,9 +156,30 @@ async fn premium_player(shared: &PremiumShared) -> Result<Arc<premium::Player>, 
     }
 }
 
+/// The best stream the web client has, through the Premium path's solver,
+/// for when no client hands out plain URLs.
+async fn web_fallback(
+    shared: &PremiumShared,
+    video_id: &str,
+    cookie: &str,
+    visitor: &str,
+) -> Result<ResolvedStream, String> {
+    let player = premium_player(shared).await?;
+    match premium::resolve(video_id, Some(cookie), visitor, &player, true).await? {
+        premium::Outcome::Stream(stream) => {
+            premium::diag(format!(
+                "{video_id}: no client gave a plain URL; playing through the web client"
+            ));
+            Ok(stream)
+        }
+        premium::Outcome::NoPremiumFormats => Err("no formats".into()),
+    }
+}
+
 impl App {
     /// Resolves a stream: Premium when signed in with Premium, otherwise the
-    /// free visionOS stream. Reuses a prefetched one.
+    /// first plain-URL client that answers, and signed in, the web client as
+    /// a last resort. Reuses a prefetched one.
     pub(super) fn resolve_future(
         &self,
         video_id: String,
@@ -188,8 +209,10 @@ impl App {
             if let Some(cookie) = cookie.as_deref().filter(|_| !premium.skipped()) {
                 match premium_player(&premium).await {
                     Ok(player) => {
-                        match premium::resolve(&video_id, Some(cookie), &visitor, &player).await {
-                            Ok(premium::Outcome::Premium(stream)) => {
+                        match premium::resolve(&video_id, Some(cookie), &visitor, &player, false)
+                            .await
+                        {
+                            Ok(premium::Outcome::Stream(stream)) => {
                                 premium.record_premium();
                                 log::info!(
                                     "{video_id}: Premium stream resolved in {} ms",
@@ -217,8 +240,9 @@ impl App {
                     let Ok(player) = premium_player(&premium).await else {
                         return;
                     };
-                    match premium::resolve(&video_id, Some(&cookie), &visitor, &player).await {
-                        Ok(premium::Outcome::Premium(_)) => premium.record_premium(),
+                    match premium::resolve(&video_id, Some(&cookie), &visitor, &player, false).await
+                    {
+                        Ok(premium::Outcome::Stream(_)) => premium.record_premium(),
                         Ok(premium::Outcome::NoPremiumFormats) => premium.record_miss(),
                         Err(e) => premium::diag(format!("{video_id}: Premium check failed: {e}")),
                     }
@@ -227,7 +251,7 @@ impl App {
                 // Times the Premium path without an account; the result is
                 // discarded as YouTube won't serve it anonymously.
                 let dry = Instant::now();
-                let result = premium::resolve(&video_id, None, &visitor, &player).await;
+                let result = premium::resolve(&video_id, None, &visitor, &player, false).await;
                 premium::diag(format!(
                     "{video_id}: dry run {} in {} ms",
                     if result.is_ok() { "resolved" } else { "failed" },
@@ -248,7 +272,24 @@ impl App {
                 "{video_id}: free stream resolved in {} ms",
                 free.elapsed().as_millis()
             );
-            result
+            match result {
+                Ok(stream) => Ok(stream),
+                // Signed in, the web client's scrambled URLs are a last
+                // resort, read by the Premium path's solver whether or not
+                // the account has Premium.
+                Err(e) => {
+                    let cookie = premium.cookie.read().unwrap().clone();
+                    match cookie {
+                        Some(cookie) => web_fallback(&premium, &video_id, &cookie, &visitor)
+                            .await
+                            .map_err(|web| {
+                                log::debug!("{video_id}: web client fallback failed: {web}");
+                                e
+                            }),
+                        None => Err(e),
+                    }
+                }
+            }
         }
     }
 

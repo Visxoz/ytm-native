@@ -1,8 +1,10 @@
 //! Resolves playable stream URLs straight from YouTube's player endpoint.
 //!
 //! Most clients get scrambled URLs that need YouTube's player JavaScript to
-//! unlock. The visionOS client gets plain URLs, so asking as that client keeps
-//! the whole pipeline native. Premium streams go through `premium`.
+//! unlock. A few get plain URLs, so asking as one of those keeps the whole
+//! pipeline native. They are tried in order: YouTube tends to change one
+//! client at a time, so a song keeps playing on the next while the first
+//! is fixed. Premium streams go through `premium`.
 
 pub mod premium;
 
@@ -10,11 +12,59 @@ use serde::Deserialize;
 use serde_json::json;
 
 const PLAYER_URL: &str = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false";
-const CLIENT_NAME: &str = "VISIONOS";
-const CLIENT_ID: &str = "101";
-const CLIENT_VERSION: &str = "1.02";
-const USER_AGENT: &str = "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 \
-    (KHTML, like Gecko) Version/26.0 Safari/605.1.15";
+
+/// A client YouTube hands plain URLs to, as yt-dlp describes it.
+pub(crate) struct Client {
+    pub(crate) name: &'static str,
+    id: &'static str,
+    version: &'static str,
+    user_agent: &'static str,
+    device_make: &'static str,
+    device_model: &'static str,
+    os_name: &'static str,
+    os_version: &'static str,
+    android_sdk: Option<u32>,
+}
+
+/// In order of trial. The first is the usual one; the rest only answer
+/// once it fails, so they cost nothing while it works.
+pub(crate) const CLIENTS: &[Client] = &[
+    Client {
+        name: "VISIONOS",
+        id: "101",
+        version: "1.02",
+        user_agent: "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_7_3) AppleWebKit/605.1.15 \
+            (KHTML, like Gecko) Version/26.0 Safari/605.1.15",
+        device_make: "Apple",
+        device_model: "RealityDevice17,1",
+        os_name: "visionOS",
+        os_version: "26.5.23O471",
+        android_sdk: None,
+    },
+    Client {
+        name: "ANDROID_VR",
+        id: "28",
+        version: "1.65.10",
+        user_agent: "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; \
+            eureka-user Build/SQ3A.220605.009.A1) gzip",
+        device_make: "Oculus",
+        device_model: "Quest 3",
+        os_name: "Android",
+        os_version: "12L",
+        android_sdk: Some(32),
+    },
+    Client {
+        name: "IOS",
+        id: "5",
+        version: "20.10.4",
+        user_agent: "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)",
+        device_make: "Apple",
+        device_model: "iPhone16,2",
+        os_name: "iPhone",
+        os_version: "18.3.2.22D82",
+        android_sdk: None,
+    },
+];
 
 #[derive(Debug, Clone)]
 pub struct ResolvedStream {
@@ -153,33 +203,61 @@ impl PlayerResponse {
     }
 }
 
-/// Fetches the player response and picks the best audio stream.
+/// Fetches the player response and picks the best audio stream, from the
+/// first client that gives one. The first client's reason is reported
+/// when none does, as it is the usual one.
 pub async fn resolve(video_id: &str, visitor_data: &str) -> Result<ResolvedStream, String> {
-    let body = json!({
-        "context": {
-            "client": {
-                "clientName": CLIENT_NAME,
-                "clientVersion": CLIENT_VERSION,
-                "deviceMake": "Apple",
-                "deviceModel": "RealityDevice17,1",
-                "userAgent": USER_AGENT,
-                "osName": "visionOS",
-                "osVersion": "26.5.23O471",
-                "hl": "en",
-                "visitorData": visitor_data,
+    let mut first_error = None;
+    for client in CLIENTS {
+        match resolve_with(client, video_id, visitor_data).await {
+            Ok(stream) => {
+                if first_error.is_some() {
+                    log::info!("{video_id}: the {} client served the stream", client.name);
+                }
+                return Ok(stream);
             }
-        },
+            Err(e) => {
+                log::debug!("{video_id}: {} client: {e}", client.name);
+                first_error.get_or_insert(e);
+            }
+        }
+    }
+    Err(first_error.unwrap_or_else(|| "no clients".into()))
+}
+
+/// Asks the player endpoint as one client.
+pub(crate) async fn resolve_with(
+    client: &Client,
+    video_id: &str,
+    visitor_data: &str,
+) -> Result<ResolvedStream, String> {
+    let mut context = json!({
+        "clientName": client.name,
+        "clientVersion": client.version,
+        "deviceMake": client.device_make,
+        "deviceModel": client.device_model,
+        "userAgent": client.user_agent,
+        "osName": client.os_name,
+        "osVersion": client.os_version,
+        "hl": "en",
+        "visitorData": visitor_data,
+    });
+    if let Some(sdk) = client.android_sdk {
+        context["androidSdkVersion"] = sdk.into();
+    }
+    let body = json!({
+        "context": { "client": context },
         "videoId": video_id,
         "contentCheckOk": true,
         "racyCheckOk": true,
     });
     let text = crate::http::client()
         .post(PLAYER_URL)
-        .header(reqwest::header::USER_AGENT, USER_AGENT)
+        .header(reqwest::header::USER_AGENT, client.user_agent)
         .header("Content-Type", "application/json")
         .header("Origin", "https://www.youtube.com")
-        .header("X-YouTube-Client-Name", CLIENT_ID)
-        .header("X-YouTube-Client-Version", CLIENT_VERSION)
+        .header("X-YouTube-Client-Name", client.id)
+        .header("X-YouTube-Client-Version", client.version)
         .header("X-Goog-Visitor-Id", visitor_data)
         .body(body.to_string())
         .send()
@@ -189,7 +267,7 @@ pub async fn resolve(video_id: &str, visitor_data: &str) -> Result<ResolvedStrea
         .text()
         .await
         .map_err(|e| format!("player request failed: {e}"))?;
-    parse(&text)
+    parse(&text, client.user_agent)
 }
 
 /// Parses a player response, failing with YouTube's reason if unplayable.
@@ -206,11 +284,13 @@ pub(crate) fn parse_response(json: &str) -> Result<PlayerResponse, String> {
     Ok(response)
 }
 
-fn parse(json: &str) -> Result<ResolvedStream, String> {
+/// The best plain-URL stream of a player response. A client that answers
+/// with scrambled URLs only counts as having none.
+fn parse(json: &str, user_agent: &str) -> Result<ResolvedStream, String> {
     let response = parse_response(json)?;
     let format = best_audio(response.audio_formats()).ok_or("no playable audio stream")?;
     let url = format.url.clone().ok_or("no playable audio stream")?;
-    Ok(response.stream(format, url, USER_AGENT, false))
+    Ok(response.stream(format, url, user_agent, false))
 }
 
 /// The highest-bitrate Opus stream, else the best AAC. Skips dynamic-range
@@ -254,26 +334,37 @@ mod tests {
     const PREMIUM: &str = r#"{"itag":774,"signatureCipher":"s=abc&sp=sig&url=https%3A%2F%2Fa%2F774",
         "mimeType":"audio/webm; codecs=\"opus\"","bitrate":260000}"#;
 
+    const UA: &str = "test";
+
     #[test]
     fn prefers_opus() {
-        let stream = parse(&response(&[AAC, OPUS, OPUS_DRC, VIDEO].join(","))).unwrap();
+        let stream = parse(&response(&[AAC, OPUS, OPUS_DRC, VIDEO].join(",")), UA).unwrap();
         assert_eq!(stream.url, "https://a/251");
         assert_eq!(stream.mime, "audio/webm");
         assert_eq!(stream.size, 6214234);
         assert_eq!(stream.loudness_db, Some(4.5));
         assert_eq!(stream.duration, Some(369.641));
         assert!(!stream.premium);
+        assert_eq!(stream.headers[0].1, UA, "downloads as the same client");
     }
 
     #[test]
     fn falls_back_to_aac() {
-        let stream = parse(&response(&[AAC, VIDEO].join(","))).unwrap();
+        let stream = parse(&response(&[AAC, VIDEO].join(",")), UA).unwrap();
         assert_eq!(stream.url, "https://a/140");
         assert_eq!(stream.codec, "AAC");
         assert_eq!(
             stream.loudness_db,
             Some(-2.5),
             "uses the player-wide loudness"
+        );
+    }
+
+    #[test]
+    fn scrambled_urls_count_as_none() {
+        assert_eq!(
+            parse(&response(PREMIUM), UA).unwrap_err(),
+            "no playable audio stream"
         );
     }
 
@@ -288,10 +379,70 @@ mod tests {
     #[test]
     fn reports_unplayable_reason() {
         let json = r#"{"playabilityStatus":{"status":"LOGIN_REQUIRED","reason":"Sign in to confirm your age"}}"#;
-        assert_eq!(parse(json).unwrap_err(), "Sign in to confirm your age");
+        assert_eq!(parse(json, UA).unwrap_err(), "Sign in to confirm your age");
         assert_eq!(
-            parse(&response(VIDEO)).unwrap_err(),
+            parse(&response(VIDEO), UA).unwrap_err(),
             "no playable audio stream"
         );
+    }
+
+    /// Asks YouTube itself whether every stream path still works: each
+    /// plain-URL client, a byte of what it serves, and the player trimming
+    /// the Premium path relies on. The canary workflow runs it daily, so a
+    /// change on YouTube's side shows up before users notice.
+    #[test]
+    #[ignore = "talks to YouTube; run by the canary workflow"]
+    fn canary_every_stream_path_still_works() {
+        // Never going away.
+        const VIDEO: &str = "dQw4w9WgXcQ";
+        let rt = tokio::runtime::Runtime::new().expect("runtime starts");
+        let failures = rt.block_on(async {
+            let mut failures = Vec::new();
+            let api = crate::api::Api::new().expect("client starts");
+            let visitor = match api.visitor_data(true).await {
+                Ok(visitor) => visitor,
+                Err(e) => return vec![format!("visitor data: {e}")],
+            };
+            for client in CLIENTS {
+                match resolve_with(client, VIDEO, &visitor).await {
+                    Ok(stream) => match probe(&stream).await {
+                        Ok(()) => eprintln!(
+                            "{}: {} {} kbps, serves bytes",
+                            client.name,
+                            stream.codec,
+                            stream.bitrate_kbps.unwrap_or(0.0).round()
+                        ),
+                        Err(e) => failures.push(format!("{}: resolved but {e}", client.name)),
+                    },
+                    Err(e) => failures.push(format!("{}: {e}", client.name)),
+                }
+            }
+            match premium::load_player().await {
+                Ok(player) => eprintln!("player {}: trims and solves", player.id),
+                Err(e) => failures.push(format!("player: {e}")),
+            }
+            failures
+        });
+        assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+    }
+
+    /// Fetches the first bytes of a stream, as a URL can resolve and still
+    /// be refused by the CDN.
+    async fn probe(stream: &ResolvedStream) -> Result<(), String> {
+        let mut request = crate::http::client()
+            .get(&stream.url)
+            .header(reqwest::header::RANGE, "bytes=0-1023");
+        for (name, value) in &stream.headers {
+            request = request.header(name, value);
+        }
+        let response = request.send().await.map_err(|e| e.to_string())?;
+        let status = response.status();
+        if !status.is_success() {
+            return Err(format!("the CDN answered {status}"));
+        }
+        let bytes = response.bytes().await.map_err(|e| e.to_string())?;
+        (!bytes.is_empty())
+            .then_some(())
+            .ok_or_else(|| "the CDN sent no bytes".to_owned())
     }
 }
