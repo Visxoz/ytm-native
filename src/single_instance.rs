@@ -1,7 +1,7 @@
 //! Keeps one copy of the app running; a second launch focuses the first.
 
 use windows_sys::Win32::{
-    Foundation::{ERROR_ALREADY_EXISTS, GetLastError, HANDLE},
+    Foundation::{ERROR_ALREADY_EXISTS, HANDLE},
     System::Threading::CreateMutexW,
     UI::WindowsAndMessaging::{FindWindowW, SW_RESTORE, SetForegroundWindow, ShowWindow},
 };
@@ -17,11 +17,16 @@ pub struct Guard(#[allow(dead_code)] HANDLE);
 
 /// Returns `None` if another instance is running, after focusing it.
 pub fn acquire(window_title: &str) -> Option<Guard> {
-    let name = wide(MUTEX_NAME);
+    acquire_named(MUTEX_NAME, window_title)
+}
+
+fn acquire_named(mutex: &str, window_title: &str) -> Option<Guard> {
+    let name = wide(mutex);
     // SAFETY: `name` is a valid NUL-terminated UTF-16 string.
     let handle = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
-    // SAFETY: reads the calling thread's last error.
-    if handle.is_null() || unsafe { GetLastError() } != ERROR_ALREADY_EXISTS {
+    let exists =
+        std::io::Error::last_os_error().raw_os_error() == Some(ERROR_ALREADY_EXISTS as i32);
+    if handle.is_null() || !exists {
         return Some(Guard(handle));
     }
     let title = wide(window_title);
@@ -35,4 +40,20 @@ pub fn acquire(window_title: &str) -> Option<Guard> {
         }
     }
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_second_instance_is_refused() {
+        let mutex = format!("Local\\ytm-native-test-{}", std::process::id());
+        let first = acquire_named(&mutex, "no such window");
+        assert!(first.is_some(), "the first instance runs");
+        assert!(
+            acquire_named(&mutex, "no such window").is_none(),
+            "a second instance stops"
+        );
+    }
 }

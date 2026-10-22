@@ -2100,16 +2100,11 @@ impl App {
 
 /// "Good morning" and so on, by the local time.
 fn greeting() -> &'static str {
-    // SAFETY: GetLocalTime only fills in the struct it is given.
-    let hour = unsafe {
-        let mut time = std::mem::zeroed();
-        windows_sys::Win32::System::SystemInformation::GetLocalTime(&mut time);
-        time.wHour
-    };
-    greeting_for(hour)
+    let now = time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+    greeting_for(now.hour())
 }
 
-fn greeting_for(hour: u16) -> &'static str {
+fn greeting_for(hour: u8) -> &'static str {
     match hour {
         4..12 => "Good morning",
         12..18 => "Good afternoon",

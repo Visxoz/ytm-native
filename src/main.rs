@@ -1,4 +1,6 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+// Every unsafe block says why it is sound; CI fails one that does not.
+#![deny(clippy::undocumented_unsafe_blocks)]
 
 mod api;
 mod app;
@@ -20,7 +22,10 @@ mod streams;
 use std::{rc::Rc, time::Duration};
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
-use slint::{CloseRequestResponse, ComponentHandle, PhysicalPosition, PhysicalSize};
+use slint::{
+    CloseRequestResponse, ComponentHandle, PhysicalPosition, PhysicalSize,
+    winit_030::WinitWindowAccessor,
+};
 
 use crate::{app::App, settings::WindowGeometry};
 
@@ -71,13 +76,12 @@ fn hwnd(ui: &AppWindow) -> Option<*mut std::ffi::c_void> {
     }
 }
 
-/// Whether the window is minimised, asking Windows directly.
+/// Whether the window is minimised, as winit asks Windows directly.
 fn is_minimized(ui: &AppWindow) -> bool {
-    match hwnd(ui) {
-        // SAFETY: `hwnd` is this window's live handle.
-        Some(hwnd) => unsafe { windows_sys::Win32::UI::WindowsAndMessaging::IsIconic(hwnd) != 0 },
-        None => ui.window().is_minimized(),
-    }
+    ui.window()
+        .with_winit_window(|window| window.is_minimized())
+        .flatten()
+        .unwrap_or_else(|| ui.window().is_minimized())
 }
 
 /// Fonts Slint tries, character by character, for anything the UI font
@@ -97,7 +101,8 @@ fn add_fallback_fonts() {
         .map(|name| fonts.join(name))
         .filter(|path| path.exists());
     if let Ok(list) = std::env::join_paths(paths) {
-        // SAFETY: called first thing in `main`, before any other thread starts.
+        // SAFETY: called first thing in `main`, before this program starts any
+        // other thread; Windows also serialises environment access itself.
         unsafe { std::env::set_var("SLINT_FONT_PATH", list) };
     }
 }
