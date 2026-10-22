@@ -13,6 +13,8 @@ const ALLOWED_DOMAINS: &[&str] = &[
     "ytimg.com",
     "googleusercontent.com",
     "ggpht.com",
+    // Built-in artwork, such as Liked music's.
+    "gstatic.com",
 ];
 const MAX_REDIRECTS: usize = 10;
 
@@ -85,6 +87,9 @@ mod tests {
         assert!(allowed("https://i.ytimg.com/vi/x/hqdefault.jpg"));
         assert!(allowed("https://lh3.googleusercontent.com/abc=w120-h120"));
         assert!(allowed("https://yt3.ggpht.com/abc=s88"));
+        assert!(allowed(
+            "https://www.gstatic.com/youtube/media/ytm/images/pbg/liked-music-@576.png"
+        ));
     }
 
     #[test]
