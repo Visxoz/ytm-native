@@ -4,7 +4,10 @@
 
 use serde_json::Value;
 
-use crate::api::{self, ArtistRef, Card, CardKind, CardLayout, QueueMode, Section, Track};
+use super::{
+    ArtistRef, Card, CardKind, CardLayout, QueueMode, Section, Track,
+    convert::{CARD_THUMB, ROW_THUMB, resize_thumb},
+};
 
 /// Longest list shelf shown, such as Quick picks.
 const LIST_LIMIT: usize = 10;
@@ -21,6 +24,13 @@ fn browse_id(run: &Value) -> Option<&str> {
     run["navigationEndpoint"]["browseEndpoint"]["browseId"].as_str()
 }
 
+/// Official music videos may have a song version; uploads have none.
+fn is_music_video(watch: &Value) -> bool {
+    watch["watchEndpointMusicSupportedConfigs"]["watchEndpointMusicConfig"]["musicVideoType"]
+        .as_str()
+        == Some("MUSIC_VIDEO_TYPE_OMV")
+}
+
 fn thumb(v: &Value, edge: u32) -> Option<String> {
     let thumbs = v["musicThumbnailRenderer"]["thumbnail"]["thumbnails"].as_array()?;
     let best = thumbs
@@ -28,7 +38,7 @@ fn thumb(v: &Value, edge: u32) -> Option<String> {
         .filter(|t| t["width"].as_u64().unwrap_or(0) >= edge as u64)
         .min_by_key(|t| t["width"].as_u64())
         .or_else(|| thumbs.iter().max_by_key(|t| t["width"].as_u64()))?;
-    Some(api::resize_thumb(best["url"].as_str()?, edge))
+    Some(resize_thumb(best["url"].as_str()?, edge))
 }
 
 /// Artists from a subtitle such as "Song • Trippie Redd & Juice WRLD": the
@@ -60,7 +70,7 @@ fn artists(subtitle: &Value) -> Vec<ArtistRef> {
 fn two_row_card(r: &Value) -> Option<Card> {
     let title = text(&r["title"]);
     let subtitle = text(&r["subtitle"]);
-    let card_thumb = thumb(&r["thumbnailRenderer"], api::CARD_THUMB);
+    let card_thumb = thumb(&r["thumbnailRenderer"], CARD_THUMB);
     let nav = &r["navigationEndpoint"];
     if let Some(video_id) = nav["watchEndpoint"]["videoId"].as_str() {
         let track = Track {
@@ -69,8 +79,9 @@ fn two_row_card(r: &Value) -> Option<Card> {
             artists: artists(&r["subtitle"]),
             album: None,
             duration: None,
-            thumb: thumb(&r["thumbnailRenderer"], api::ROW_THUMB),
+            thumb: thumb(&r["thumbnailRenderer"], ROW_THUMB),
             track_nr: None,
+            video: is_music_video(&nav["watchEndpoint"]),
         };
         return Some(Card {
             kind: CardKind::Song,
@@ -106,11 +117,11 @@ fn two_row_card(r: &Value) -> Option<Card> {
 }
 
 fn list_track(r: &Value) -> Option<Track> {
-    let video_id = r["playlistItemData"]["videoId"].as_str().or_else(|| {
-        r["overlay"]["musicItemThumbnailOverlayRenderer"]["content"]["musicPlayButtonRenderer"]
-                ["playNavigationEndpoint"]["watchEndpoint"]["videoId"]
-                .as_str()
-    })?;
+    let watch = &r["overlay"]["musicItemThumbnailOverlayRenderer"]["content"]["musicPlayButtonRenderer"]
+        ["playNavigationEndpoint"]["watchEndpoint"];
+    let video_id = r["playlistItemData"]["videoId"]
+        .as_str()
+        .or_else(|| watch["videoId"].as_str())?;
     let column =
         |i: usize| &r["flexColumns"][i]["musicResponsiveListItemFlexColumnRenderer"]["text"];
     let album = runs(column(2))
@@ -127,8 +138,9 @@ fn list_track(r: &Value) -> Option<Track> {
         artists: artists(column(1)),
         album,
         duration: None,
-        thumb: thumb(&r["thumbnail"], api::ROW_THUMB),
+        thumb: thumb(&r["thumbnail"], ROW_THUMB),
         track_nr: None,
+        video: is_music_video(watch),
     })
 }
 
@@ -242,7 +254,8 @@ mod tests {
             {"musicTwoRowItemRenderer":{"title":{"runs":[{"text":"Matt Hardy 999"}]},
               "subtitle":{"runs":[{"text":"Song"},{"text":" • "},{"text":"Trippie Redd","navigationEndpoint":{"browseEndpoint":{"browseId":"UCa"}}},{"text":" & "},{"text":"Juice WRLD","navigationEndpoint":{"browseEndpoint":{"browseId":"UCb"}}}]},
               "thumbnailRenderer":{"musicThumbnailRenderer":{"thumbnail":{"thumbnails":[{"url":"https://lh3.googleusercontent.com/x=w226-h226","width":226}]}}},
-              "navigationEndpoint":{"watchEndpoint":{"videoId":"44zDzdf08s4"}}}},
+              "navigationEndpoint":{"watchEndpoint":{"videoId":"44zDzdf08s4",
+                "watchEndpointMusicSupportedConfigs":{"watchEndpointMusicConfig":{"musicVideoType":"MUSIC_VIDEO_TYPE_OMV"}}}}}},
             {"musicTwoRowItemRenderer":{"title":{"runs":[{"text":"My Supermix"}]},"subtitle":{"runs":[{"text":"Juice WRLD, MXZI"}]},
               "navigationEndpoint":{"browseEndpoint":{"browseId":"VLRDTMAK5uy_kset","browseEndpointContextSupportedConfigs":{"browseEndpointContextMusicConfig":{"pageType":"MUSIC_PAGE_TYPE_PLAYLIST"}}}}}}
           ]}},
@@ -269,6 +282,7 @@ mod tests {
         let track = cards[0].track.as_ref().unwrap();
         assert_eq!(track.id, "44zDzdf08s4");
         assert_eq!(track.artist_names(), "Trippie Redd, Juice WRLD");
+        assert!(track.video, "an official music video");
         assert_eq!(cards[1].kind, CardKind::Playlist);
         assert_eq!(cards[1].id, "RDTMAK5uy_kset", "VL prefix is dropped");
 
@@ -279,6 +293,7 @@ mod tests {
         assert_eq!(tracks[0].title, "Plug Walk");
         assert_eq!(tracks[0].artist_names(), "Rich The Kid");
         assert_eq!(tracks[0].album.as_ref().unwrap().0, "MPREb_1");
+        assert!(!tracks[0].video);
     }
 
     #[test]

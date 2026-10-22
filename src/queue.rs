@@ -260,6 +260,19 @@ impl<T: Clone> Queue<T> {
         true
     }
 
+    /// Puts `item` in place of every entry `matches` picks, keeping their
+    /// places, so the revision stays. Returns the indices replaced.
+    pub fn replace(&mut self, matches: impl Fn(&T) -> bool, item: &T) -> Vec<usize> {
+        let mut replaced = Vec::new();
+        for (index, entry) in self.entries.iter_mut().enumerate() {
+            if matches(&entry.item) {
+                entry.item = item.clone();
+                replaced.push(index);
+            }
+        }
+        replaced
+    }
+
     /// Drops everything after the current track.
     pub fn clear_upcoming(&mut self) {
         if let Some(current) = self.current {
@@ -310,6 +323,22 @@ mod tests {
         assert_eq!(q.back(), Some(&0));
         q.repeat = Repeat::All;
         assert_eq!(q.back(), Some(&2));
+    }
+
+    #[test]
+    fn replaces_in_place_through_shuffle() {
+        let mut q = queue(10);
+        q.jump(2);
+        q.set_shuffle(true);
+        let revision = q.revision();
+        let at = q.items().position(|&i| i == 7).unwrap();
+        assert_eq!(q.replace(|&i| i == 7, &70), [at]);
+        assert_eq!(q.revision(), revision, "nothing moved");
+        assert_eq!(q.current(), Some(&2));
+        assert!(q.replace(|&i| i == 99, &0).is_empty(), "nothing to replace");
+
+        q.set_shuffle(false);
+        assert_eq!(items(&q), [0, 1, 2, 3, 4, 5, 6, 70, 8, 9]);
     }
 
     #[test]

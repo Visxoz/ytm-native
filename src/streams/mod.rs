@@ -2,7 +2,9 @@
 //!
 //! Most clients get scrambled URLs that need YouTube's player JavaScript to
 //! unlock. The visionOS client gets plain URLs, so asking as that client keeps
-//! the whole pipeline native. Premium streams go through `crate::premium`.
+//! the whole pipeline native. Premium streams go through `premium`.
+
+pub mod premium;
 
 use serde::Deserialize;
 use serde_json::json;

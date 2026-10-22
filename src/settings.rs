@@ -55,6 +55,9 @@ pub struct Settings {
     pub sidebar_collapsed: bool,
     /// Use 256 kbps streams when signed in with YouTube Premium.
     pub premium_audio: bool,
+    /// The signed-in account has been served Premium formats, so songs
+    /// without them, such as music videos, never mark it as not Premium.
+    pub premium_account: bool,
     /// Look for a newer version on GitHub now and then.
     pub check_updates: bool,
     pub window: Option<WindowGeometry>,
@@ -72,6 +75,7 @@ impl Default for Settings {
             repeat: 0,
             sidebar_collapsed: false,
             premium_audio: true,
+            premium_account: false,
             check_updates: true,
             window: None,
         }

@@ -153,7 +153,7 @@ The interface, the player and the audio pipeline are all native Rust. A browser 
 | Part | Built on |
 | :-- | :-- |
 | YouTube Music data: search, pages, radio, lyrics, library | [`rustypipe`](https://codeberg.org/ThetaDev/rustypipe) |
-| Stream URLs | YouTube's player endpoint, called directly (`src/streams.rs`) |
+| Stream URLs | YouTube's player endpoint, called directly (`src/streams`) |
 | Demuxing and AAC | [`symphonia`](https://github.com/pdeljanov/Symphonia) |
 | Opus | libopus 1.3.1, as Rust ([`unsafe-libopus`](https://crates.io/crates/unsafe-libopus)) |
 | Audio output | [`cpal`](https://github.com/RustAudio/cpal), through WASAPI |
@@ -162,7 +162,7 @@ The interface, the player and the audio pipeline are all native Rust. A browser 
 | Google sign-in | WebView2 through [`wry`](https://github.com/tauri-apps/wry), only while signing in |
 | Media keys | [`souvlaki`](https://github.com/Sinono3/souvlaki) |
 
-Most YouTube clients get stream URLs scrambled by YouTube's player JavaScript. The visionOS client gets plain ones, so the app asks as that client and needs no JavaScript engine. With Premium, the app unscrambles the web player's URLs itself, in a short-lived QuickJS context with a cut-down copy of the player. When YouTube changes this, `src/streams.rs` and `src/premium` are the places to update.
+Most YouTube clients get stream URLs scrambled by YouTube's player JavaScript. The visionOS client gets plain ones, so the app asks as that client and needs no JavaScript engine. With Premium, the app unscrambles the web player's URLs itself, in a short-lived QuickJS context with a cut-down copy of the player. When YouTube changes this, `src/streams/mod.rs` and `src/streams/premium` are the places to update.
 
 Streams download in ranges and are decoded in the app; the next song's stream is looked up ahead of time. Skia draws on the GPU, so scrolling costs little CPU, and animations only run while something changes.
 
