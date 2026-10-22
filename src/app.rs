@@ -344,6 +344,7 @@ impl App {
         self.ui().set_signed_in(signed_in);
         if signed_in {
             self.load_library();
+            self.load_account_photo();
         }
         self.warm_premium();
         self.navigate(Route::Home, false);
@@ -1908,6 +1909,7 @@ impl App {
                         app.state.borrow_mut().signed_in = true;
                         app.state.borrow_mut().page_cache.clear();
                         app.load_library();
+                        app.load_account_photo();
                         settings::save_cookie(&header);
                         *app.premium.cookie.write().unwrap() = Some(header);
                         app.premium.status.store(PREMIUM_UNKNOWN, Ordering::Relaxed);
@@ -1916,7 +1918,7 @@ impl App {
                         ui.set_signed_in(true);
                         ui.set_sign_in_open(false);
                         app.toast("Signed in");
-                        app.navigate(Route::Library, true);
+                        app.show_fresh(Route::Library);
                     }
                     Err(e) => ui.set_sign_in_error(format!("Sign-in failed: {e}").into()),
                 }
@@ -2073,10 +2075,38 @@ impl App {
             state.route == Route::Home
         };
         self.library.set_vec(Vec::new());
-        self.ui().set_signed_in(false);
+        let ui = self.ui();
+        ui.set_signed_in(false);
+        ui.set_account_photo(Image::default());
         if on_home {
             self.reload();
         }
+    }
+
+    /// Shows `route` loaded afresh, as signing in or out changes what it
+    /// holds. Navigating to the page already shown would do nothing.
+    fn show_fresh(self: &Rc<Self>, route: Route) {
+        if self.state.borrow().route == route {
+            self.reload();
+        } else {
+            self.navigate(route, true);
+        }
+    }
+
+    /// Puts the account's profile picture on the account button.
+    fn load_account_photo(self: &Rc<Self>) {
+        let api = self.api.clone();
+        self.spawn(
+            async move { api.account_photo().await },
+            |app, result| match result {
+                Ok(url) => app.load_image(url, images::AVATAR, |app, image| {
+                    if app.state.borrow().signed_in {
+                        app.ui().set_account_photo(image);
+                    }
+                }),
+                Err(e) => log::warn!("could not load the account's picture: {e}"),
+            },
+        );
     }
 
     fn sign_out(self: &Rc<Self>) {
@@ -2090,10 +2120,11 @@ impl App {
             app.premium.status.store(PREMIUM_UNKNOWN, Ordering::Relaxed);
             app.premium.misses.store(0, Ordering::Relaxed);
             let ui = app.ui();
+            ui.set_account_photo(Image::default());
             ui.set_signed_in(false);
             ui.set_settings_open(false);
             app.toast("Signed out");
-            app.navigate(Route::Home, true);
+            app.show_fresh(Route::Home);
         });
     }
 }

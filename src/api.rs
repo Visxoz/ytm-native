@@ -998,6 +998,22 @@ impl Api {
         let _ = self.rp.user_auth_remove_cookie().await;
     }
 
+    /// The signed-in account's profile picture, from YouTube Music's
+    /// account menu.
+    pub async fn account_photo(&self) -> Result<Option<String>> {
+        let json = self
+            .q()
+            .authenticated()
+            .raw(
+                ClientType::DesktopMusic,
+                "account/account_menu",
+                &serde_json::json!({}),
+            )
+            .await
+            .map_err(err)?;
+        Ok(account_photo(&json))
+    }
+
     /// Whether a sign-in cookie is stored, without asking YouTube.
     pub fn has_cookie(&self) -> bool {
         self.q().auth_enabled(ClientType::DesktopMusic)
@@ -1015,6 +1031,19 @@ impl Api {
             }
         }
     }
+}
+
+/// The largest profile picture in an account menu response.
+fn account_photo(json: &str) -> Option<String> {
+    let menu: serde_json::Value = serde_json::from_str(json).ok()?;
+    let header = &menu["actions"][0]["openPopupAction"]["popup"]["multiPageMenuRenderer"]["header"]
+        ["activeAccountHeaderRenderer"];
+    header["accountPhoto"]["thumbnails"]
+        .as_array()?
+        .iter()
+        .max_by_key(|t| t["width"].as_u64().unwrap_or(0))?["url"]
+        .as_str()
+        .map(str::to_owned)
 }
 
 fn genre_card(g: rustypipe::model::MusicGenreItem) -> Card {
@@ -1065,6 +1094,21 @@ mod tests {
         assert_eq!(compact(312_000), "312K");
         assert_eq!(format_duration(59), "0:59");
         assert_eq!(format_duration(3725), "1:02:05");
+    }
+
+    #[test]
+    fn reads_the_account_photo() {
+        let menu = r#"{"actions":[{"openPopupAction":{"popup":{"multiPageMenuRenderer":{"header":
+            {"activeAccountHeaderRenderer":{"accountName":{"runs":[{"text":"Alex"}]},
+            "accountPhoto":{"thumbnails":[
+                {"url":"https://yt3.ggpht.com/a=s88","width":88,"height":88},
+                {"url":"https://yt3.ggpht.com/a=s176","width":176,"height":176}]}}}}}}}]}"#;
+        assert_eq!(
+            account_photo(menu).as_deref(),
+            Some("https://yt3.ggpht.com/a=s176")
+        );
+        assert_eq!(account_photo("{}"), None);
+        assert_eq!(account_photo("not json"), None);
     }
 
     #[test]

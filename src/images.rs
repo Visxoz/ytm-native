@@ -20,6 +20,7 @@ pub const TOP: u32 = 96;
 pub const CARD: u32 = 176;
 pub const HEADER: u32 = 232;
 pub const BANNER: u32 = 360;
+pub const AVATAR: u32 = 26;
 
 /// Decoded artwork kept for reuse, in bytes. Images still on screen stay
 /// alive regardless, as Slint holds its own reference.

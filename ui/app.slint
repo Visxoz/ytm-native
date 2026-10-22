@@ -437,6 +437,7 @@ export component AppWindow inherits Window {
 
     // Account and settings
     in property <bool> signed-in;
+    in property <image> account-photo;
     in property <bool> signing-in;
     in property <bool> signing-in-browser;
     in-out property <string> pasted-cookie;
@@ -646,6 +647,12 @@ export component AppWindow inherits Window {
                                 path: Icons.account;
                                 size: 18px;
                                 color: Theme.text;
+                            }
+                            if root.signed-in && root.account-photo.width > 0: Art {
+                                width: 100%;
+                                height: 100%;
+                                round: true;
+                                source: root.account-photo;
                             }
                         }
                         account-touch := TouchArea {
