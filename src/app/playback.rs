@@ -223,10 +223,10 @@ impl App {
             state.playback.prefetching.remove(&next.id);
             match result {
                 Ok(stream) => {
-                    state
-                        .playback
-                        .prefetched
-                        .insert(next.id, (stream, Instant::now()));
+                    // Streams of tracks skipped past would otherwise stay.
+                    let prefetched = &mut state.playback.prefetched;
+                    prefetched.retain(|_, (_, at)| at.elapsed() < PREFETCH_FRESH);
+                    prefetched.insert(next.id, (stream, Instant::now()));
                 }
                 Err(e) => log::debug!("prefetch failed: {e}"),
             }

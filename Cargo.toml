@@ -21,11 +21,13 @@ oxc_parser = "0.155"
 oxc_semantic = "0.155"
 oxc_span = "0.155"
 raw-window-handle = "0.6.2"
-reqwest = { version = "0.12", default-features = false, features = ["default-tls", "native-tls-alpn", "http2", "blocking"] }
+# gzip and brotli are already in the tree through rustypipe; they let the
+# player endpoint and the player script answer compressed.
+reqwest = { version = "0.12", default-features = false, features = ["default-tls", "native-tls-alpn", "http2", "blocking", "gzip", "brotli"] }
 rquickjs = "0.9"
 rustypipe = { version = "=0.11.4", features = ["userdata"] }
 serde = { version = "1.0.229", features = ["derive"] }
-serde_json = "1.0"
+serde_json = { version = "1.0", features = ["raw_value"] }
 sha1 = "0.10"
 sha2 = "0.10"
 slint = { version = "1.18.1", default-features = false, features = ["std", "backend-winit", "renderer-skia", "accessibility", "compat-1-2", "raw-window-handle-06", "unstable-winit-030"] }
@@ -56,6 +58,21 @@ opt-level = 3
 opt-level = 3
 
 [profile.release.package.zune-jpeg]
+opt-level = 3
+
+# Artwork decoding and scaling.
+[profile.release.package.image]
+opt-level = 3
+
+[profile.release.package.image-webp]
+opt-level = 3
+
+# Every page is a large JSON response.
+[profile.release.package.serde_json]
+opt-level = 3
+
+# QuickJS, which unscrambles each Premium stream's URL.
+[profile.release.package.rquickjs-sys]
 opt-level = 3
 
 [profile.dev.package."*"]

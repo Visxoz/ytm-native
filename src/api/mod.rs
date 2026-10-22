@@ -12,6 +12,7 @@ use rustypipe::{
     model::{MusicPlaylist, TrackItem, TrackType, paginator::Paginator},
 };
 
+pub use convert::resize_thumb;
 use convert::tracks;
 pub use format::format_duration;
 pub use model::*;
@@ -53,7 +54,7 @@ impl Api {
             .storage(Box::new(crate::secret::EncryptedStorage::new(&dir)))
             .storage_dir(dir)
             .no_botguard()
-            .build()
+            .build_with_client(crate::http::keep_alive(reqwest::ClientBuilder::new()))
             .map_err(err)?;
         Ok(Self { rp })
     }
@@ -97,12 +98,7 @@ impl Api {
     /// Tracks of an album or playlist, for playing a card directly.
     pub async fn card_tracks(&self, kind: CardKind, id: &str) -> Result<Vec<Track>> {
         match kind {
-            CardKind::Album => Ok(self
-                .album(id)
-                .await?
-                .header
-                .map(|h| h.tracks)
-                .unwrap_or_default()),
+            CardKind::Album => Ok(self.album(id).await?.header_tracks().to_vec()),
             CardKind::Playlist => self.playlist_tracks(id).await,
             // The top songs only, without the discography the page fetches.
             CardKind::Artist => {

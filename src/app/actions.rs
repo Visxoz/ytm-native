@@ -7,27 +7,37 @@ use super::App;
 use crate::api::{CardKind, QueueMode, Route, Section, Track};
 
 impl App {
-    fn section_tracks(&self, section: usize) -> Option<(Vec<Track>, QueueMode)> {
+    /// One track of the page.
+    fn section_track(&self, section: usize, index: usize) -> Option<Track> {
         match self.state.borrow().page.sections.get(section)? {
-            Section::Tracks { tracks, mode, .. } => Some((tracks.clone(), *mode)),
+            Section::Tracks { tracks, .. } => tracks.get(index).cloned(),
             Section::Cards { .. } => None,
         }
     }
 
     pub(super) fn play_from_section(self: &Rc<Self>, section: usize, index: usize) {
-        let Some((tracks, mode)) = self.section_tracks(section) else {
-            return;
+        // Only a section played whole is copied; a radio seed is one track.
+        let (track, whole) = {
+            let state = self.state.borrow();
+            let Some(Section::Tracks { tracks, mode, .. }) = state.page.sections.get(section)
+            else {
+                return;
+            };
+            let Some(track) = tracks.get(index) else {
+                return;
+            };
+            match mode {
+                QueueMode::Section => (track.clone(), Some(tracks.clone())),
+                QueueMode::Radio => (track.clone(), None),
+            }
         };
-        let Some(track) = tracks.get(index).cloned() else {
-            return;
-        };
-        match mode {
-            QueueMode::Section => {
+        match whole {
+            Some(tracks) => {
                 let shuffle = self.state.borrow().settings.shuffle;
                 self.state.borrow_mut().queue.set(tracks, index, shuffle);
                 self.start_current();
             }
-            QueueMode::Radio => self.play_with_radio(track),
+            None => self.play_with_radio(track),
         }
     }
 
@@ -113,26 +123,34 @@ impl App {
     }
 
     pub(super) fn header_action(self: &Rc<Self>, action: &str) {
-        let Some(header) = self.state.borrow().page.header.clone() else {
-            return;
+        let (tracks, shuffle_playlist, radio_id) = {
+            let state = self.state.borrow();
+            let Some(header) = &state.page.header else {
+                return;
+            };
+            (
+                state.page.header_tracks().to_vec(),
+                header.shuffle_playlist.clone(),
+                header.radio_id.clone(),
+            )
         };
         match action {
-            "play" => self.play_tracks(header.tracks, false),
-            "shuffle" => match header.shuffle_playlist {
+            "play" => self.play_tracks(tracks, false),
+            "shuffle" => match shuffle_playlist {
                 Some(playlist) => {
                     let api = self.api.clone();
                     self.spawn(
                         async move { api.playlist_tracks(&playlist).await },
                         move |app, result| match result {
-                            Ok(tracks) if !tracks.is_empty() => app.play_tracks(tracks, true),
-                            _ => app.play_tracks(header.tracks, true),
+                            Ok(found) if !found.is_empty() => app.play_tracks(found, true),
+                            _ => app.play_tracks(tracks, true),
                         },
                     );
                 }
-                None => self.play_tracks(header.tracks, true),
+                None => self.play_tracks(tracks, true),
             },
             "radio" => {
-                if let Some(radio) = header.radio_id {
+                if let Some(radio) = radio_id {
                     self.play_radio(radio);
                 }
             }
@@ -190,10 +208,7 @@ impl App {
     }
 
     pub(super) fn track_action(self: &Rc<Self>, action: &str, section: usize, index: usize) {
-        let Some(track) = self
-            .section_tracks(section)
-            .and_then(|(tracks, _)| tracks.get(index).cloned())
-        else {
+        let Some(track) = self.section_track(section, index) else {
             return;
         };
         match action {

@@ -123,9 +123,7 @@ pub struct Header {
     pub round: bool,
     /// Artists show their wide header image behind the title.
     pub banner: bool,
-    /// Tracks the Play and Shuffle buttons queue.
-    pub tracks: Vec<Track>,
-    /// Playlist whose tracks Shuffle loads when `tracks` is incomplete.
+    /// Playlist whose tracks Shuffle loads when the page's are incomplete.
     pub shuffle_playlist: Option<String>,
     pub radio_id: Option<String>,
 }
@@ -134,14 +132,44 @@ pub struct Header {
 pub struct Page {
     pub header: Option<Header>,
     pub sections: Vec<Section>,
-    /// Tracks of a long playlist still to fetch after its first page shows.
-    pub more: Option<MoreTracks>,
+    /// What the page still has to fetch after it shows; `Api::complete`
+    /// fetches a step of it at a time.
+    pub more: Option<More>,
+}
+
+impl Page {
+    /// The tracks the header's Play and Shuffle buttons queue: the page's
+    /// track list, which comes first.
+    pub fn header_tracks(&self) -> &[Track] {
+        match self.sections.first() {
+            Some(Section::Tracks { tracks, .. }) if self.header.is_some() => tracks,
+            _ => &[],
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum More {
+    /// The rest of a long playlist's tracks.
+    Tracks(MoreTracks),
+    /// The home feed's further shelves.
+    Shelves(MoreShelves),
 }
 
 #[derive(Debug, Clone)]
 pub struct MoreTracks {
     pub(super) tracks: Paginator<TrackItem>,
     pub(super) count: Option<u64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct MoreShelves {
+    /// Continuation token of the next page.
+    pub(super) token: String,
+    /// Pages still to fetch.
+    pub(super) pages_left: usize,
+    /// Sections shown after the last shelf, such as the genre chips.
+    pub(super) trailing: Vec<Section>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

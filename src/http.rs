@@ -17,6 +17,12 @@ const ALLOWED_DOMAINS: &[&str] = &[
     "gstatic.com",
 ];
 const MAX_REDIRECTS: usize = 10;
+/// Idle connections are kept this long, with HTTP/2 pings meanwhile, so the
+/// next song's requests a few minutes after the last skip the TCP and TLS
+/// handshakes. A ping that goes unanswered drops the connection.
+const POOL_IDLE: Duration = Duration::from_secs(5 * 60);
+const KEEP_ALIVE_EVERY: Duration = Duration::from_secs(30);
+const KEEP_ALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 
 /// Whether the app may request `url`: HTTPS on an allowed domain. URLs
 /// from YouTube's responses, such as artwork and streams, are checked with
@@ -52,10 +58,20 @@ pub fn redirects(domains: &'static [&'static str]) -> redirect::Policy {
     })
 }
 
+/// Connection reuse settings shared with rustypipe's client, which talks to
+/// the same hosts.
+pub fn keep_alive(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    builder
+        .pool_idle_timeout(POOL_IDLE)
+        .http2_keep_alive_interval(KEEP_ALIVE_EVERY)
+        .http2_keep_alive_timeout(KEEP_ALIVE_TIMEOUT)
+        .http2_keep_alive_while_idle(true)
+}
+
 pub fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
+        keep_alive(reqwest::Client::builder())
             .timeout(Duration::from_secs(15))
             .redirect(redirects(ALLOWED_DOMAINS))
             .build()
@@ -63,12 +79,15 @@ pub fn client() -> &'static reqwest::Client {
     })
 }
 
-/// For the audio download thread.
+/// For the audio download thread. Audio is fetched in byte ranges, whose
+/// lengths must be the bytes on the wire, so it asks for no compression.
 pub fn blocking_client() -> &'static reqwest::blocking::Client {
     static CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(30))
+            .no_gzip()
+            .no_brotli()
             .redirect(redirects(ALLOWED_DOMAINS))
             .build()
             .expect("HTTP client builds")

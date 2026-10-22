@@ -85,6 +85,7 @@ impl Download {
             return;
         }
         let mut retries = 0;
+        let mut buf = vec![0; READ_BUF];
         loop {
             let (offset, total) = {
                 let state = self.state.lock().unwrap();
@@ -96,7 +97,7 @@ impl Download {
             if total > 0 && offset >= total {
                 break;
             }
-            match self.fetch(url, headers, offset, total) {
+            match self.fetch(url, headers, offset, total, &mut buf) {
                 Ok(true) => break,
                 Ok(false) => retries = 0,
                 Err(e) if retries < MAX_RETRIES => {
@@ -116,14 +117,15 @@ impl Download {
         self.changed.notify_all();
     }
 
-    /// Fetches one range starting at `offset`. Returns `true` once the whole
-    /// file has arrived.
+    /// Fetches one range starting at `offset`, reading through `buf`.
+    /// Returns `true` once the whole file has arrived.
     fn fetch(
         &self,
         url: &str,
         headers: &[(String, String)],
         offset: u64,
         total: u64,
+        buf: &mut [u8],
     ) -> Result<bool, Box<dyn std::error::Error>> {
         let mut request = crate::http::blocking_client().get(url);
         for (name, value) in headers {
@@ -141,9 +143,8 @@ impl Download {
             state.data.reserve(length.min(MAX_RESERVE) as usize);
         }
 
-        let mut buf = vec![0; READ_BUF];
         loop {
-            let n = response.read(&mut buf)?;
+            let n = response.read(buf)?;
             if n == 0 {
                 break;
             }

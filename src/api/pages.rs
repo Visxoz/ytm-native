@@ -1,19 +1,43 @@
 //! The pages behind each route.
 
-use rustypipe::model::{AlbumType, MusicItem, richtext::ToPlaintext};
+use std::future::Future;
+
+use rustypipe::model::{AlbumType, MusicGenreItem, MusicItem, richtext::ToPlaintext};
 
 use super::{
-    Api, Card, CardKind, CardLayout, Header, MoreTracks, PLAYLIST_LIMIT, Page, QueueMode, Result,
-    Route, Section,
+    Api, Card, CardKind, CardLayout, Header, More, MoreShelves, MoreTracks, PLAYLIST_LIMIT, Page,
+    QueueMode, Result, Route, Section,
     convert::{
         CARD_THUMB, HEADER_THUMB, ROW_THUMB, album_card, album_type, artist_card, artist_refs,
         card_section, genre_card, join_artists, pick_thumb, playlist_card, track_section, tracks,
     },
     err,
     format::{compact, playlist_meta, songs, total_time},
+    home_feed,
 };
 
 const HOME_SHELF: usize = 20;
+const HOME_GENRES: usize = 12;
+
+fn genre_section(genres: Vec<MusicGenreItem>) -> Option<Section> {
+    card_section(
+        "Browse moods & genres",
+        genres
+            .into_iter()
+            .take(HOME_GENRES)
+            .map(genre_card)
+            .collect(),
+        CardLayout::Chips,
+    )
+}
+
+fn sections_page(sections: Vec<Section>) -> Page {
+    Page {
+        header: None,
+        sections,
+        more: None,
+    }
+}
 
 impl Api {
     pub async fn page(&self, route: &Route, signed_in: bool) -> Result<Page> {
@@ -29,35 +53,50 @@ impl Api {
         }
     }
 
+    /// Home: the personal feed when signed in, otherwise the charts. The
+    /// feed's first page shows at once, and `complete` adds the next ones.
     async fn home(&self, signed_in: bool) -> Result<Page> {
         let q = self.q();
-        if signed_in {
-            let (feed, genres) = tokio::join!(super::home_feed::fetch(&q), q.music_genres());
-            match feed {
-                Ok(mut sections) if !sections.is_empty() => {
-                    sections.extend(card_section(
-                        "Browse moods & genres",
-                        genres
-                            .unwrap_or_default()
-                            .into_iter()
-                            .take(12)
-                            .map(genre_card)
-                            .collect(),
-                        CardLayout::Chips,
-                    ));
-                    return Ok(Page {
-                        header: None,
-                        sections,
-                        more: None,
-                    });
+        let genres = async { genre_section(q.music_genres().await.unwrap_or_default()) };
+        if !signed_in {
+            return self.public_home(genres).await;
+        }
+        let user = self.user_q();
+        let (feed, genres) = tokio::join!(home_feed::first(&user), genres);
+        match feed {
+            Ok((mut sections, token)) if !sections.is_empty() => {
+                let more = token.map(|token| {
+                    More::Shelves(MoreShelves {
+                        token,
+                        pages_left: home_feed::CONTINUATIONS,
+                        trailing: genres.clone().into_iter().collect(),
+                    })
+                });
+                if more.is_none() {
+                    sections.extend(genres);
                 }
-                Ok(_) => log::warn!("the personal home feed was empty"),
-                Err(e) => log::warn!("could not load the personal home feed: {e}"),
+                Ok(Page {
+                    header: None,
+                    sections,
+                    more,
+                })
+            }
+            Ok(_) => {
+                log::warn!("the personal home feed was empty");
+                self.public_home(std::future::ready(genres)).await
+            }
+            Err(e) => {
+                log::warn!("could not load the personal home feed: {e}");
+                self.public_home(std::future::ready(genres)).await
             }
         }
+    }
 
+    /// Home for everyone: the charts and new releases.
+    async fn public_home(&self, genres: impl Future<Output = Option<Section>>) -> Result<Page> {
+        let q = self.q();
         let (charts, new_albums, genres) =
-            tokio::join!(q.music_charts(None), q.music_new_albums(), q.music_genres());
+            tokio::join!(q.music_charts(None), q.music_new_albums(), genres);
         let charts = charts.map_err(err)?;
 
         // Chart track lists are empty nowadays; the Trending playlist has them.
@@ -100,21 +139,8 @@ impl Api {
                 .collect(),
             CardLayout::Carousel,
         ));
-        sections.extend(card_section(
-            "Browse moods & genres",
-            genres
-                .unwrap_or_default()
-                .into_iter()
-                .take(12)
-                .map(genre_card)
-                .collect(),
-            CardLayout::Chips,
-        ));
-        Ok(Page {
-            header: None,
-            sections,
-            more: None,
-        })
+        sections.extend(genres);
+        Ok(sections_page(sections))
     }
 
     async fn explore(&self) -> Result<Page> {
@@ -151,11 +177,7 @@ impl Api {
                 .collect(),
             QueueMode::Radio,
         ));
-        Ok(Page {
-            header: None,
-            sections,
-            more: None,
-        })
+        Ok(sections_page(sections))
     }
 
     async fn library(&self) -> Result<Page> {
@@ -188,11 +210,7 @@ impl Api {
                 .collect(),
             CardLayout::Grid,
         ));
-        Ok(Page {
-            header: None,
-            sections,
-            more: None,
-        })
+        Ok(sections_page(sections))
     }
 
     /// Liked music followed by the saved playlists, for the sidebar.
@@ -215,11 +233,12 @@ impl Api {
                 track: None,
             });
         }
+        let liked_id = liked.as_ref().ok().map(|l| l.id.as_str());
         cards.extend(
             playlists
                 .items
                 .into_iter()
-                .filter(|p| liked.as_ref().is_ok_and(|l| l.id != p.id) || liked.is_err())
+                .filter(|p| liked_id != Some(p.id.as_str()))
                 // Episodes for Later is a podcast page, which does not open
                 // as a playlist.
                 .filter(|p| p.id != "SE")
@@ -297,11 +316,7 @@ impl Api {
         if sections.is_empty() {
             return Err(format!("No results for \u{201c}{query}\u{201d}"));
         }
-        Ok(Page {
-            header: None,
-            sections,
-            more: None,
-        })
+        Ok(sections_page(sections))
     }
 
     pub(super) async fn album(&self, id: &str) -> Result<Page> {
@@ -335,7 +350,6 @@ impl Api {
             thumb: pick_thumb(&album.cover, HEADER_THUMB),
             round: false,
             banner: false,
-            tracks: tracks.clone(),
             shuffle_playlist: None,
             radio_id: album.playlist_id.map(|p| format!("RDAMPL{p}")),
         };
@@ -361,10 +375,12 @@ impl Api {
     async fn playlist(&self, id: &str) -> Result<Page> {
         let playlist = self.fetch_playlist(id, false).await?;
         let tracks = tracks(playlist.tracks.items.clone());
-        let more = (playlist.tracks.ctoken.is_some() && !tracks.is_empty()).then_some(MoreTracks {
-            tracks: playlist.tracks,
-            count: playlist.track_count,
-        });
+        let more = (playlist.tracks.ctoken.is_some() && !tracks.is_empty()).then_some(
+            More::Tracks(MoreTracks {
+                tracks: playlist.tracks,
+                count: playlist.track_count,
+            }),
+        );
         let header = Header {
             label: "Playlist".to_owned(),
             title: playlist.name,
@@ -377,7 +393,6 @@ impl Api {
             thumb: pick_thumb(&playlist.thumbnail, HEADER_THUMB),
             round: false,
             banner: false,
-            tracks: tracks.clone(),
             shuffle_playlist: None,
             radio_id: Some(format!("RDAMPL{}", playlist.id)),
         };
@@ -400,21 +415,47 @@ impl Api {
         })
     }
 
-    /// Fetches the rest of a playlist page's tracks, up to `PLAYLIST_LIMIT`.
-    /// Keeps what arrived should a later request fail.
+    /// Fetches the next step of what `page` has still to show, and leaves
+    /// `more` set while there is another. Keeps what arrived should a
+    /// request fail.
     pub async fn complete(&self, mut page: Page) -> Page {
-        let Some(MoreTracks { mut tracks, count }) = page.more.take() else {
-            return page;
-        };
-        let shown = tracks.items.len();
-        let _ = tracks.extend_limit(self.q(), PLAYLIST_LIMIT).await;
-        let extra = super::convert::tracks(tracks.items.split_off(shown));
-        if let Some(Section::Tracks { tracks, .. }) = page.sections.first_mut() {
-            tracks.extend_from_slice(&extra);
-        }
-        if let Some(header) = &mut page.header {
-            header.tracks.extend(extra);
-            header.meta = playlist_meta(count, &header.tracks);
+        match page.more.take() {
+            None => {}
+            // The rest of a playlist's tracks, up to `PLAYLIST_LIMIT`, in one go.
+            Some(More::Tracks(MoreTracks { mut tracks, count })) => {
+                let shown = tracks.items.len();
+                let _ = tracks.extend_limit(self.q(), PLAYLIST_LIMIT).await;
+                let extra = super::convert::tracks(tracks.items.split_off(shown));
+                if let Some(Section::Tracks { tracks, .. }) = page.sections.first_mut() {
+                    tracks.extend(extra);
+                }
+                let meta = playlist_meta(count, page.header_tracks());
+                if let Some(header) = &mut page.header {
+                    header.meta = meta;
+                }
+            }
+            // One page of home feed shelves at a time, so each shows as it
+            // arrives.
+            Some(More::Shelves(more)) => match home_feed::next(&self.user_q(), &more.token).await {
+                Ok((sections, token)) => {
+                    page.sections.extend(sections);
+                    let pages_left = more.pages_left - 1;
+                    match token.filter(|_| pages_left > 0) {
+                        Some(token) => {
+                            page.more = Some(More::Shelves(MoreShelves {
+                                token,
+                                pages_left,
+                                trailing: more.trailing,
+                            }));
+                        }
+                        None => page.sections.extend(more.trailing),
+                    }
+                }
+                Err(e) => {
+                    log::warn!("could not load more of the home feed: {e}");
+                    page.sections.extend(more.trailing);
+                }
+            },
         }
         page
     }
@@ -439,7 +480,6 @@ impl Api {
                 .map(|t| t.url.clone()),
             round: true,
             banner: true,
-            tracks: top.clone(),
             shuffle_playlist: artist.tracks_playlist_id,
             radio_id: artist.radio_id,
         };

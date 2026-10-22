@@ -25,7 +25,9 @@ pub const AVATAR: u32 = 26;
 /// Decoded artwork kept for reuse, in bytes. Images still on screen stay
 /// alive regardless, as Slint holds its own reference.
 const CACHE_BUDGET: usize = 32 * 1024 * 1024;
-const PARALLEL_FETCHES: usize = 8;
+/// Thumbnails are a few KB each and share HTTP/2 connections, so a page's
+/// worth is fetched widely in parallel.
+const PARALLEL_FETCHES: usize = 16;
 
 thread_local! {
     static CACHE: RefCell<Cache> = RefCell::new(Cache::default());
@@ -123,7 +125,7 @@ pub async fn load(rt: &Handle, url: &str, edge: u32) -> Option<Image> {
 
     // Only artwork with something drawn behind it needs a colour picked.
     let with_accent = matches!(edge, PLAYER | HEADER | BANNER);
-    let image = fetch(rt, url.to_owned(), physical(edge), with_accent)
+    let image = fetch(rt, url.to_owned(), edge, with_accent)
         .await
         .map(|(buffer, accent)| {
             let image = Image::from_rgba8(buffer);
@@ -143,16 +145,26 @@ pub async fn load(rt: &Handle, url: &str, edge: u32) -> Option<Image> {
     image
 }
 
+/// Fetches `url` and decodes it at `edge` logical pixels.
 async fn fetch(
     rt: &Handle,
     url: String,
-    pixels: u32,
+    edge: u32,
     with_accent: bool,
 ) -> Option<(SharedPixelBuffer<Rgba8Pixel>, Option<Color>)> {
     if !crate::http::allowed(&url) {
         log::debug!("skipped artwork from a host YouTube does not use");
         return None;
     }
+    let pixels = physical(edge);
+    // googleusercontent renders any size, so ask for the pixels drawn rather
+    // than download a larger rendition and scale it down. Banners keep the
+    // wide rendition they came with, as a square size would crop them.
+    let url = if edge == BANNER {
+        url
+    } else {
+        crate::api::resize_thumb(&url, pixels)
+    };
     rt.spawn(async move {
         let _permit = permits().acquire().await.ok()?;
         let bytes = crate::http::client()
@@ -194,7 +206,8 @@ fn decode(
         image
     };
     let accent = with_accent.then(|| accent_of(&image));
-    let rgba = image.to_rgba8();
+    // Consumes the image, so one already in RGBA is not copied first.
+    let rgba = image.into_rgba8();
     let buffer = SharedPixelBuffer::clone_from_slice(rgba.as_raw(), rgba.width(), rgba.height());
     Some((buffer, accent))
 }
