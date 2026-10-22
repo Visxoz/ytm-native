@@ -1,7 +1,7 @@
 //! Keeps one copy of the app running; a second launch focuses the first.
 
 use windows_sys::Win32::{
-    Foundation::{ERROR_ALREADY_EXISTS, HANDLE},
+    Foundation::{CloseHandle, ERROR_ALREADY_EXISTS, HANDLE},
     System::Threading::CreateMutexW,
     UI::WindowsAndMessaging::{FindWindowW, SW_RESTORE, SetForegroundWindow, ShowWindow},
 };
@@ -12,8 +12,18 @@ fn wide(s: &str) -> Vec<u16> {
     s.encode_utf16().chain(std::iter::once(0)).collect()
 }
 
-/// Held for the life of the process; the mutex closes when it exits.
-pub struct Guard(#[allow(dead_code)] HANDLE);
+/// Holds the mutex until dropped, so an update can start the new copy
+/// before this process has fully exited.
+pub struct Guard(HANDLE);
+
+impl Drop for Guard {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            // SAFETY: the handle came from CreateMutexW and is closed once.
+            unsafe { CloseHandle(self.0) };
+        }
+    }
+}
 
 /// Returns `None` if another instance is running, after focusing it.
 pub fn acquire(window_title: &str) -> Option<Guard> {
@@ -26,9 +36,12 @@ fn acquire_named(mutex: &str, window_title: &str) -> Option<Guard> {
     let handle = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
     let exists =
         std::io::Error::last_os_error().raw_os_error() == Some(ERROR_ALREADY_EXISTS as i32);
+    let guard = Guard(handle);
     if handle.is_null() || !exists {
-        return Some(Guard(handle));
+        return Some(guard);
     }
+    // Let go of the other copy's mutex at once, rather than at exit.
+    drop(guard);
     let title = wide(window_title);
     // SAFETY: `title` is NUL-terminated; a null class matches any window.
     let hwnd = unsafe { FindWindowW(std::ptr::null(), title.as_ptr()) };
@@ -54,6 +67,11 @@ mod tests {
         assert!(
             acquire_named(&mutex, "no such window").is_none(),
             "a second instance stops"
+        );
+        drop(first);
+        assert!(
+            acquire_named(&mutex, "no such window").is_some(),
+            "a new copy runs once the first lets go, as after an update"
         );
     }
 }

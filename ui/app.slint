@@ -501,6 +501,11 @@ export component AppWindow inherits Window {
     in property <bool> autoplay;
     in property <bool> premium-audio;
     in property <string> premium-status;
+    // A newer version to install, or empty, and the Updates row's text.
+    in property <string> update-version;
+    in property <string> update-status;
+    in property <bool> update-busy;
+    in property <bool> check-updates;
 
     in property <string> toast;
     in property <bool> toast-visible;
@@ -533,6 +538,8 @@ export component AppWindow inherits Window {
     callback sign-out();
     callback set-normalise(value: bool);
     callback set-discord(value: bool);
+    callback set-check-updates(value: bool);
+    callback install-update();
     callback set-autoplay(value: bool);
     callback set-premium-audio(value: bool);
     // Delivered from background threads through the event loop.
@@ -686,6 +693,7 @@ export component AppWindow inherits Window {
                         icon: Icons.settings;
                         size: 36px;
                         icon-size: 20px;
+                        show-dot: root.update-version != "";
                         clicked => { root.settings-open = true; }
                     }
 
@@ -1393,6 +1401,23 @@ export component AppWindow inherits Window {
                     y: (parent.height - self.height) / 2;
                     checked: root.discord;
                     toggled(v) => { root.set-discord(v); }
+                }
+            }
+
+            SettingRow {
+                label: "Updates";
+                detail: root.update-status;
+                if root.update-version != "" && !root.update-busy: PillButton {
+                    y: (parent.height - self.height) / 2;
+                    text: "Update to " + root.update-version;
+                    primary: true;
+                    small: true;
+                    clicked => { root.install-update(); }
+                }
+                if root.update-version == "": Toggle {
+                    y: (parent.height - self.height) / 2;
+                    checked: root.check-updates;
+                    toggled(v) => { root.set-check-updates(v); }
                 }
             }
 

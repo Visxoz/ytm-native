@@ -30,9 +30,23 @@ jobs:
       - name: Build
         run: cargo build --release --locked
 
+      # Inno Setup builds the installer into dist/, beside the portable exe.
+      - name: Build installer
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            choco install innosetup --yes --no-progress
+            if ($LASTEXITCODE -ne 0) { throw 'could not install Inno Setup' }
+          }
+          $version = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"' |
+            Select-Object -First 1).Matches[0].Groups[1].Value
+          & $iscc /Qp "/DAppVersion=$version" installer/ytm-native.iss
+          if ($LASTEXITCODE -ne 0) { throw 'the installer did not build' }
+          Copy-Item target/release/ytm-native.exe dist/
+
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ytm-native-${{ github.sha }}
-          path: target/release/ytm-native.exe
+          path: dist/*.exe
           if-no-files-found: error
           retention-days: 14

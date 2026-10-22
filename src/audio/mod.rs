@@ -1,5 +1,12 @@
 //! Audio engine: one thread decodes the current stream into a sample queue
 //! that the output device drains.
+//!
+//! Gapless playback: the app queues the next track shortly before the
+//! current one ends. Its download starts at once and its decoder opens on a
+//! side thread, so the engine never waits on the network. When the current
+//! track runs out, the next one's samples follow in the same queue, and the
+//! device callback marks the sample where it becomes audible; only then does
+//! the app hear that the track changed.
 
 pub mod decode;
 mod opus;
@@ -41,13 +48,19 @@ pub struct StreamSpec {
 pub enum PlayerEvent {
     /// The track has started producing sound.
     Started,
-    /// The track played to the end.
+    /// The queued track has become audible, with no gap.
+    Advanced,
+    /// The queued track was dropped, as a seek kept the current one going.
+    NextDropped,
+    /// The track played to the end, with nothing queued.
     Ended,
     Error(String),
 }
 
 enum Command {
     Load(StreamSpec, Arc<Download>),
+    Queue(StreamSpec, Arc<Download>),
+    ClearNext,
     Seek(f64),
     Stop,
 }
@@ -62,6 +75,13 @@ struct Output {
     frames_played: u64,
     /// Set by the device callback when the queue ran dry.
     underrun: bool,
+    /// The frame count at which the queued track's samples start, once its
+    /// samples follow the current track's in the queue.
+    switch_at: Option<u64>,
+    /// The queued track's loudness correction, applied as it starts.
+    next_loudness: f32,
+    /// Set by the device callback once the queued track is audible.
+    advanced: bool,
 }
 
 impl Output {
@@ -76,7 +96,29 @@ impl Output {
         self.samples.clear();
         self.base_secs = base_secs;
         self.frames_played = 0;
+        self.switch_at = None;
     }
+
+    /// Counts `frames` as played. Returns the next track's loudness
+    /// correction when they cross into it, which then counts from zero.
+    fn played(&mut self, frames: u64) -> Option<f32> {
+        self.frames_played += frames;
+        let at = self.switch_at?;
+        if self.frames_played < at {
+            return None;
+        }
+        self.frames_played -= at;
+        self.base_secs = 0.0;
+        self.switch_at = None;
+        self.advanced = true;
+        Some(self.next_loudness)
+    }
+}
+
+fn loudness_gain(loudness_db: Option<f32>) -> f32 {
+    loudness_db
+        .filter(|db| *db > 0.0)
+        .map_or(1.0, |db| 10f32.powf(-db / 20.0))
 }
 
 struct Shared {
@@ -87,10 +129,24 @@ struct Shared {
     volume: AtomicU32,
     normalise: AtomicBool,
     loudness_gain: AtomicU32,
+    /// The audible track's download.
     download: Mutex<Option<Arc<Download>>>,
+    /// The queued track's download.
+    next_download: Mutex<Option<Arc<Download>>>,
 }
 
 impl Shared {
+    fn set_loudness(&self, gain: f32) {
+        self.loudness_gain.store(gain.to_bits(), Ordering::Relaxed);
+        self.update_gain();
+    }
+
+    fn cancel_next(&self) {
+        if let Some(next) = self.next_download.lock().unwrap().take() {
+            next.cancel();
+        }
+    }
+
     fn update_gain(&self) {
         let volume = f32::from_bits(self.volume.load(Ordering::Relaxed));
         let loudness = if self.normalise.load(Ordering::Relaxed) {
@@ -120,6 +176,9 @@ impl Player {
                 base_secs: 0.0,
                 frames_played: 0,
                 underrun: false,
+                switch_at: None,
+                next_loudness: 1.0,
+                advanced: false,
             }),
             paused: AtomicBool::new(false),
             gain: AtomicU32::new(1f32.to_bits()),
@@ -127,6 +186,7 @@ impl Player {
             normalise: AtomicBool::new(true),
             loudness_gain: AtomicU32::new(1f32.to_bits()),
             download: Mutex::new(None),
+            next_download: Mutex::new(None),
         });
         let (tx, rx) = mpsc::channel();
         let engine_shared = Arc::clone(&shared);
@@ -142,16 +202,32 @@ impl Player {
         if let Some(old) = self.shared.download.lock().unwrap().take() {
             old.cancel();
         }
+        self.shared.cancel_next();
         let download = Download::start(spec.url.clone(), spec.size, spec.headers.clone());
         *self.shared.download.lock().unwrap() = Some(Arc::clone(&download));
         self.shared.paused.store(false, Ordering::Relaxed);
         let _ = self.tx.send(Command::Load(spec, download));
     }
 
+    /// Queues the track to follow the current one without a gap, replacing
+    /// any queued before. Its download starts now.
+    pub fn queue_next(&self, spec: StreamSpec) {
+        self.shared.cancel_next();
+        let download = Download::start(spec.url.clone(), spec.size, spec.headers.clone());
+        *self.shared.next_download.lock().unwrap() = Some(Arc::clone(&download));
+        let _ = self.tx.send(Command::Queue(spec, download));
+    }
+
+    pub fn clear_next(&self) {
+        self.shared.cancel_next();
+        let _ = self.tx.send(Command::ClearNext);
+    }
+
     pub fn stop(&self) {
         if let Some(old) = self.shared.download.lock().unwrap().take() {
             old.cancel();
         }
+        self.shared.cancel_next();
         let _ = self.tx.send(Command::Stop);
     }
 
@@ -208,12 +284,25 @@ struct Track {
     started: bool,
 }
 
+/// The queued track, whose decoder opens on a side thread, as opening reads
+/// the first of the download and would block the engine.
+struct Next {
+    download: Arc<Download>,
+    loudness: f32,
+    opened: Receiver<Result<Decoder, String>>,
+    decoder: Option<Decoder>,
+}
+
 struct Engine {
     rx: Receiver<Command>,
     shared: Arc<Shared>,
     on_event: Box<dyn Fn(PlayerEvent) + Send>,
     stream: Option<(cpal::Stream, u32, usize)>,
     track: Option<Track>,
+    next: Option<Next>,
+    /// The track still audible after the queued one took over decoding,
+    /// kept so a seek before the switch can return to it.
+    previous: Option<Track>,
     scratch: Vec<f32>,
 }
 
@@ -229,6 +318,8 @@ impl Engine {
             on_event,
             stream: None,
             track: None,
+            next: None,
+            previous: None,
             scratch: Vec::new(),
         }
     }
@@ -250,15 +341,165 @@ impl Engine {
             };
             match command {
                 Some(Command::Load(spec, download)) => self.load(spec, download),
+                Some(Command::Queue(spec, download)) => self.queue(spec, download),
+                Some(Command::ClearNext) => {
+                    self.undo_switch();
+                    self.next = None;
+                }
                 Some(Command::Seek(secs)) => self.seek(secs),
                 Some(Command::Stop) => {
                     self.track = None;
+                    self.next = None;
+                    self.previous = None;
                     self.shared.output.lock().unwrap().reset(0.0);
                 }
-                None if self.wants_samples() => self.decode_some(),
-                None => self.check_finished(),
+                None => {
+                    self.poll_next();
+                    self.check_advanced();
+                    self.try_switch();
+                    if self.wants_samples() {
+                        self.decode_some();
+                    } else {
+                        self.check_finished();
+                    }
+                }
             }
         }
+    }
+
+    fn queue(&mut self, spec: StreamSpec, download: Arc<Download>) {
+        // A replaced queued track may already have taken over decoding.
+        self.undo_switch();
+        self.next = None;
+        let (tx, opened) = mpsc::channel();
+        let reader = download.reader();
+        let mime = spec.mime;
+        let spawned = thread::Builder::new()
+            .name("next-track".into())
+            .spawn(move || {
+                let _ = tx.send(Decoder::open(reader, &mime));
+            });
+        if let Err(e) = spawned {
+            log::warn!("could not open the next track: {e}");
+            return;
+        }
+        self.next = Some(Next {
+            download,
+            loudness: loudness_gain(spec.loudness_db),
+            opened,
+            decoder: None,
+        });
+    }
+
+    fn poll_next(&mut self) {
+        let Some(next) = &mut self.next else {
+            return;
+        };
+        if next.decoder.is_some() {
+            return;
+        }
+        match next.opened.try_recv() {
+            Ok(Ok(decoder)) => next.decoder = Some(decoder),
+            // The track then loads as usual once the current one ends.
+            Ok(Err(e)) => {
+                log::debug!("the next track did not open: {e}");
+                self.next = None;
+            }
+            Err(mpsc::TryRecvError::Empty) => {}
+            Err(mpsc::TryRecvError::Disconnected) => self.next = None,
+        }
+    }
+
+    /// Moves decoding on to the queued track once the current one is fully
+    /// decoded. Of the same format, its samples follow straight on;
+    /// otherwise the device reopens once the current track has played out.
+    fn try_switch(&mut self) {
+        let finished = self.track.as_ref().is_some_and(|t| t.finished);
+        let ready = self.next.as_ref().is_some_and(|n| n.decoder.is_some());
+        if !finished || !ready || self.previous.is_some() {
+            return;
+        }
+        let mut output = self.shared.output.lock().unwrap();
+        let decoder = self.next.as_ref().and_then(|n| n.decoder.as_ref());
+        let same_format =
+            decoder.is_some_and(|d| d.rate == output.rate && d.channels == output.channels);
+        if !same_format && !output.samples.is_empty() {
+            return;
+        }
+        let Some(Next {
+            download,
+            loudness,
+            decoder: Some(decoder),
+            ..
+        }) = self.next.take()
+        else {
+            return;
+        };
+        let (rate, channels) = (decoder.rate, decoder.channels);
+        let track = Track {
+            decoder,
+            download,
+            finished: false,
+            started: true,
+        };
+        if same_format {
+            let queued = (output.samples.len() / output.channels.max(1)) as u64;
+            output.switch_at = Some(output.frames_played + queued);
+            output.next_loudness = loudness;
+            drop(output);
+            self.previous = self.track.replace(track);
+        } else {
+            drop(output);
+            if let Err(e) = self.ensure_stream(rate, channels) {
+                (self.on_event)(PlayerEvent::Error(e));
+                return;
+            }
+            self.shared.output.lock().unwrap().reset(0.0);
+            self.shared.set_loudness(loudness);
+            self.track = Some(track);
+            self.became_audible();
+        }
+    }
+
+    /// Undoes a switch the listener has not heard yet: the queued track's
+    /// samples leave the queue and the previous track plays out.
+    fn undo_switch(&mut self) -> bool {
+        let Some(previous) = self.previous.take() else {
+            return false;
+        };
+        if let Some(switched) = self.track.replace(previous) {
+            switched.download.cancel();
+        }
+        let mut output = self.shared.output.lock().unwrap();
+        if let Some(at) = output.switch_at.take() {
+            let frames = at.saturating_sub(output.frames_played) as usize;
+            let keep = frames * output.channels;
+            output.samples.truncate(keep);
+        }
+        true
+    }
+
+    fn check_advanced(&mut self) {
+        let advanced = std::mem::take(&mut self.shared.output.lock().unwrap().advanced);
+        if advanced {
+            self.previous = None;
+            self.became_audible();
+        }
+    }
+
+    /// The current track's download becomes the audible one, for progress.
+    fn became_audible(&mut self) {
+        let Some(download) = self.track.as_ref().map(|t| Arc::clone(&t.download)) else {
+            return;
+        };
+        {
+            let mut next = self.shared.next_download.lock().unwrap();
+            if next.as_ref().is_some_and(|n| Arc::ptr_eq(n, &download)) {
+                *next = None;
+            }
+        }
+        *self.shared.download.lock().unwrap() = Some(download);
+        (self.on_event)(PlayerEvent::Advanced);
     }
 
     fn wants_samples(&self) -> bool {
@@ -276,16 +517,10 @@ impl Engine {
 
     fn load(&mut self, spec: StreamSpec, download: Arc<Download>) {
         self.track = None;
+        self.next = None;
+        self.previous = None;
         self.shared.output.lock().unwrap().reset(0.0);
-
-        let loudness_gain = spec
-            .loudness_db
-            .filter(|db| *db > 0.0)
-            .map_or(1.0, |db| 10f32.powf(-db / 20.0));
-        self.shared
-            .loudness_gain
-            .store(loudness_gain.to_bits(), Ordering::Relaxed);
-        self.shared.update_gain();
+        self.shared.set_loudness(loudness_gain(spec.loudness_db));
 
         let mut decoder = match Decoder::open(download.reader(), &spec.mime) {
             Ok(decoder) => decoder,
@@ -332,6 +567,11 @@ impl Engine {
     }
 
     fn seek(&mut self, secs: f64) {
+        // A seek lands in the track still audible, so a queued track that
+        // already took over decoding is dropped, and the app queues it again.
+        if self.undo_switch() {
+            (self.on_event)(PlayerEvent::NextDropped);
+        }
         let Some(track) = &mut self.track else {
             return;
         };
@@ -378,6 +618,10 @@ impl Engine {
         let Some(track) = &self.track else {
             return;
         };
+        // A queued track still opening takes over once it can.
+        if self.next.is_some() {
+            return;
+        }
         if track.finished && self.shared.output.lock().unwrap().samples.is_empty() {
             // A stream that ends without a sound is broken, not finished: as
             // "ended" it would skip through the queue fetching every track.
@@ -450,6 +694,58 @@ fn fill(shared: &Shared, data: &mut [f32]) {
         *out = sample * gain;
     }
     data[n..].fill(0.0);
-    output.frames_played += (n / channels) as u64;
+    if let Some(loudness) = output.played((n / channels) as u64) {
+        shared.set_loudness(loudness);
+    }
     output.underrun = n < data.len() && output.rate > 0;
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn output() -> Output {
+        Output {
+            samples: VecDeque::new(),
+            rate: 48_000,
+            channels: 2,
+            base_secs: 30.0,
+            frames_played: 0,
+            underrun: false,
+            switch_at: None,
+            next_loudness: 0.5,
+            advanced: false,
+        }
+    }
+
+    #[test]
+    fn counts_frames_without_a_queued_track() {
+        let mut out = output();
+        assert_eq!(out.played(48_000), None);
+        assert_eq!(out.position(), 31.0);
+        assert!(!out.advanced);
+    }
+
+    #[test]
+    fn crosses_into_the_queued_track_at_its_first_frame() {
+        let mut out = output();
+        out.switch_at = Some(1_000);
+        assert_eq!(out.played(600), None, "still the current track");
+        assert_eq!(out.played(600), Some(0.5), "crossed, with its loudness");
+        assert!(out.advanced);
+        assert_eq!(out.switch_at, None);
+        assert_eq!(out.frames_played, 200, "the next track's frames so far");
+        assert_eq!(out.base_secs, 0.0);
+    }
+
+    #[test]
+    fn applies_the_next_tracks_loudness() {
+        assert_eq!(loudness_gain(None), 1.0);
+        assert_eq!(
+            loudness_gain(Some(-3.0)),
+            1.0,
+            "quiet tracks stay as they are"
+        );
+        assert!((loudness_gain(Some(6.0)) - 0.501).abs() < 0.001);
+    }
 }

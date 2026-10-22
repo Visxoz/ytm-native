@@ -18,6 +18,7 @@ mod secret;
 mod settings;
 mod single_instance;
 mod streams;
+mod update;
 
 use std::{rc::Rc, time::Duration};
 
@@ -110,9 +111,10 @@ fn add_fallback_fonts() {
 fn main() {
     add_fallback_fonts();
     logger::init();
-    let Some(_instance) = single_instance::acquire(WINDOW_TITLE) else {
+    let Some(instance) = single_instance::acquire(WINDOW_TITLE) else {
         return;
     };
+    update::clean_up();
     let _ = std::fs::create_dir_all(settings::data_dir());
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -219,4 +221,7 @@ fn main() {
     drop(media_timer);
     drop(app);
     runtime.shutdown_timeout(Duration::from_millis(500));
+    // A staged update starts only once this copy no longer holds the lock.
+    drop(instance);
+    update::launch_pending();
 }

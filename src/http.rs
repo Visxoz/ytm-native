@@ -22,13 +22,14 @@ const MAX_REDIRECTS: usize = 10;
 /// from YouTube's responses, such as artwork and streams, are checked with
 /// this before they are fetched, and every redirect is too.
 pub fn allowed(url: &str) -> bool {
-    Url::parse(url).is_ok_and(|url| allowed_url(&url))
+    Url::parse(url).is_ok_and(|url| within(&url, ALLOWED_DOMAINS))
 }
 
-fn allowed_url(url: &Url) -> bool {
+/// Whether `url` is HTTPS on one of `domains` or a subdomain of one.
+pub fn within(url: &Url, domains: &[&str]) -> bool {
     url.scheme() == "https"
         && url.host_str().is_some_and(|host| {
-            ALLOWED_DOMAINS.iter().any(|domain| {
+            domains.iter().any(|domain| {
                 host == *domain
                     || host
                         .strip_suffix(domain)
@@ -37,11 +38,12 @@ fn allowed_url(url: &Url) -> bool {
         })
 }
 
-fn redirects() -> redirect::Policy {
-    redirect::Policy::custom(|attempt| {
+/// Follows redirects only within `domains`; any other fails the request.
+pub fn redirects(domains: &'static [&'static str]) -> redirect::Policy {
+    redirect::Policy::custom(move |attempt| {
         if attempt.previous().len() >= MAX_REDIRECTS {
             attempt.error("too many redirects")
-        } else if allowed_url(attempt.url()) {
+        } else if within(attempt.url(), domains) {
             attempt.follow()
         } else {
             let origin = attempt.url().origin().ascii_serialization();
@@ -55,7 +57,7 @@ pub fn client() -> &'static reqwest::Client {
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
             .timeout(Duration::from_secs(15))
-            .redirect(redirects())
+            .redirect(redirects(ALLOWED_DOMAINS))
             .build()
             .expect("HTTP client builds")
     })
@@ -67,7 +69,7 @@ pub fn blocking_client() -> &'static reqwest::blocking::Client {
     CLIENT.get_or_init(|| {
         reqwest::blocking::Client::builder()
             .timeout(Duration::from_secs(30))
-            .redirect(redirects())
+            .redirect(redirects(ALLOWED_DOMAINS))
             .build()
             .expect("HTTP client builds")
     })

@@ -7838,6 +7838,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha1",
+ "sha2",
  "slint",
  "slint-build",
  "souvlaki",

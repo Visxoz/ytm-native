@@ -29,6 +29,7 @@ use crate::{
     queue::{Queue, Repeat},
     settings::{self, Settings},
     streams::{self, ResolvedStream},
+    update,
 };
 
 const TICK: Duration = Duration::from_millis(250);
@@ -39,7 +40,12 @@ const TOAST_FOR: Duration = Duration::from_secs(5);
 const RESTART_AFTER_SECS: f64 = 3.0;
 /// Stream URLs last about six hours; refresh well before.
 const PREFETCH_FRESH: Duration = Duration::from_secs(60 * 60);
+/// How long before a track ends the next one is queued to follow it with no
+/// gap: time for its stream to start downloading and its decoder to open.
+const GAPLESS_LEAD_SECS: f64 = 15.0;
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
+const UPDATE_FIRST_CHECK: Duration = Duration::from_secs(10);
+const UPDATE_CHECK_EVERY: Duration = Duration::from_secs(12 * 60 * 60);
 /// How long a loaded page is reused when navigating back to it.
 const PAGE_CACHE_FOR: Duration = Duration::from_secs(5 * 60);
 const PAGE_CACHE_SIZE: usize = 12;
@@ -69,6 +75,11 @@ struct Playback {
     force_free: Option<String>,
     /// Track and position restored from the last run, used on its first play.
     resume: Option<(String, f64)>,
+    /// The next track, queued in the player to follow without a gap.
+    queued: Option<(String, ResolvedStream)>,
+    /// The track last tried for queueing, so a failure is not retried
+    /// every tick; it then loads as usual when the current one ends.
+    queue_tried: Option<String>,
 }
 
 struct State {
@@ -109,6 +120,9 @@ pub struct App {
     suggest_timer: Timer,
     google_sign_in: RefCell<Option<GoogleSignIn>>,
     sign_in_timer: Timer,
+    /// A newer release found on GitHub.
+    update: RefCell<Option<update::Update>>,
+    update_timer: Timer,
 }
 
 fn s(text: impl AsRef<str>) -> SharedString {
@@ -175,6 +189,8 @@ impl App {
         let player = Player::spawn(move |event| {
             let (kind, message) = match event {
                 PlayerEvent::Started => ("started", String::new()),
+                PlayerEvent::Advanced => ("advanced", String::new()),
+                PlayerEvent::NextDropped => ("next-dropped", String::new()),
                 PlayerEvent::Ended => ("ended", String::new()),
                 PlayerEvent::Error(e) => ("error", e),
             };
@@ -231,6 +247,8 @@ impl App {
             suggest_timer: Timer::default(),
             google_sign_in: RefCell::new(None),
             sign_in_timer: Timer::default(),
+            update: RefCell::new(None),
+            update_timer: Timer::default(),
         });
         app.bind(ui);
         app.apply_settings_to_ui(ui);
@@ -313,6 +331,8 @@ impl App {
         ui.set_autoplay(settings.autoplay);
         ui.set_premium_audio(settings.premium_audio);
         ui.set_sidebar_collapsed(settings.sidebar_collapsed);
+        ui.set_check_updates(settings.check_updates);
+        ui.set_update_status(up_to_date_status(settings.check_updates).into());
     }
 
     pub fn settings(&self) -> Settings {
@@ -348,6 +368,21 @@ impl App {
         }
         self.warm_premium();
         self.navigate(Route::Home, false);
+        // Once at startup, after the first page has had the network, then
+        // twice a day for a copy left running.
+        let weak = Rc::downgrade(self);
+        Timer::single_shot(UPDATE_FIRST_CHECK, move || {
+            if let Some(app) = weak.upgrade() {
+                app.check_for_update();
+            }
+        });
+        let weak = Rc::downgrade(self);
+        self.update_timer
+            .start(TimerMode::Repeated, UPDATE_CHECK_EVERY, move || {
+                if let Some(app) = weak.upgrade() {
+                    app.check_for_update();
+                }
+            });
         if signed_in {
             let api = self.api.clone();
             self.spawn(async move { api.cookie_valid().await }, |app, valid| {
@@ -550,6 +585,16 @@ impl App {
         });
         on!(on_set_autoplay, |app, value| app
             .update_settings(|s| s.autoplay = value));
+        on!(on_set_check_updates, |app, value| {
+            app.update_settings(|s| s.check_updates = value);
+            let ui = app.ui();
+            ui.set_check_updates(value);
+            ui.set_update_status(up_to_date_status(value).into());
+            if value {
+                app.check_for_update();
+            }
+        });
+        on!(on_install_update, |app| app.install_update());
         on!(on_player_event, |app, kind, message| app
             .on_player_event(&kind, message.to_string()));
         on!(
@@ -1255,11 +1300,50 @@ impl App {
             playback.started = false;
             playback.duration = track.duration.unwrap_or(0) as f64;
             playback.requested_at = Some(Instant::now());
+            playback.queued = None;
+            playback.queue_tried = None;
             playback.generation
         };
         self.player.stop();
         self.player.set_paused(false);
 
+        let resume = match &self.state.borrow().playback.resume {
+            Some((id, position)) if *id == track.id => *position,
+            _ => 0.0,
+        };
+        self.present(&track, resume);
+        let ui = self.ui();
+        ui.set_np_loading(true);
+        ui.set_np_quality(SharedString::new());
+        ui.set_np_premium(false);
+
+        let prefetched = self.take_prefetched(&track.id);
+        let resolve = self.resolve_future(track.id.clone(), prefetched);
+        self.spawn(resolve, move |app, result| {
+            if app.state.borrow().playback.generation != generation {
+                return;
+            }
+            match result {
+                Ok(stream) => app.load_stream(stream),
+                Err(e) => app.playback_failed(&track.title, &e),
+            }
+        });
+    }
+
+    /// A stream resolved ahead of time for `id`, if still fresh.
+    fn take_prefetched(&self, id: &str) -> Option<ResolvedStream> {
+        self.state
+            .borrow_mut()
+            .playback
+            .prefetched
+            .remove(id)
+            .filter(|(_, at)| at.elapsed() < PREFETCH_FRESH)
+            .map(|(stream, _)| stream)
+    }
+
+    /// Shows `track` as the one playing: the player bar, its artwork, the
+    /// queue, the media overlay, Discord, the lyrics and the saved session.
+    fn present(self: &Rc<Self>, track: &Track, position: f64) {
         let ui = self.ui();
         ui.set_has_track(true);
         ui.set_np_title(s(&track.title));
@@ -1267,17 +1351,10 @@ impl App {
         ui.set_np_album(s(track.album.as_ref().map_or("", |(_, n)| n.as_str())));
         ui.set_np_has_artist(track.first_artist_id().is_some());
         ui.set_np_has_album(track.album.is_some());
-        ui.set_np_duration(track.duration.unwrap_or(0) as f32);
-        let resume = match &self.state.borrow().playback.resume {
-            Some((id, position)) if *id == track.id => *position,
-            _ => 0.0,
-        };
-        ui.set_np_position(resume as f32);
+        ui.set_np_duration(self.state.borrow().playback.duration as f32);
+        ui.set_np_position(position as f32);
         ui.set_np_buffered(0.0);
         self.show_playing(true);
-        ui.set_np_loading(true);
-        ui.set_np_quality(SharedString::new());
-        ui.set_np_premium(false);
         ui.set_np_art(
             track
                 .thumb
@@ -1325,26 +1402,6 @@ impl App {
         if ui.get_panel_open() && ui.get_panel_tab() == 1 {
             self.load_lyrics();
         }
-
-        let prefetched = {
-            let mut state = self.state.borrow_mut();
-            state
-                .playback
-                .prefetched
-                .remove(&track.id)
-                .filter(|(_, at)| at.elapsed() < PREFETCH_FRESH)
-                .map(|(stream, _)| stream)
-        };
-        let resolve = self.resolve_future(track.id.clone(), prefetched);
-        self.spawn(resolve, move |app, result| {
-            if app.state.borrow().playback.generation != generation {
-                return;
-            }
-            match result {
-                Ok(stream) => app.load_stream(stream),
-                Err(e) => app.playback_failed(&track.title, &e),
-            }
-        });
     }
 
     /// Resolves a stream: Premium when signed in with Premium, otherwise the
@@ -1436,26 +1493,108 @@ impl App {
     }
 
     fn load_stream(self: &Rc<Self>, stream: ResolvedStream) {
-        let quality = quality_label(&stream);
-        self.ui().set_np_premium(stream.premium);
+        self.show_stream(&stream);
+        let start_at = self.take_resume_position();
+        self.player.load(stream_spec(stream, start_at));
+    }
+
+    /// Shows the stream's quality, and fills in a length the track lacked.
+    fn show_stream(&self, stream: &ResolvedStream) {
+        let ui = self.ui();
+        ui.set_np_premium(stream.premium);
+        ui.set_np_quality(quality_label(stream).into());
         if let Some(duration) = stream.duration {
             let mut state = self.state.borrow_mut();
             if state.playback.duration <= 0.0 {
                 state.playback.duration = duration;
                 drop(state);
-                self.ui().set_np_duration(duration as f32);
+                ui.set_np_duration(duration as f32);
             }
         }
-        self.ui().set_np_quality(quality.into());
         self.state.borrow_mut().playback.current_premium = stream.premium;
-        self.player.load(StreamSpec {
-            url: stream.url,
-            size: stream.size,
-            mime: stream.mime,
-            headers: stream.headers,
-            loudness_db: stream.loudness_db,
-            start_at: self.take_resume_position(),
+    }
+
+    /// Queues the next track in the player shortly before the current one
+    /// ends, so it follows without a gap, and drops a queued track the
+    /// queue no longer has next. Runs every tick.
+    fn update_gapless(self: &Rc<Self>) {
+        let next = self.state.borrow().queue.peek_next().cloned();
+        let stale = self
+            .state
+            .borrow()
+            .playback
+            .queued
+            .as_ref()
+            .is_some_and(|(id, _)| next.as_ref().is_none_or(|t| t.id != *id));
+        if stale {
+            self.state.borrow_mut().playback.queued = None;
+            self.player.clear_next();
+        }
+        let Some(next) = next else {
+            return;
+        };
+        let generation = {
+            let state = self.state.borrow();
+            let playback = &state.playback;
+            let remaining = playback.duration - self.player.position();
+            let due = playback.started && playback.duration > 0.0 && remaining <= GAPLESS_LEAD_SECS;
+            if !due
+                || playback.queued.is_some()
+                || playback.queue_tried.as_deref() == Some(next.id.as_str())
+            {
+                return;
+            }
+            playback.generation
+        };
+        self.state.borrow_mut().playback.queue_tried = Some(next.id.clone());
+        let prefetched = self.take_prefetched(&next.id);
+        let resolve = self.resolve_future(next.id.clone(), prefetched);
+        self.spawn(resolve, move |app, result| {
+            let still_next = {
+                let state = app.state.borrow();
+                state.playback.generation == generation
+                    && state.queue.peek_next().is_some_and(|t| t.id == next.id)
+            };
+            match result {
+                Ok(stream) if still_next => {
+                    app.player.queue_next(stream_spec(stream.clone(), 0.0));
+                    app.state.borrow_mut().playback.queued = Some((next.id, stream));
+                }
+                Ok(_) => {}
+                Err(e) => log::debug!("could not queue the next track: {e}"),
+            }
         });
+    }
+
+    /// The queued track became audible: move the queue on and show it,
+    /// without loading anything.
+    fn advance_gapless(self: &Rc<Self>) {
+        let Some((id, stream)) = self.state.borrow_mut().playback.queued.take() else {
+            return;
+        };
+        let current = self.state.borrow_mut().queue.advance(false).cloned();
+        let Some(track) = current.filter(|t| t.id == id) else {
+            // The queue changed under the player; play what it says now.
+            self.start_current();
+            return;
+        };
+        {
+            let mut state = self.state.borrow_mut();
+            let playback = &mut state.playback;
+            playback.generation += 1;
+            playback.started = true;
+            playback.failures = 0;
+            playback.duration = track.duration.map_or(0.0, f64::from);
+            playback.requested_at = None;
+            playback.queue_tried = None;
+            playback.resume = None;
+        }
+        self.present(&track, 0.0);
+        self.show_stream(&stream);
+        self.ui().set_np_loading(false);
+        self.update_media_state();
+        self.extend_with_radio_if_ending();
+        self.prefetch_next();
     }
 
     fn playback_failed(self: &Rc<Self>, title: &str, error: &str) {
@@ -1523,6 +1662,12 @@ impl App {
                 self.update_presence();
                 self.extend_with_radio_if_ending();
                 self.prefetch_next();
+            }
+            "advanced" => self.advance_gapless(),
+            "next-dropped" => {
+                let mut state = self.state.borrow_mut();
+                state.playback.queued = None;
+                state.playback.queue_tried = None;
             }
             "ended" => self.next(false),
             "error" => {
@@ -1755,6 +1900,7 @@ impl App {
             ui.set_np_buffered(buffered);
             let stalled = self.player.is_buffering() && !self.player.is_paused();
             ui.set_np_loading(stalled && buffered < 1.0);
+            self.update_gapless();
         }
     }
 
@@ -2021,6 +2167,76 @@ impl App {
         self.ui().set_signing_in_browser(false);
     }
 
+    // Updates
+
+    /// Looks for a newer release, when checks are on and none is waiting.
+    fn check_for_update(self: &Rc<Self>) {
+        if !self.state.borrow().settings.check_updates || self.update.borrow().is_some() {
+            return;
+        }
+        self.spawn(update::check(), |app, result| match result {
+            Ok(Some(found)) => {
+                let ui = app.ui();
+                ui.set_update_version(s(&found.version));
+                ui.set_update_status(
+                    format!(
+                        "Version {} is available. The app restarts to install it.",
+                        found.version
+                    )
+                    .into(),
+                );
+                app.toast(format!(
+                    "ytm-native {} is available; update it from Settings",
+                    found.version
+                ));
+                *app.update.borrow_mut() = Some(found);
+            }
+            Ok(None) => {}
+            Err(e) => log::debug!("{e}"),
+        });
+    }
+
+    /// Downloads and checks the update, then closes the app as its close
+    /// button does; the update takes over as the app exits.
+    fn install_update(self: &Rc<Self>) {
+        let Some(found) = self.update.borrow().clone() else {
+            return;
+        };
+        let ui = self.ui();
+        ui.set_update_busy(true);
+        ui.set_update_status(format!("Downloading version {}…", found.version).into());
+        let weak = self.ui.clone();
+        let shown = Arc::new(AtomicU8::new(0));
+        let progress = move |fraction: f32| {
+            let percent = (fraction * 100.0) as u8;
+            if shown.swap(percent, Ordering::Relaxed) != percent {
+                let _ = weak.upgrade_in_event_loop(move |ui| {
+                    ui.set_update_status(format!("Downloading… {percent}%").into());
+                });
+            }
+        };
+        let download = async move {
+            let result = update::download(&found, progress).await;
+            (found, result)
+        };
+        self.spawn(download, |app, (found, result)| {
+            let ui = app.ui();
+            match result.and_then(|path| update::stage(&found, path)) {
+                Ok(()) => {
+                    ui.set_update_status("Restarting to finish the update…".into());
+                    let close = slint::platform::WindowEvent::CloseRequested;
+                    if let Err(e) = ui.window().dispatch_event_with_result(close) {
+                        log::warn!("could not close for the update: {e}");
+                    }
+                }
+                Err(e) => {
+                    ui.set_update_busy(false);
+                    ui.set_update_status(format!("The update failed: {e}").into());
+                }
+            }
+        });
+    }
+
     /// Prepares the Premium player script in the background, so the first
     /// song does not wait for it. Only runs when Premium audio can apply.
     fn warm_premium(self: &Rc<Self>) {
@@ -2233,6 +2449,28 @@ async fn premium_player(shared: &PremiumShared) -> Result<Arc<premium::Player>, 
 
 /// The player-bar badge text. Premium formats show YouTube's nominal 256
 /// kbps; others show the stream's bitrate.
+fn up_to_date_status(checking: bool) -> String {
+    if checking {
+        format!(
+            "ytm-native {}. Checks GitHub for new versions.",
+            update::CURRENT
+        )
+    } else {
+        format!("ytm-native {}. Automatic checks are off.", update::CURRENT)
+    }
+}
+
+fn stream_spec(stream: ResolvedStream, start_at: f64) -> StreamSpec {
+    StreamSpec {
+        url: stream.url,
+        size: stream.size,
+        mime: stream.mime,
+        headers: stream.headers,
+        loudness_db: stream.loudness_db,
+        start_at,
+    }
+}
+
 fn quality_label(stream: &ResolvedStream) -> String {
     let codec = stream.codec.to_uppercase();
     match (stream.itag, stream.bitrate_kbps) {

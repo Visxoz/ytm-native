@@ -40,7 +40,7 @@ A single portable exe that starts in a moment and stays around 160 MB while you 
 <td width="50%" valign="top">
 
 ### Sounds better
-Always the best stream YouTube offers, and **256 kbps Opus** with YouTube Premium. Volume levels out between songs, like on YouTube Music.
+Always the best stream YouTube offers, and **256 kbps Opus** with YouTube Premium. Songs play back to back with no gap, and volume levels out between them, like on YouTube Music.
 
 </td>
 </tr>
@@ -97,12 +97,19 @@ Sign in on Google's own page to get your playlists, albums, artists and Liked mu
 
 ## Install
 
-1. Download `ytm-native_<version>_x64-portable.exe` from the [latest release](https://github.com/Visxoz/ytm-native/releases/latest).
-2. Put it wherever you like and run it. There's nothing to install.
-3. Optionally, choose **Sign in** and then **Sign in with Google** to bring your library over.
+Download from the [latest release](https://github.com/Visxoz/ytm-native/releases/latest):
+
+| File | What it is |
+| :-- | :-- |
+| `ytm-native_<version>_x64-setup.exe` | The installer. Installs for your account only, with no admin prompt, and adds a Start menu entry and an uninstaller. |
+| `ytm-native_<version>_x64-portable.exe` | The portable app. Put it anywhere and run it; nothing is installed. |
+
+Either way, the app keeps itself up to date: when a new version is out, a dot appears on the settings icon, and **Settings ▸ Updates** installs it and restarts. Each download is checked against the release's SHA-256 checksums before it replaces anything. Automatic checks can be turned off there too.
+
+Optionally, choose **Sign in** and then **Sign in with Google** to bring your library over.
 
 > [!NOTE]
-> The exe isn't code-signed yet, so Windows SmartScreen may say it "protected your PC". Choose **More info**, then **Run anyway**.
+> The app isn't code-signed yet, so Windows SmartScreen may say it "protected your PC". Choose **More info**, then **Run anyway**. With Smart App Control on, Windows may block it outright: right-click the file, choose **Properties**, tick **Unblock**, and run it again.
 
 > [!TIP]
 > Signing in uses Microsoft Edge WebView2, which comes with Windows 11 and most Windows 10 PCs. If it's missing, you can paste cookies instead; see [Signing in](#signing-in).
