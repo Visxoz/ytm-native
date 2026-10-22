@@ -1,45 +1,76 @@
-//! The queue and position saved on exit and restored on the next start.
+//! What is kept between runs: the queue and position, restored on the next
+//! start, and the history of songs played.
 
-use std::rc::Rc;
+use std::{rc::Rc, time::Duration};
 
-use slint::ComponentHandle;
+use slint::{ComponentHandle, TimerMode};
 
-use super::{App, s};
+use super::{App, State, s};
 use crate::{
     Api as ApiGlobal,
-    api::{self, Header, Page, QueueMode, Section, Track},
+    api::{self, Header, Page, QueueMode, Section},
     images, settings,
 };
 
+/// How long after the last change the session and history are written.
+/// Skipping through songs then costs one write, after the sound starts.
+const PERSIST_AFTER: Duration = Duration::from_secs(2);
+
 impl App {
-    /// Adds `track` to the history, as it starts to play.
-    pub(super) fn record_play(&self, track: &Track) {
-        self.state.borrow_mut().history.record(track);
+    /// Adds the playing track to the history, as its sound starts.
+    pub(super) fn record_play(self: &Rc<Self>) {
+        {
+            let mut state = self.state.borrow_mut();
+            let State { history, queue, .. } = &mut *state;
+            let Some(track) = queue.current() else {
+                return;
+            };
+            history.record(track);
+        }
+        self.persist_soon();
     }
 
     /// The history as a page, newest first, or `None` when nothing has
     /// played yet.
     pub(super) fn history_page(&self) -> Option<Page> {
         let state = self.state.borrow();
-        let tracks = state.history.tracks();
-        if tracks.is_empty() {
+        let history = &state.history;
+        if history.is_empty() {
             return None;
         }
         Some(Page {
             header: Some(Header {
                 label: "Recently played".to_owned(),
                 title: "History".to_owned(),
-                meta: api::songs(tracks.len() as u64),
+                meta: api::songs(history.len() as u64),
                 ..Default::default()
             }),
             sections: vec![Section::Tracks {
                 title: String::new(),
-                tracks: tracks.to_vec(),
+                tracks: history.tracks().cloned().collect(),
                 mode: QueueMode::Section,
                 numbered: false,
             }],
             more: None,
         })
+    }
+
+    /// Writes the session and history shortly, once things settle.
+    pub(super) fn persist_soon(self: &Rc<Self>) {
+        let weak = Rc::downgrade(self);
+        self.persist_timer
+            .start(TimerMode::SingleShot, PERSIST_AFTER, move || {
+                if let Some(app) = weak.upgrade() {
+                    app.persist();
+                }
+            });
+    }
+
+    /// Writes the session and history now, as on exit.
+    pub(super) fn persist(&self) {
+        self.persist_timer.stop();
+        self.save_session();
+        self.state.borrow_mut().history.save();
     }
     /// The restored position, if the current track is the restored one.
     pub(super) fn take_resume_position(&self) -> f64 {
@@ -52,7 +83,7 @@ impl App {
     }
 
     /// Saves the queue and position so the next start can resume.
-    pub(super) fn save_session(&self) {
+    fn save_session(&self) {
         let state = self.state.borrow();
         let Some(index) = state.queue.current_index() else {
             return;

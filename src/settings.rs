@@ -1,6 +1,6 @@
 //! Preferences persisted as JSON in the app's data directory.
 
-use std::path::PathBuf;
+use std::{collections::VecDeque, path::PathBuf};
 
 use serde::{Deserialize, Serialize};
 
@@ -195,10 +195,14 @@ impl Session {
     }
 }
 
-/// The songs played, newest first, one entry per song.
+/// The songs played, newest first, one entry per song. Changes are kept in
+/// memory until `save`, which the app calls a moment after the last one
+/// and on exit, so a song's start never waits on the disk.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct History {
-    tracks: Vec<crate::api::Track>,
+    tracks: VecDeque<crate::api::Track>,
+    #[serde(skip)]
+    changed: bool,
 }
 
 const HISTORY_LIMIT: usize = 500;
@@ -215,21 +219,37 @@ impl History {
             .unwrap_or_default()
     }
 
-    pub fn tracks(&self) -> &[crate::api::Track] {
-        &self.tracks
+    pub fn is_empty(&self) -> bool {
+        self.tracks.is_empty()
     }
 
-    /// Puts `track` first, dropping an earlier play of it, and saves.
+    pub fn len(&self) -> usize {
+        self.tracks.len()
+    }
+
+    /// Newest first.
+    pub fn tracks(&self) -> impl Iterator<Item = &crate::api::Track> {
+        self.tracks.iter()
+    }
+
+    /// Puts `track` first, dropping an earlier play of it.
     pub fn record(&mut self, track: &crate::api::Track) {
         self.tracks.retain(|t| t.id != track.id);
-        self.tracks.insert(0, track.clone());
+        self.tracks.push_front(track.clone());
         self.tracks.truncate(HISTORY_LIMIT);
-        match serde_json::to_vec(self) {
-            Ok(json) => {
-                if let Err(e) = std::fs::write(history_path(), json) {
-                    log::warn!("could not save the history: {e}");
-                }
-            }
+        self.changed = true;
+    }
+
+    /// Writes the history, if it changed since the last save.
+    pub fn save(&mut self) {
+        if !self.changed {
+            return;
+        }
+        let written = serde_json::to_vec(self)
+            .map_err(std::io::Error::other)
+            .and_then(|json| std::fs::write(history_path(), json));
+        match written {
+            Ok(()) => self.changed = false,
             Err(e) => log::warn!("could not save the history: {e}"),
         }
     }

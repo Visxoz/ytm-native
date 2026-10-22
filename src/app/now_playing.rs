@@ -97,7 +97,7 @@ impl App {
             );
         }
         self.refresh_queue();
-        self.save_session();
+        self.persist_soon();
         self.update_presence();
         self.state.borrow_mut().lyrics_for = None;
         if ui.get_panel_open() && ui.get_panel_tab() == 1 {

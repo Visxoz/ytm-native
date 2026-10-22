@@ -125,6 +125,8 @@ pub struct App {
     /// A newer release found on GitHub.
     update: RefCell<Option<update::Update>>,
     update_timer: Timer,
+    /// Writes the session and history a moment after they change.
+    persist_timer: Timer,
 }
 
 fn s(text: impl AsRef<str>) -> SharedString {
@@ -192,6 +194,7 @@ impl App {
             sign_in_timer: Timer::default(),
             update: RefCell::new(None),
             update_timer: Timer::default(),
+            persist_timer: Timer::default(),
         });
         app.bind(ui);
         app.apply_settings_to_ui(ui);
@@ -366,7 +369,7 @@ impl App {
     }
 
     pub fn shutdown(&self) {
-        self.save_session();
+        self.persist();
         self.player.stop();
         self.presence.shutdown();
     }
