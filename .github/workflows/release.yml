@@ -59,7 +59,10 @@ jobs:
           (cd dist && sha256sum -- *.exe > SHA256SUMS)
           previous=$(git tag --list 'v*' --sort=-v:refname | grep -vx "$TAG" | head -n 1 || true)
           if [ -n "$previous" ]; then
-            notes=(--generate-notes --notes-start-tag "$previous")
+            # From the commit subjects: GitHub's own notes come from pull
+            # requests, and commits are pushed directly.
+            bash scripts/release-notes.sh "$previous" "$TAG" > notes.md
+            notes=(--notes-file notes.md)
           else
             notes=(--notes "First release of ytm-native, a native YouTube Music client for Windows.")
           fi
