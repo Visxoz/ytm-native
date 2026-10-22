@@ -97,6 +97,8 @@ struct State {
     page_cache: HashMap<Route, (Page, Instant)>,
     /// Music videos looked up for a song version, by video ID.
     song_versions: HashMap<String, SongVersion>,
+    /// The songs played, saved between runs.
+    history: settings::History,
 }
 
 pub struct App {
@@ -174,6 +176,7 @@ impl App {
                 suggest_generation: 0,
                 page_cache: HashMap::new(),
                 song_versions: HashMap::new(),
+                history: settings::History::load(),
             }),
             rows: Rc::new(VecModel::default()),
             library: Rc::new(VecModel::default()),
@@ -269,7 +272,7 @@ impl App {
         ui.set_normalise(settings.normalise);
         ui.set_discord(settings.discord);
         ui.set_autoplay(settings.autoplay);
-        ui.set_premium_audio(settings.premium_audio);
+        ui.set_quality(settings.quality.index());
         ui.set_sidebar_collapsed(settings.sidebar_collapsed);
         ui.set_check_updates(settings.check_updates);
         ui.set_update_status(updates::up_to_date_status(settings.check_updates).into());

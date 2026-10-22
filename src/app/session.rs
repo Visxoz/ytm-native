@@ -5,9 +5,42 @@ use std::rc::Rc;
 use slint::ComponentHandle;
 
 use super::{App, s};
-use crate::{Api as ApiGlobal, images, settings};
+use crate::{
+    Api as ApiGlobal,
+    api::{self, Header, Page, QueueMode, Section, Track},
+    images, settings,
+};
 
 impl App {
+    /// Adds `track` to the history, as it starts to play.
+    pub(super) fn record_play(&self, track: &Track) {
+        self.state.borrow_mut().history.record(track);
+    }
+
+    /// The history as a page, newest first, or `None` when nothing has
+    /// played yet.
+    pub(super) fn history_page(&self) -> Option<Page> {
+        let state = self.state.borrow();
+        let tracks = state.history.tracks();
+        if tracks.is_empty() {
+            return None;
+        }
+        Some(Page {
+            header: Some(Header {
+                label: "Recently played".to_owned(),
+                title: "History".to_owned(),
+                meta: api::songs(tracks.len() as u64),
+                ..Default::default()
+            }),
+            sections: vec![Section::Tracks {
+                title: String::new(),
+                tracks: tracks.to_vec(),
+                mode: QueueMode::Section,
+                numbered: false,
+            }],
+            more: None,
+        })
+    }
     /// The restored position, if the current track is the restored one.
     pub(super) fn take_resume_position(&self) -> f64 {
         let mut state = self.state.borrow_mut();

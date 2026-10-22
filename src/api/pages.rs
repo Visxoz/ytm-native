@@ -45,6 +45,8 @@ impl Api {
             Route::Home => self.home(signed_in).await,
             Route::Explore => self.explore().await,
             Route::Library => self.library().await,
+            // Kept by the app itself; never fetched.
+            Route::History => Err("the history is kept on this PC".into()),
             Route::Search(query) => self.search(query).await,
             Route::Album(id) => self.album(id).await,
             Route::Playlist(id) => self.playlist(id).await,
@@ -249,9 +251,10 @@ impl Api {
 
     async fn search(&self, query: &str) -> Result<Page> {
         let q = self.q();
-        let (main, songs, albums, artists, playlists) = tokio::join!(
+        let (main, songs, videos, albums, artists, playlists) = tokio::join!(
             q.music_search_main(query),
             q.music_search_tracks(query),
+            q.music_search_videos(query),
             q.music_search_albums(query),
             q.music_search_artists(query),
             q.music_search_playlists(query, false),
@@ -281,6 +284,13 @@ impl Api {
         sections.extend(track_section(
             "Songs",
             tracks(songs.items.items),
+            QueueMode::Radio,
+        ));
+        // Uploads too: slowed and sped-up edits, mashups and live versions
+        // are videos, not songs, on YouTube Music.
+        sections.extend(track_section(
+            "Videos",
+            tracks(videos.map(|r| r.items.items).unwrap_or_default()),
             QueueMode::Radio,
         ));
         sections.extend(card_section(

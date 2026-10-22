@@ -220,14 +220,15 @@ fn unscramble(format: &streams::Format, player: &Player) -> Result<String, Strin
 
 /// Resolves a Premium stream. `cookie` is `None` only for dry runs, which
 /// time the path without a Premium account. With `any_format`, the best
-/// stream the web client has is taken whether or not it is Premium: the
-/// last resort when no client hands out plain URLs.
+/// stream the web client has within `max_kbps` is taken whether or not it
+/// is Premium: the last resort when no client hands out plain URLs.
 pub async fn resolve(
     video_id: &str,
     cookie: Option<&str>,
     visitor_data: &str,
     player: &Arc<Player>,
     any_format: bool,
+    max_kbps: Option<u64>,
 ) -> Result<Outcome, String> {
     let started = Instant::now();
     let mut last_error = String::from("no clients");
@@ -251,7 +252,7 @@ pub async fn resolve(
             ));
             return Ok(Outcome::NoPremiumFormats);
         }
-        let Some(format) = streams::best_audio(response.audio_formats()).cloned() else {
+        let Some(format) = streams::best_audio(response.audio_formats(), max_kbps).cloned() else {
             last_error = "no audio formats".into();
             continue;
         };

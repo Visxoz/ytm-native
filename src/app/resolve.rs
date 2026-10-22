@@ -163,9 +163,10 @@ async fn web_fallback(
     video_id: &str,
     cookie: &str,
     visitor: &str,
+    max_kbps: Option<u64>,
 ) -> Result<ResolvedStream, String> {
     let player = premium_player(shared).await?;
-    match premium::resolve(video_id, Some(cookie), visitor, &player, true).await? {
+    match premium::resolve(video_id, Some(cookie), visitor, &player, true, max_kbps).await? {
         premium::Outcome::Stream(stream) => {
             premium::diag(format!(
                 "{video_id}: no client gave a plain URL; playing through the web client"
@@ -187,11 +188,12 @@ impl App {
     ) -> impl Future<Output = Result<ResolvedStream, String>> + Send + 'static {
         let api = self.api.clone();
         let premium = Arc::clone(&self.premium);
-        let want_premium = {
+        let (want_premium, max_kbps) = {
             let state = self.state.borrow();
-            state.signed_in
+            let want_premium = state.signed_in
                 && state.settings.premium_audio
-                && state.playback.force_free.as_deref() != Some(video_id.as_str())
+                && state.playback.force_free.as_deref() != Some(video_id.as_str());
+            (want_premium, state.settings.quality.max_kbps())
         };
         let dry_run = !want_premium && premium_dry_run();
         async move {
@@ -209,8 +211,15 @@ impl App {
             if let Some(cookie) = cookie.as_deref().filter(|_| !premium.skipped()) {
                 match premium_player(&premium).await {
                     Ok(player) => {
-                        match premium::resolve(&video_id, Some(cookie), &visitor, &player, false)
-                            .await
+                        match premium::resolve(
+                            &video_id,
+                            Some(cookie),
+                            &visitor,
+                            &player,
+                            false,
+                            None,
+                        )
+                        .await
                         {
                             Ok(premium::Outcome::Stream(stream)) => {
                                 premium.record_premium();
@@ -240,7 +249,8 @@ impl App {
                     let Ok(player) = premium_player(&premium).await else {
                         return;
                     };
-                    match premium::resolve(&video_id, Some(&cookie), &visitor, &player, false).await
+                    match premium::resolve(&video_id, Some(&cookie), &visitor, &player, false, None)
+                        .await
                     {
                         Ok(premium::Outcome::Stream(_)) => premium.record_premium(),
                         Ok(premium::Outcome::NoPremiumFormats) => premium.record_miss(),
@@ -251,7 +261,8 @@ impl App {
                 // Times the Premium path without an account; the result is
                 // discarded as YouTube won't serve it anonymously.
                 let dry = Instant::now();
-                let result = premium::resolve(&video_id, None, &visitor, &player, false).await;
+                let result =
+                    premium::resolve(&video_id, None, &visitor, &player, false, None).await;
                 premium::diag(format!(
                     "{video_id}: dry run {} in {} ms",
                     if result.is_ok() { "resolved" } else { "failed" },
@@ -259,13 +270,13 @@ impl App {
                 ));
             }
             let free = Instant::now();
-            let result = match streams::resolve(&video_id, &visitor).await {
+            let result = match streams::resolve(&video_id, &visitor, max_kbps).await {
                 Ok(stream) => Ok(stream),
                 // YouTube sometimes bot-checks a visitor ID; retry with a fresh one.
                 Err(e) => {
                     log::debug!("retrying with a new visitor ID: {e}");
                     let visitor = api.visitor_data(true).await?;
-                    streams::resolve(&video_id, &visitor).await
+                    streams::resolve(&video_id, &visitor, max_kbps).await
                 }
             };
             log::info!(
@@ -280,12 +291,14 @@ impl App {
                 Err(e) => {
                     let cookie = premium.cookie.read().unwrap().clone();
                     match cookie {
-                        Some(cookie) => web_fallback(&premium, &video_id, &cookie, &visitor)
-                            .await
-                            .map_err(|web| {
-                                log::debug!("{video_id}: web client fallback failed: {web}");
-                                e
-                            }),
+                        Some(cookie) => {
+                            web_fallback(&premium, &video_id, &cookie, &visitor, max_kbps)
+                                .await
+                                .map_err(|web| {
+                                    log::debug!("{video_id}: web client fallback failed: {web}");
+                                    e
+                                })
+                        }
                         None => Err(e),
                     }
                 }

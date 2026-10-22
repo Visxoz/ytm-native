@@ -40,7 +40,7 @@ A single portable exe that starts in a moment and stays around 160 MB while you 
 <td width="50%" valign="top">
 
 ### Sounds better
-Always the best stream YouTube offers, and **256 kbps Opus** with YouTube Premium. Songs play back to back with no gap, and volume levels out between them, like on YouTube Music.
+Always the best stream YouTube offers, and **256 kbps Opus** with YouTube Premium, or a lower quality when data is dear. Songs play back to back with no gap, and volume levels out between them, like on YouTube Music.
 
 </td>
 </tr>
@@ -62,7 +62,7 @@ Media keys, the Windows media overlay, Discord status, and a window that remembe
 <td width="50%" valign="top">
 
 ### Plays like YouTube Music
-Search starts a radio after the song you pick, autoplay keeps going, and shuffle, repeat, play next and the queue all work as you'd expect.
+Search finds songs and uploads alike and starts a radio after the one you pick, autoplay keeps going, your history is a click away, and shuffle, repeat, play next and the queue all work as you'd expect.
 
 </td>
 <td width="50%" valign="top">

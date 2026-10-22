@@ -206,10 +206,14 @@ impl PlayerResponse {
 /// Fetches the player response and picks the best audio stream, from the
 /// first client that gives one. The first client's reason is reported
 /// when none does, as it is the usual one.
-pub async fn resolve(video_id: &str, visitor_data: &str) -> Result<ResolvedStream, String> {
+pub async fn resolve(
+    video_id: &str,
+    visitor_data: &str,
+    max_kbps: Option<u64>,
+) -> Result<ResolvedStream, String> {
     let mut first_error = None;
     for client in CLIENTS {
-        match resolve_with(client, video_id, visitor_data).await {
+        match resolve_with(client, video_id, visitor_data, max_kbps).await {
             Ok(stream) => {
                 if first_error.is_some() {
                     log::info!("{video_id}: the {} client served the stream", client.name);
@@ -230,6 +234,7 @@ pub(crate) async fn resolve_with(
     client: &Client,
     video_id: &str,
     visitor_data: &str,
+    max_kbps: Option<u64>,
 ) -> Result<ResolvedStream, String> {
     let mut context = json!({
         "clientName": client.name,
@@ -267,7 +272,7 @@ pub(crate) async fn resolve_with(
         .text()
         .await
         .map_err(|e| format!("player request failed: {e}"))?;
-    parse(&text, client.user_agent)
+    parse(&text, client.user_agent, max_kbps)
 }
 
 /// Parses a player response, failing with YouTube's reason if unplayable.
@@ -286,29 +291,33 @@ pub(crate) fn parse_response(json: &str) -> Result<PlayerResponse, String> {
 
 /// The best plain-URL stream of a player response. A client that answers
 /// with scrambled URLs only counts as having none.
-fn parse(json: &str, user_agent: &str) -> Result<ResolvedStream, String> {
+fn parse(json: &str, user_agent: &str, max_kbps: Option<u64>) -> Result<ResolvedStream, String> {
     let response = parse_response(json)?;
-    let format = best_audio(response.audio_formats()).ok_or("no playable audio stream")?;
+    let format =
+        best_audio(response.audio_formats(), max_kbps).ok_or("no playable audio stream")?;
     let url = format.url.clone().ok_or("no playable audio stream")?;
     Ok(response.stream(format, url, user_agent, false))
 }
 
 /// The highest-bitrate Opus stream, else the best AAC. Skips dynamic-range
-/// compressed variants and dubbed tracks.
-pub(crate) fn best_audio(formats: &[Format]) -> Option<&Format> {
-    let candidates = || {
-        formats.iter().filter(|f| {
-            f.has_url() && !f.is_drc && f.audio_track.as_ref().is_none_or(|t| t.audio_is_default)
+/// compressed variants and dubbed tracks. With `max_kbps`, the best within
+/// it, or the lowest there is when none fits.
+pub(crate) fn best_audio(formats: &[Format], max_kbps: Option<u64>) -> Option<&Format> {
+    let candidates = |codec: fn(&Format) -> bool| {
+        formats.iter().filter(move |f| {
+            codec(f)
+                && f.has_url()
+                && !f.is_drc
+                && f.audio_track.as_ref().is_none_or(|t| t.audio_is_default)
         })
     };
-    candidates()
-        .filter(|f| f.is_opus())
-        .max_by_key(|f| (f.bitrate, f.itag))
-        .or_else(|| {
-            candidates()
-                .filter(|f| f.is_aac())
-                .max_by_key(|f| f.bitrate)
-        })
+    let pick = |codec: fn(&Format) -> bool| {
+        candidates(codec)
+            .filter(|f| max_kbps.is_none_or(|kbps| f.bitrate <= kbps * 1000))
+            .max_by_key(|f| (f.bitrate, f.itag))
+            .or_else(|| candidates(codec).min_by_key(|f| f.bitrate))
+    };
+    pick(Format::is_opus).or_else(|| pick(Format::is_aac))
 }
 
 #[cfg(test)]
@@ -335,10 +344,12 @@ mod tests {
         "mimeType":"audio/webm; codecs=\"opus\"","bitrate":260000}"#;
 
     const UA: &str = "test";
+    const OPUS_LOW: &str = r#"{"itag":249,"url":"https://a/249","mimeType":"audio/webm; codecs=\"opus\"",
+        "bitrate":52000}"#;
 
     #[test]
     fn prefers_opus() {
-        let stream = parse(&response(&[AAC, OPUS, OPUS_DRC, VIDEO].join(",")), UA).unwrap();
+        let stream = parse(&response(&[AAC, OPUS, OPUS_DRC, VIDEO].join(",")), UA, None).unwrap();
         assert_eq!(stream.url, "https://a/251");
         assert_eq!(stream.mime, "audio/webm");
         assert_eq!(stream.size, 6214234);
@@ -349,8 +360,22 @@ mod tests {
     }
 
     #[test]
+    fn caps_the_bitrate_for_lower_qualities() {
+        let all = response(&[AAC, OPUS, OPUS_LOW].join(","));
+        assert_eq!(parse(&all, UA, Some(64)).unwrap().url, "https://a/249");
+        assert_eq!(parse(&all, UA, Some(192)).unwrap().url, "https://a/251");
+        assert_eq!(
+            parse(&response(&[AAC, OPUS].join(",")), UA, Some(64))
+                .unwrap()
+                .url,
+            "https://a/251",
+            "nothing within the cap, so the lowest Opus"
+        );
+    }
+
+    #[test]
     fn falls_back_to_aac() {
-        let stream = parse(&response(&[AAC, VIDEO].join(",")), UA).unwrap();
+        let stream = parse(&response(&[AAC, VIDEO].join(",")), UA, None).unwrap();
         assert_eq!(stream.url, "https://a/140");
         assert_eq!(stream.codec, "AAC");
         assert_eq!(
@@ -363,7 +388,7 @@ mod tests {
     #[test]
     fn scrambled_urls_count_as_none() {
         assert_eq!(
-            parse(&response(PREMIUM), UA).unwrap_err(),
+            parse(&response(PREMIUM), UA, None).unwrap_err(),
             "no playable audio stream"
         );
     }
@@ -371,7 +396,7 @@ mod tests {
     #[test]
     fn picks_scrambled_premium_formats() {
         let response = parse_response(&response(&[OPUS, PREMIUM].join(","))).unwrap();
-        let best = best_audio(response.audio_formats()).unwrap();
+        let best = best_audio(response.audio_formats(), None).unwrap();
         assert_eq!(best.itag, 774);
         assert!(best.signature_cipher.is_some());
     }
@@ -379,9 +404,12 @@ mod tests {
     #[test]
     fn reports_unplayable_reason() {
         let json = r#"{"playabilityStatus":{"status":"LOGIN_REQUIRED","reason":"Sign in to confirm your age"}}"#;
-        assert_eq!(parse(json, UA).unwrap_err(), "Sign in to confirm your age");
         assert_eq!(
-            parse(&response(VIDEO), UA).unwrap_err(),
+            parse(json, UA, None).unwrap_err(),
+            "Sign in to confirm your age"
+        );
+        assert_eq!(
+            parse(&response(VIDEO), UA, None).unwrap_err(),
             "no playable audio stream"
         );
     }
@@ -404,7 +432,7 @@ mod tests {
                 Err(e) => return vec![format!("visitor data: {e}")],
             };
             for client in CLIENTS {
-                match resolve_with(client, VIDEO, &visitor).await {
+                match resolve_with(client, VIDEO, &visitor, None).await {
                     Ok(stream) => match probe(&stream).await {
                         Ok(()) => eprintln!(
                             "{}: {} {} kbps, serves bytes",

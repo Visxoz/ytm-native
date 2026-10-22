@@ -83,6 +83,7 @@ impl App {
             playback.resume = None;
         }
         self.present(&track, 0.0);
+        self.record_play(&track);
         self.show_stream(&stream);
         self.ui().set_np_loading(false);
         self.update_media_state();

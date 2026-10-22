@@ -14,7 +14,7 @@ use rustypipe::{
 
 pub use convert::resize_thumb;
 use convert::tracks;
-pub use format::format_duration;
+pub use format::{format_duration, songs};
 pub use model::*;
 
 /// Longest playlist loaded in one go.

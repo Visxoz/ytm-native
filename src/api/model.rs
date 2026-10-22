@@ -177,6 +177,8 @@ pub enum Route {
     Home,
     Explore,
     Library,
+    /// The songs played, kept locally.
+    History,
     Search(String),
     Album(String),
     Playlist(String),
@@ -190,6 +192,7 @@ impl Route {
             Route::Home => "home",
             Route::Explore => "explore",
             Route::Library => "library",
+            Route::History => "history",
             _ => "",
         }
     }

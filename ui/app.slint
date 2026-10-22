@@ -350,13 +350,22 @@ component QueueRow inherits Rectangle {
     }
 }
 
-/// A modal card that fades and scales in.
+/// A modal card that fades and scales in, and out again once `open` is
+/// cleared; the owner removes it after `Theme.normal`.
 component Dialog inherits Rectangle {
     in property <string> title;
     in property <length> dialog-width: 520px;
+    in property <bool> open: true;
     callback close();
-    property <bool> shown;
-    init => { self.shown = true; }
+    // The first frame draws the closed look, so the opening animates
+    // from it; a value set before any frame has nothing to animate from.
+    property <bool> started;
+    property <bool> shown: root.open && root.started;
+    Timer {
+        interval: 16ms;
+        running: !root.started;
+        triggered => { root.started = true; }
+    }
     background: root.shown ? #000000b0 : #00000000;
     animate background { duration: Theme.normal; }
     TouchArea {
@@ -499,7 +508,8 @@ export component AppWindow inherits Window {
     in property <bool> normalise;
     in property <bool> discord;
     in property <bool> autoplay;
-    in property <bool> premium-audio;
+    /// 0 low, 1 normal, 2 high.
+    in property <int> quality: 2;
     in property <string> premium-status;
     // A newer version to install, or empty, and the Updates row's text.
     in property <string> update-version;
@@ -541,7 +551,7 @@ export component AppWindow inherits Window {
     callback set-check-updates(value: bool);
     callback install-update();
     callback set-autoplay(value: bool);
-    callback set-premium-audio(value: bool);
+    callback set-quality(value: int);
     // Delivered from background threads through the event loop.
     callback player-event(kind: string, message: string);
     callback media-action(action: string, value: float);
@@ -574,6 +584,40 @@ export component AppWindow inherits Window {
     function toggle-sidebar() {
         root.sidebar-collapsed = !root.sidebar-collapsed;
         root.sidebar-changed(root.sidebar-collapsed);
+    }
+
+    // A dialog stays for its closing animation, then goes.
+    property <bool> settings-shown;
+    changed settings-open => {
+        if root.settings-open {
+            root.settings-shown = true;
+        } else {
+            settings-closer.running = true;
+        }
+    }
+    settings-closer := Timer {
+        interval: Theme.normal;
+        running: false;
+        triggered => {
+            self.running = false;
+            root.settings-shown = root.settings-open;
+        }
+    }
+    property <bool> sign-in-shown;
+    changed sign-in-open => {
+        if root.sign-in-open {
+            root.sign-in-shown = true;
+        } else {
+            sign-in-closer.running = true;
+        }
+    }
+    sign-in-closer := Timer {
+        interval: Theme.normal;
+        running: false;
+        triggered => {
+            self.running = false;
+            root.sign-in-shown = root.sign-in-open;
+        }
     }
 
     public function focus-search() {
@@ -684,55 +728,49 @@ export component AppWindow inherits Window {
                     }
                 }
 
-                HorizontalLayout {
+                // The account button opens Settings, which holds sign-in
+                // and sign-out too. A dot on it marks a waiting update.
+                Rectangle {
                     x: parent.width - self.width - 8px;
-                    width: self.preferred-width;
-                    spacing: 8px;
-                    IconButton {
-                        y: (parent.height - self.height) / 2;
-                        icon: Icons.settings;
-                        size: 36px;
-                        icon-size: 20px;
-                        show-dot: root.update-version != "";
-                        clicked => { root.settings-open = true; }
+                    y: (parent.height - self.height) / 2;
+                    width: 36px;
+                    height: 36px;
+                    border-radius: 18px;
+                    background: account-touch.has-hover ? Theme.highlight : Theme.elevated;
+                    animate background { duration: Theme.fast; }
+                    Rectangle {
+                        width: 26px;
+                        height: 26px;
+                        border-radius: 13px;
+                        background: root.signed-in ? Theme.accent : #535353;
+                        Icon {
+                            path: Icons.account;
+                            size: 18px;
+                            color: Theme.text;
+                        }
+
+                        if root.signed-in && root.account-photo.width > 0: Art {
+                            width: 100%;
+                            height: 100%;
+                            round: true;
+                            source: root.account-photo;
+                        }
                     }
 
-                    Rectangle {
-                        y: (parent.height - self.height) / 2;
-                        width: 36px;
-                        height: 36px;
-                        border-radius: 18px;
-                        background: account-touch.has-hover ? Theme.highlight : Theme.elevated;
-                        animate background { duration: Theme.fast; }
-                        Rectangle {
-                            width: 26px;
-                            height: 26px;
-                            border-radius: 13px;
-                            background: root.signed-in ? Theme.accent : #535353;
-                            Icon {
-                                path: Icons.account;
-                                size: 18px;
-                                color: Theme.text;
-                            }
+                    if root.update-version != "": Rectangle {
+                        x: parent.width - self.width + 1px;
+                        y: -1px;
+                        width: 12px;
+                        height: 12px;
+                        border-radius: 6px;
+                        background: Theme.accent;
+                        border-width: 2px;
+                        border-color: Theme.background;
+                    }
 
-                            if root.signed-in && root.account-photo.width > 0: Art {
-                                width: 100%;
-                                height: 100%;
-                                round: true;
-                                source: root.account-photo;
-                            }
-                        }
-
-                        account-touch := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => {
-                                if root.signed-in {
-                                    root.settings-open = true;
-                                } else {
-                                    root.sign-in-open = true;
-                                }
-                            }
-                        }
+                    account-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.settings-open = true; }
                     }
                 }
             }
@@ -803,6 +841,14 @@ export component AppWindow inherits Window {
                             wide: sidebar.wide;
                             active: root.nav-current == "library";
                             clicked => { root.go("library"); }
+                        }
+
+                        NavRow {
+                            icon: Icons.history;
+                            label: "History";
+                            wide: sidebar.wide;
+                            active: root.nav-current == "history";
+                            clicked => { root.go("history"); }
                         }
 
                         Rectangle {
@@ -1361,16 +1407,25 @@ export component AppWindow inherits Window {
             }
         }
 
-        if root.settings-open: Dialog {
+        if root.settings-shown: Dialog {
             title: "Settings";
+            open: root.settings-open;
             close => { root.settings-open = false; }
             SettingRow {
-                label: "Premium audio";
-                detail: root.premium-status;
-                Toggle {
-                    y: (parent.height - self.height) / 2;
-                    checked: root.premium-audio;
-                    toggled(v) => { root.set-premium-audio(v); }
+                label: "Audio quality";
+                detail: root.quality == 0 ? "About 50 kbps, a third of the data of Normal. For a metered connection."
+                    : root.quality == 1 ? "About 130 kbps, as YouTube Music plays without Premium."
+                    : root.premium-status;
+                VerticalLayout {
+                    alignment: center;
+                    HorizontalLayout {
+                        spacing: 6px;
+                        for name[i] in ["Low", "Normal", "High"]: Pill {
+                            label: name;
+                            active: root.quality == i;
+                            clicked => { root.set-quality(i); }
+                        }
+                    }
                 }
             }
 
@@ -1452,10 +1507,11 @@ export component AppWindow inherits Window {
             }
         }
 
-        if root.sign-in-open: sign-in-dialog := Dialog {
+        if root.sign-in-shown: sign-in-dialog := Dialog {
             property <bool> pasting;
             title: "Sign in";
             dialog-width: 600px;
+            open: root.sign-in-open;
             close => { root.sign-in-open = false; }
             Text {
                 text: root.signing-in-browser

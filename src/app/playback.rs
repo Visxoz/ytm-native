@@ -136,13 +136,20 @@ impl App {
     pub(super) fn on_player_event(self: &Rc<Self>, kind: &str, message: &str) {
         match kind {
             "started" => {
-                let (waited, premium_stream) = {
+                let (waited, premium_stream, track) = {
                     let mut state = self.state.borrow_mut();
                     state.playback.started = true;
                     state.playback.failures = 0;
                     let waited = state.playback.requested_at.take().map(|t| t.elapsed());
-                    (waited, state.playback.current_premium)
+                    (
+                        waited,
+                        state.playback.current_premium,
+                        state.queue.current().cloned(),
+                    )
                 };
+                if let Some(track) = &track {
+                    self.record_play(track);
+                }
                 if let Some(waited) = waited {
                     let line = format!(
                         "first sound after {} ms ({}, {})",

@@ -53,6 +53,14 @@ impl App {
             ui.set_sign_in_open(true);
             return;
         }
+        if route == Route::History {
+            ui.set_page_loading(false);
+            match self.history_page() {
+                Some(page) => self.show_page(page),
+                None => ui.set_page_error("Songs you play will show up here.".into()),
+            }
+            return;
+        }
 
         let cached = self
             .state

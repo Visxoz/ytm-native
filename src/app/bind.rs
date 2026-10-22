@@ -5,7 +5,7 @@ use std::rc::Rc;
 use slint::{ComponentHandle, ModelRc};
 
 use super::{App, updates::up_to_date_status};
-use crate::{Api as ApiGlobal, AppWindow, api::Route};
+use crate::{Api as ApiGlobal, AppWindow, api::Route, settings::Quality};
 
 impl App {
     pub(super) fn bind(self: &Rc<Self>, ui: &AppWindow) {
@@ -24,6 +24,7 @@ impl App {
             "home" => app.navigate(Route::Home, true),
             "explore" => app.navigate(Route::Explore, true),
             "library" => app.navigate(Route::Library, true),
+            "history" => app.navigate(Route::History, true),
             _ => app.reload(),
         });
         on!(on_back, |app| app.go_back());
@@ -105,9 +106,18 @@ impl App {
         });
         on!(on_sidebar_changed, |app, collapsed| app
             .update_settings(|s| s.sidebar_collapsed = collapsed));
-        on!(on_set_premium_audio, |app, value| {
-            app.update_settings(|s| s.premium_audio = value);
-            app.state.borrow_mut().playback.prefetched.clear();
+        on!(on_set_quality, |app, index| {
+            let quality = Quality::from_index(index);
+            app.update_settings(|s| s.set_quality(quality));
+            // Streams resolved ahead at the old quality are dropped; the
+            // playing song carries on as it is.
+            {
+                let mut state = app.state.borrow_mut();
+                state.playback.prefetched.clear();
+                state.playback.queued = None;
+                state.playback.queue_tried = None;
+            }
+            app.player.clear_next();
             app.warm_premium();
         });
         on!(on_set_autoplay, |app, value| app

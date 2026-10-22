@@ -42,6 +42,42 @@ pub struct WindowGeometry {
     pub maximized: bool,
 }
 
+/// How much of a stream to ask for. Low and Normal cap the bitrate, for
+/// metered connections; High takes the best YouTube offers, which is 256
+/// kbps when signed in with Premium.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Quality {
+    Low,
+    Normal,
+    #[default]
+    High,
+}
+
+impl Quality {
+    pub fn index(self) -> i32 {
+        self as i32
+    }
+
+    pub fn from_index(i: i32) -> Self {
+        match i {
+            0 => Quality::Low,
+            1 => Quality::Normal,
+            _ => Quality::High,
+        }
+    }
+
+    /// The highest bitrate wanted, in kbps, or `None` for the best there
+    /// is. YouTube's Opus streams come at about 50, 70 and 130 kbps.
+    pub fn max_kbps(self) -> Option<u64> {
+        match self {
+            Quality::Low => Some(64),
+            Quality::Normal => Some(192),
+            Quality::High => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -53,7 +89,10 @@ pub struct Settings {
     pub shuffle: bool,
     pub repeat: i32,
     pub sidebar_collapsed: bool,
-    /// Use 256 kbps streams when signed in with YouTube Premium.
+    pub quality: Quality,
+    /// Use 256 kbps streams when signed in with YouTube Premium: High
+    /// quality. Kept alongside `quality`, as the code and older settings
+    /// files use it.
     pub premium_audio: bool,
     /// The signed-in account has been served Premium formats, so songs
     /// without them, such as music videos, never mark it as not Premium.
@@ -74,6 +113,7 @@ impl Default for Settings {
             shuffle: false,
             repeat: 0,
             sidebar_collapsed: false,
+            quality: Quality::High,
             premium_audio: true,
             premium_account: false,
             check_updates: true,
@@ -84,10 +124,20 @@ impl Default for Settings {
 
 impl Settings {
     pub fn load() -> Self {
-        std::fs::read(settings_path())
+        let mut settings: Self = std::fs::read(settings_path())
             .ok()
             .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default()
+            .unwrap_or_default();
+        // Premium audio turned off by an older version means Normal.
+        if !settings.premium_audio && settings.quality == Quality::High {
+            settings.quality = Quality::Normal;
+        }
+        settings
+    }
+
+    pub fn set_quality(&mut self, quality: Quality) {
+        self.quality = quality;
+        self.premium_audio = quality == Quality::High;
     }
 
     pub fn save(&self) {
@@ -145,6 +195,46 @@ impl Session {
     }
 }
 
+/// The songs played, newest first, one entry per song.
+#[derive(Debug, Default, Serialize, Deserialize)]
+pub struct History {
+    tracks: Vec<crate::api::Track>,
+}
+
+const HISTORY_LIMIT: usize = 500;
+
+fn history_path() -> PathBuf {
+    data_dir().join("history.json")
+}
+
+impl History {
+    pub fn load() -> Self {
+        std::fs::read(history_path())
+            .ok()
+            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn tracks(&self) -> &[crate::api::Track] {
+        &self.tracks
+    }
+
+    /// Puts `track` first, dropping an earlier play of it, and saves.
+    pub fn record(&mut self, track: &crate::api::Track) {
+        self.tracks.retain(|t| t.id != track.id);
+        self.tracks.insert(0, track.clone());
+        self.tracks.truncate(HISTORY_LIMIT);
+        match serde_json::to_vec(self) {
+            Ok(json) => {
+                if let Err(e) = std::fs::write(history_path(), json) {
+                    log::warn!("could not save the history: {e}");
+                }
+            }
+            Err(e) => log::warn!("could not save the history: {e}"),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -154,5 +244,20 @@ mod tests {
         let settings: Settings = serde_json::from_str(r#"{"volume":0.5}"#).unwrap();
         assert_eq!(settings.volume, 0.5);
         assert!(settings.normalise);
+        assert_eq!(settings.quality, Quality::High);
+    }
+
+    #[test]
+    fn quality_and_premium_audio_agree() {
+        let mut settings = Settings::default();
+        settings.set_quality(Quality::Low);
+        assert!(!settings.premium_audio);
+        settings.set_quality(Quality::High);
+        assert!(settings.premium_audio);
+        assert_eq!(
+            Quality::from_index(Quality::Normal.index()),
+            Quality::Normal
+        );
+        assert_eq!(Quality::High.max_kbps(), None);
     }
 }
