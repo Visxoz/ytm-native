@@ -9,9 +9,10 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
 
+# Lint and test run side by side, each on the light `ci` profile.
 jobs:
-  check:
-    name: Lint and test
+  lint:
+    name: Format and lint
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -21,16 +22,35 @@ jobs:
           toolchain: stable
           components: clippy, rustfmt
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
-
-      - name: Vendor patched crates
-        run: ./scripts/vendor-patched.ps1
-
       - name: Format
         run: cargo fmt --check
 
+      - uses: ./.github/actions/patched-crates
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # Patched crates rebuild when patches change, so save afresh then.
+          key: ${{ hashFiles('patches/*.patch', 'scripts/vendor-patched.ps1') }}
+
       - name: Clippy
-        run: cargo clippy --all-targets --locked -- -D warnings
+        run: cargo clippy --profile ci --all-targets --locked -- -D warnings
+
+  test:
+    name: Test
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+        with:
+          toolchain: stable
+
+      - uses: ./.github/actions/patched-crates
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # Patched crates rebuild when patches change, so save afresh then.
+          key: ${{ hashFiles('patches/*.patch', 'scripts/vendor-patched.ps1') }}
 
       - name: Test
-        run: cargo test --locked
+        run: cargo test --profile ci --locked

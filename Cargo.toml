@@ -63,6 +63,17 @@ opt-level = 2
 [profile.dev.package.unsafe-libopus]
 overflow-checks = false
 
+# CI's lint and tests: quickest to build, as nothing there needs speed.
+[profile.ci]
+inherits = "dev"
+debug = false
+
+[profile.ci.package."*"]
+opt-level = 0
+
+[profile.ci.package.unsafe-libopus]
+overflow-checks = false
+
 # Crates with patches/<crate>.patch applied; scripts/vendor-patched.ps1 makes
 # them. Slint maps the fallback fonts instead of reading them into memory, and
 # its Skia renderer draws fonts from those mappings instead of private copies;

@@ -27,13 +27,14 @@ jobs:
     needs: version
     uses: ./.github/workflows/check.yml
 
+  # Built alongside the checks; publishing waits for both.
   build:
-    needs: check
+    needs: version
     uses: ./.github/workflows/build.yml
 
   publish:
     name: Publish release
-    needs: build
+    needs: [check, build]
     runs-on: ubuntu-latest
     permissions:
       contents: write

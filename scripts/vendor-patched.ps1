@@ -1,8 +1,10 @@
 # Rebuilds vendor/<crate> for each patched crate from crates.io and applies
 # patches/<crate>.patch. Run once after cloning, and again after updating Slint
-# or rustypipe.
+# or rustypipe. CI vendors into a folder outside the repo with -Destination.
+param([string]$Destination)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
+if (-not $Destination) { $Destination = Join-Path $root 'vendor' }
 $lock = Get-Content (Join-Path $root 'Cargo.lock') -Raw
 $manifest = Get-Content (Join-Path $root 'Cargo.toml') -Raw
 
@@ -43,10 +45,11 @@ $crates = @(
     }
 )
 
+New-Item -ItemType Directory -Force $Destination | Out-Null
 foreach ($c in $crates) {
     $name = $c.Name
     $version = & $c.Version
-    $vendor = Join-Path $root "vendor\$name"
+    $vendor = Join-Path $Destination $name
     $patch = Join-Path $root "patches\$name.patch"
 
     $staging = Join-Path ([IO.Path]::GetTempPath()) "$name-$version-$PID"

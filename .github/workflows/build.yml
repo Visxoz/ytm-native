@@ -20,10 +20,12 @@ jobs:
         with:
           toolchain: stable
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      - uses: ./.github/actions/patched-crates
 
-      - name: Vendor patched crates
-        run: ./scripts/vendor-patched.ps1
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          # Patched crates rebuild when patches change, so save afresh then.
+          key: ${{ hashFiles('patches/*.patch', 'scripts/vendor-patched.ps1') }}
 
       - name: Build
         run: cargo build --release --locked

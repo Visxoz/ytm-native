@@ -1,0 +1,47 @@
+name: Patched crates
+description: >
+  Vendors the patched crates outside the repo and points cargo at them.
+  rust-cache drops the builds of crates inside the repo, so in vendor/ they
+  and all of Slint above them would rebuild on every run; outside it they
+  are cached with everything else. Use before rust-cache, which reads the
+  generated .cargo/config.toml.
+
+runs:
+  using: composite
+  steps:
+    # The folder is named after the patches, script and lockfile. Cargo's
+    # build IDs depend on it, so builds of other patches never pass for
+    # these, and the sources can be dated back safely below.
+    - name: Name the patched crates' folder
+      id: dir
+      shell: pwsh
+      run: |
+        $hash = '${{ hashFiles('patches/*.patch', 'scripts/vendor-patched.ps1', 'Cargo.lock') }}'
+        $dir = (Join-Path '${{ runner.temp }}' "patched-$($hash.Substring(0, 12))") -replace '\\', '/'
+        "path=$dir" >> $env:GITHUB_OUTPUT
+
+    - name: Restore patched crates
+      id: cache
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: ${{ steps.dir.outputs.path }}
+        key: patched-crates-${{ hashFiles('patches/*.patch', 'scripts/vendor-patched.ps1', 'Cargo.lock') }}
+
+    - name: Vendor patched crates
+      if: steps.cache.outputs.cache-hit != 'true'
+      shell: pwsh
+      run: ./scripts/vendor-patched.ps1 -Destination '${{ steps.dir.outputs.path }}'
+
+    # Sources dated before any build stay fresh, whichever run built them.
+    - name: Point cargo at the patched crates
+      shell: pwsh
+      run: |
+        $dir = '${{ steps.dir.outputs.path }}'
+        Get-ChildItem $dir -Recurse -File |
+          ForEach-Object { $_.LastWriteTimeUtc = [datetime]'2000-01-01' }
+        $patches = 'i-slint-common', 'i-slint-renderer-skia', 'rustypipe' |
+          ForEach-Object { "$_ = { path = `"$dir/$_`" }" }
+        "YTM_PATCHED_CRATES=$dir" >> $env:GITHUB_ENV
+        New-Item -ItemType Directory -Force .cargo | Out-Null
+        Set-Content .cargo/config.toml -Encoding utf8NoBOM -Value (@('[patch.crates-io]') + $patches)
+        Get-Content .cargo/config.toml

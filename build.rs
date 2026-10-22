@@ -11,31 +11,33 @@ fn quoted_after(text: &str, prefix: &str) -> Option<String> {
     Some(rest[..rest.find('"')?].to_owned())
 }
 
-fn vendored_version(name: &str) -> Option<String> {
-    let manifest = read(&format!("vendor/{name}/Cargo.toml"));
+fn vendored_version(dir: &str, name: &str) -> Option<String> {
+    let manifest = read(&format!("{dir}/{name}/Cargo.toml"));
     quoted_after(&manifest, &format!("name = \"{name}\"\nversion = \""))
 }
 
 /// Cargo silently ignores a `[patch]` whose version no longer matches, which
 /// would quietly drop the fixes in `patches/`, so fail the build instead.
+/// CI vendors outside the repo and names the folder in `YTM_PATCHED_CRATES`.
 fn check_vendored() {
+    println!("cargo:rerun-if-env-changed=YTM_PATCHED_CRATES");
+    let dir = std::env::var("YTM_PATCHED_CRATES").unwrap_or_else(|_| "vendor".into());
     let lock = read("Cargo.lock");
     let manifest = read("Cargo.toml");
+    let slint = quoted_after(&lock, "name = \"i-slint-core\"\nversion = \"");
     let wanted = [
-        (
-            "i-slint-renderer-skia",
-            quoted_after(&lock, "name = \"i-slint-core\"\nversion = \""),
-        ),
+        ("i-slint-common", slint.clone()),
+        ("i-slint-renderer-skia", slint),
         (
             "rustypipe",
             quoted_after(&manifest, "\nrustypipe = { version = \"="),
         ),
     ];
     for (name, version) in wanted {
-        let vendored = vendored_version(name);
+        let vendored = vendored_version(&dir, name);
         if version != vendored {
             panic!(
-                "{name} should be {} but vendor/{name} is {}; run scripts/vendor-patched.ps1",
+                "{name} should be {} but {dir}/{name} is {}; run scripts/vendor-patched.ps1",
                 version.as_deref().unwrap_or("unknown"),
                 vendored.as_deref().unwrap_or("missing"),
             );

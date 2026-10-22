@@ -3,6 +3,8 @@ name: CI
 on:
   push:
     branches: [main]
+    # Docs-only changes have nothing to check.
+    paths-ignore: ['**.md', 'docs/**']
   pull_request:
   workflow_dispatch:
 
