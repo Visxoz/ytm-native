@@ -7819,7 +7819,7 @@ dependencies = [
 
 [[package]]
 name = "ytm-native"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "cpal",
  "discord-rich-presence",
