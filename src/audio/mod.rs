@@ -115,6 +115,15 @@ impl Output {
     }
 }
 
+/// Empties a download slot and cancels what it held, once the slot's lock
+/// is released.
+fn cancel(slot: &Mutex<Option<Arc<Download>>>) {
+    let taken = slot.lock().unwrap().take();
+    if let Some(download) = taken {
+        download.cancel();
+    }
+}
+
 fn loudness_gain(loudness_db: Option<f32>) -> f32 {
     loudness_db
         .filter(|db| *db > 0.0)
@@ -141,10 +150,12 @@ impl Shared {
         self.update_gain();
     }
 
+    fn cancel_current(&self) {
+        cancel(&self.download);
+    }
+
     fn cancel_next(&self) {
-        if let Some(next) = self.next_download.lock().unwrap().take() {
-            next.cancel();
-        }
+        cancel(&self.next_download);
     }
 
     fn update_gain(&self) {
@@ -199,9 +210,7 @@ impl Player {
 
     pub fn load(&self, spec: StreamSpec) {
         // Cancel first so a decoder blocked on the old download wakes up.
-        if let Some(old) = self.shared.download.lock().unwrap().take() {
-            old.cancel();
-        }
+        self.shared.cancel_current();
         self.shared.cancel_next();
         let download = Download::start(spec.url.clone(), spec.size, spec.headers.clone());
         *self.shared.download.lock().unwrap() = Some(Arc::clone(&download));
@@ -224,9 +233,7 @@ impl Player {
     }
 
     pub fn stop(&self) {
-        if let Some(old) = self.shared.download.lock().unwrap().take() {
-            old.cancel();
-        }
+        self.shared.cancel_current();
         self.shared.cancel_next();
         let _ = self.tx.send(Command::Stop);
     }
@@ -488,7 +495,7 @@ impl Engine {
     }
 
     /// The current track's download becomes the audible one, for progress.
-    fn became_audible(&mut self) {
+    fn became_audible(&self) {
         let Some(download) = self.track.as_ref().map(|t| Arc::clone(&t.download)) else {
             return;
         };

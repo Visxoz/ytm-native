@@ -596,7 +596,7 @@ impl App {
         });
         on!(on_install_update, |app| app.install_update());
         on!(on_player_event, |app, kind, message| app
-            .on_player_event(&kind, message.to_string()));
+            .on_player_event(&kind, &message));
         on!(
             on_media_action,
             |app, action, value| match action.as_str() {
@@ -1516,49 +1516,46 @@ impl App {
 
     /// Queues the next track in the player shortly before the current one
     /// ends, so it follows without a gap, and drops a queued track the
-    /// queue no longer has next. Runs every tick.
-    fn update_gapless(self: &Rc<Self>) {
-        let next = self.state.borrow().queue.peek_next().cloned();
-        let stale = self
-            .state
-            .borrow()
-            .playback
-            .queued
-            .as_ref()
-            .is_some_and(|(id, _)| next.as_ref().is_none_or(|t| t.id != *id));
+    /// queue no longer has next. Runs every tick, so it copies nothing
+    /// until a track is due.
+    fn update_gapless(self: &Rc<Self>, position: f64) {
+        let (stale, due, generation) = {
+            let state = self.state.borrow();
+            let playback = &state.playback;
+            let next = state.queue.peek_next().map(|t| t.id.as_str());
+            let stale = playback
+                .queued
+                .as_ref()
+                .is_some_and(|(id, _)| next != Some(id.as_str()));
+            let near_end = playback.started
+                && playback.duration > 0.0
+                && playback.duration - position <= GAPLESS_LEAD_SECS
+                && (playback.queued.is_none() || stale);
+            let due = next
+                .filter(|id| near_end && playback.queue_tried.as_deref() != Some(*id))
+                .map(str::to_owned);
+            (stale, due, playback.generation)
+        };
         if stale {
             self.state.borrow_mut().playback.queued = None;
             self.player.clear_next();
         }
-        let Some(next) = next else {
+        let Some(next_id) = due else {
             return;
         };
-        let generation = {
-            let state = self.state.borrow();
-            let playback = &state.playback;
-            let remaining = playback.duration - self.player.position();
-            let due = playback.started && playback.duration > 0.0 && remaining <= GAPLESS_LEAD_SECS;
-            if !due
-                || playback.queued.is_some()
-                || playback.queue_tried.as_deref() == Some(next.id.as_str())
-            {
-                return;
-            }
-            playback.generation
-        };
-        self.state.borrow_mut().playback.queue_tried = Some(next.id.clone());
-        let prefetched = self.take_prefetched(&next.id);
-        let resolve = self.resolve_future(next.id.clone(), prefetched);
+        self.state.borrow_mut().playback.queue_tried = Some(next_id.clone());
+        let prefetched = self.take_prefetched(&next_id);
+        let resolve = self.resolve_future(next_id.clone(), prefetched);
         self.spawn(resolve, move |app, result| {
             let still_next = {
                 let state = app.state.borrow();
                 state.playback.generation == generation
-                    && state.queue.peek_next().is_some_and(|t| t.id == next.id)
+                    && state.queue.peek_next().is_some_and(|t| t.id == next_id)
             };
             match result {
                 Ok(stream) if still_next => {
                     app.player.queue_next(stream_spec(stream.clone(), 0.0));
-                    app.state.borrow_mut().playback.queued = Some((next.id, stream));
+                    app.state.borrow_mut().playback.queued = Some((next_id, stream));
                 }
                 Ok(_) => {}
                 Err(e) => log::debug!("could not queue the next track: {e}"),
@@ -1634,7 +1631,7 @@ impl App {
         }
     }
 
-    fn on_player_event(self: &Rc<Self>, kind: &str, message: String) {
+    fn on_player_event(self: &Rc<Self>, kind: &str, message: &str) {
         match kind {
             "started" => {
                 let (waited, premium_stream) = {
@@ -1678,7 +1675,7 @@ impl App {
                     .current()
                     .map(|t| t.title.clone())
                     .unwrap_or_default();
-                self.playback_failed(&title, &message);
+                self.playback_failed(&title, message);
             }
             _ => {}
         }
@@ -1895,12 +1892,13 @@ impl App {
         }
         let started = self.state.borrow().playback.started;
         if started {
-            ui.set_np_position(self.player.position() as f32);
+            let position = self.player.position();
+            ui.set_np_position(position as f32);
             let buffered = self.player.buffered();
             ui.set_np_buffered(buffered);
             let stalled = self.player.is_buffering() && !self.player.is_paused();
             ui.set_np_loading(stalled && buffered < 1.0);
-            self.update_gapless();
+            self.update_gapless(position);
         }
     }
 

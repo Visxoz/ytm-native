@@ -188,11 +188,7 @@ pub async fn download(update: &Update, progress: impl Fn(f32)) -> Result<PathBuf
     }
     drop(file);
 
-    let actual: String = hasher
-        .finalize()
-        .iter()
-        .map(|b| format!("{b:02x}"))
-        .collect();
+    let actual = format!("{:x}", hasher.finalize());
     if actual != expected || done != update.asset.size {
         let _ = fs::remove_file(&path);
         return Err("the download did not match its checksum".into());

@@ -243,8 +243,7 @@ fn authorization(cookie: &str, origin: &str, now: u64) -> Option<String> {
         .filter_map(|(scheme, sid)| {
             let sid = (*sid)?;
             let digest = Sha1::digest(format!("{now} {sid} {origin}").as_bytes());
-            let hex: String = digest.iter().map(|b| format!("{b:02x}")).collect();
-            Some(format!("{scheme} {now}_{hex}"))
+            Some(format!("{scheme} {now}_{digest:x}"))
         })
         .collect();
     (!parts.is_empty()).then(|| parts.join(" "))
@@ -459,8 +458,11 @@ mod tests {
         let cookie = "SID=a; SAPISID=abc; __Secure-3PAPISID=def";
         let auth = authorization(cookie, "https://music.youtube.com", 1_700_000_000).unwrap();
         // sha1("1700000000 abc https://music.youtube.com")
-        assert!(auth.starts_with("SAPISIDHASH 1700000000_"));
-        assert!(auth.contains(" SAPISID3PHASH 1700000000_"));
+        assert_eq!(
+            auth,
+            "SAPISIDHASH 1700000000_2f3ec011e870f3fbd0238c090c2062c208cead32 \
+             SAPISID3PHASH 1700000000_b38b56d67b7362e62fd452ce74b55b7cce306020"
+        );
         assert!(!auth.contains("SAPISID1PHASH"), "no 1P cookie, no 1P hash");
         assert!(authorization("SID=a", "https://x", 0).is_none());
     }
