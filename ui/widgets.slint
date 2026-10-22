@@ -39,6 +39,7 @@ export component IconButton {
         background: touch.has-hover && root.enabled ? root.hover-background : root.background;
         animate background { duration: Theme.fast; }
     }
+
     Icon {
         path: root.icon;
         size: root.icon-size;
@@ -46,6 +47,7 @@ export component IconButton {
         transform-scale: touch.pressed ? 0.88 : 1.0;
         animate transform-scale { duration: 90ms; }
     }
+
     if root.show-dot: Rectangle {
         y: root.height / 2 + root.icon-size / 2 + 2px;
         width: 4px;
@@ -78,7 +80,10 @@ export component PlayButton {
         drop-shadow-offset-y: 4px;
         drop-shadow-color: #00000080;
         transform-scale: touch.pressed ? 0.95 : touch.has-hover ? 1.05 : 1.0;
-        animate transform-scale { duration: Theme.fast; easing: ease-out; }
+        animate transform-scale {
+            duration: Theme.fast;
+            easing: ease-out;
+        }
         animate background { duration: Theme.fast; }
         Icon {
             path: root.playing ? Icons.pause : Icons.play;
@@ -86,6 +91,7 @@ export component PlayButton {
             color: root.icon-color;
         }
     }
+
     touch := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
@@ -109,12 +115,14 @@ export component PillButton {
         animate transform-scale { duration: Theme.fast; }
         animate border-color { duration: Theme.fast; }
     }
+
     label := Text {
         text: root.text;
         font-size: root.small ? 13px : 14px;
         font-weight: 700;
         color: root.primary ? #000000 : Theme.text;
     }
+
     touch := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
@@ -168,6 +176,7 @@ export component Slider {
             width: parent.width * clamp(root.buffered, 0, 1);
             background: #ffffff28;
         }
+
         Rectangle {
             x: 0;
             width: parent.width * root.shown;
@@ -176,6 +185,7 @@ export component Slider {
             animate background { duration: Theme.fast; }
         }
     }
+
     Rectangle {
         x: root.width * root.shown - self.width / 2;
         y: (parent.height - self.height) / 2;
@@ -188,6 +198,7 @@ export component Slider {
         opacity: root.hot ? 1 : 0;
         animate opacity { duration: Theme.fast; }
     }
+
     touch := TouchArea {
         enabled: root.enabled;
         mouse-cursor: pointer;
@@ -225,6 +236,7 @@ export component Toggle {
         background: root.checked ? Theme.accent : #ffffff38;
         animate background { duration: Theme.normal; }
     }
+
     Rectangle {
         x: root.checked ? root.width - self.width - 3px : 3px;
         y: 3px;
@@ -232,8 +244,12 @@ export component Toggle {
         height: 16px;
         border-radius: 8px;
         background: Theme.text;
-        animate x { duration: Theme.normal; easing: ease-in-out; }
+        animate x {
+            duration: Theme.normal;
+            easing: ease-in-out;
+        }
     }
+
     TouchArea {
         mouse-cursor: pointer;
         clicked => {
@@ -267,6 +283,7 @@ export component Spinner {
         stroke: #ffffff1f;
         stroke-width: root.size / 12;
     }
+
     Path {
         width: 100%;
         height: 100%;

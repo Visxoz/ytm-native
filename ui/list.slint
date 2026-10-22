@@ -106,7 +106,10 @@ export component ListView {
             y: (parent.height - self.height) * (-root.content-y / max(root.max-scroll, 1px));
             border-radius: self.width / 2;
             background: bar.has-hover || bar.pressed ? #ffffff8c : #ffffff52;
-            animate width, background { duration: 150ms; easing: ease-out; }
+            animate width, background {
+                duration: 150ms;
+                easing: ease-out;
+            }
         }
     }
 }

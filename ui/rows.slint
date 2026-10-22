@@ -1,5 +1,12 @@
 import { Theme, Icons } from "theme.slint";
-import { Icon, IconButton, PlayButton, PillButton, Art, Equalizer } from "widgets.slint";
+import {
+    Icon,
+    IconButton,
+    PlayButton,
+    PillButton,
+    Art,
+    Equalizer,
+} from "widgets.slint";
 import { Api, TrackItem, CardItem, RowItem, RowKind } from "types.slint";
 
 export global Layout {
@@ -53,20 +60,25 @@ export component TrackRow inherits Rectangle {
                 title: "Play next";
                 activated => { Api.track-action("next", root.section, root.index); }
             }
+
             MenuItem {
                 title: "Add to queue";
                 activated => { Api.track-action("queue", root.section, root.index); }
             }
+
             MenuItem {
                 title: "Start radio";
                 activated => { Api.track-action("radio", root.section, root.index); }
             }
+
             MenuSeparator { }
+
             MenuItem {
                 title: "Go to artist";
                 enabled: root.track.has-artist;
                 activated => { Api.track-action("artist", root.section, root.index); }
             }
+
             MenuItem {
                 title: "Go to album";
                 enabled: root.track.has-album;
@@ -163,6 +175,7 @@ export component TrackRow inherits Rectangle {
                     size: 20px;
                     color: more-touch.has-hover ? Theme.text : Theme.text-secondary;
                 }
+
                 more-touch := TouchArea {
                     mouse-cursor: pointer;
                     clicked => { menu.show({ x: more.x, y: more.y + more.height - 8px }); }
@@ -197,6 +210,7 @@ component Columns {
             horizontal-alignment: center;
             vertical-alignment: center;
         }
+
         Text {
             horizontal-stretch: 3;
             preferred-width: 0px;
@@ -206,6 +220,7 @@ component Columns {
             color: Theme.text-secondary;
             vertical-alignment: center;
         }
+
         if root.show-album: Text {
             horizontal-stretch: 2;
             preferred-width: 0px;
@@ -215,7 +230,10 @@ component Columns {
             color: Theme.text-secondary;
             vertical-alignment: center;
         }
-        Rectangle { width: 32px; }
+        Rectangle {
+            width: 32px;
+        }
+
         Rectangle {
             width: 44px;
             Icon {
@@ -226,6 +244,7 @@ component Columns {
             }
         }
     }
+
     Rectangle {
         y: parent.height - 9px;
         height: 1px;
@@ -246,6 +265,7 @@ export component Card {
                 title: "Play";
                 activated => { Api.play-card(root.card.kind, root.card.id); }
             }
+
             MenuItem {
                 title: "Start radio";
                 activated => { Api.card-radio(root.card.kind, root.card.id); }
@@ -257,10 +277,12 @@ export component Card {
             background: root.hot ? Theme.elevated : transparent;
             animate background { duration: Theme.normal; }
         }
+
         touch := TouchArea {
             mouse-cursor: pointer;
             clicked => { Api.navigate(root.card.kind, root.card.id, root.card.title); }
         }
+
         Art {
             x: Layout.card-padding;
             y: Layout.card-padding;
@@ -273,18 +295,23 @@ export component Card {
             drop-shadow-offset-y: 6px;
             drop-shadow-color: #00000060;
         }
+
         Rectangle {
             x: Layout.card-padding + root.art-size - self.width - 8px;
             y: Layout.card-padding + root.art-size - self.height - (root.hot ? 8px : 0px);
             width: 48px;
             height: 48px;
             opacity: root.hot ? 1 : 0;
-            animate y, opacity { duration: Theme.normal; easing: ease-out; }
+            animate y, opacity {
+                duration: Theme.normal;
+                easing: ease-out;
+            }
             play-button := PlayButton {
                 size: 48px;
                 clicked => { Api.play-card(root.card.kind, root.card.id); }
             }
         }
+
         VerticalLayout {
             x: Layout.card-padding;
             y: Layout.card-padding + root.art-size + 8px;
@@ -299,6 +326,7 @@ export component Card {
                 font-weight: 600;
                 color: Theme.text;
             }
+
             Text {
                 text: root.card.subtitle;
                 overflow: elide;
@@ -327,6 +355,7 @@ component GenreTile inherits Rectangle {
         font-family: Theme.display-font;
         color: Theme.text;
     }
+
     Rectangle {
         x: parent.width - 52px;
         y: parent.height - 44px;
@@ -336,10 +365,12 @@ component GenreTile inherits Rectangle {
         background: #ffffff22;
         transform-rotation: 25deg;
     }
+
     Rectangle {
         background: touch.has-hover ? #ffffff14 : transparent;
         animate background { duration: Theme.fast; }
     }
+
     touch := TouchArea {
         mouse-cursor: pointer;
         clicked => { Api.navigate(root.card.kind, root.card.id, root.card.title); }
@@ -361,7 +392,10 @@ export component Carousel {
         clip: true;
         Rectangle {
             x: -root.offset;
-            animate x { duration: 400ms; easing: ease-in-out; }
+            animate x {
+                duration: 400ms;
+                easing: ease-in-out;
+            }
             for card[i] in root.cards: Card {
                 x: i * root.step;
                 y: 0;
@@ -369,6 +403,7 @@ export component Carousel {
             }
         }
     }
+
     if root.offset > 0: IconButton {
         x: -14px;
         y: (Layout.card-width - Layout.card-padding) / 2 - self.height / 2;
@@ -429,6 +464,7 @@ component TopResult inherits Rectangle {
         mouse-cursor: pointer;
         clicked => { Api.navigate(root.card.kind, root.card.id, root.card.title); }
     }
+
     Art {
         x: 20px;
         y: 20px;
@@ -440,6 +476,7 @@ component TopResult inherits Rectangle {
         drop-shadow-blur: 16px;
         drop-shadow-color: #00000080;
     }
+
     Text {
         x: 20px;
         y: 132px;
@@ -451,6 +488,7 @@ component TopResult inherits Rectangle {
         font-family: Theme.display-font;
         color: Theme.text;
     }
+
     Text {
         x: 20px;
         y: 172px;
@@ -460,13 +498,17 @@ component TopResult inherits Rectangle {
         font-size: 14px;
         color: Theme.text-secondary;
     }
+
     Rectangle {
         x: parent.width - self.width - 20px;
         y: parent.height - self.height - (root.hot ? 20px : 12px);
         width: 52px;
         height: 52px;
         opacity: root.hot ? 1 : 0;
-        animate y, opacity { duration: Theme.normal; easing: ease-out; }
+        animate y, opacity {
+            duration: Theme.normal;
+            easing: ease-out;
+        }
         top-play := PlayButton {
             size: 52px;
             clicked => { Api.play-card(root.card.kind, root.card.id); }
@@ -496,6 +538,7 @@ export component PageHeader {
             opacity: root.data.art.width > 0 ? 1 : 0;
             animate opacity { duration: 400ms; }
         }
+
         Rectangle {
             background: @linear-gradient(180deg, #00000000 35%, #000000b0 100%);
         }
@@ -527,6 +570,7 @@ export component PageHeader {
                 font-weight: 600;
                 color: Theme.text;
             }
+
             Text {
                 text: root.data.title;
                 font-size: root.title-size;
@@ -536,6 +580,7 @@ export component PageHeader {
                 color: Theme.text;
                 overflow: elide;
             }
+
             HorizontalLayout {
                 spacing: 0;
                 alignment: start;
