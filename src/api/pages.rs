@@ -57,6 +57,7 @@ impl Api {
 
     /// Home: the personal feed when signed in, otherwise the charts. The
     /// feed's first page shows at once, and `complete` adds the next ones.
+    /// Should the feed fail, the app decides what stands in for it.
     async fn home(&self, signed_in: bool) -> Result<Page> {
         let q = self.q();
         let genres = async { genre_section(q.music_genres().await.unwrap_or_default()) };
@@ -65,33 +66,25 @@ impl Api {
         }
         let user = self.user_q();
         let (feed, genres) = tokio::join!(home_feed::first(&user), genres);
-        match feed {
-            Ok((mut sections, token)) if !sections.is_empty() => {
-                let more = token.map(|token| {
-                    More::Shelves(MoreShelves {
-                        token,
-                        pages_left: home_feed::CONTINUATIONS,
-                        trailing: genres.clone().into_iter().collect(),
-                    })
-                });
-                if more.is_none() {
-                    sections.extend(genres);
-                }
-                Ok(Page {
-                    header: None,
-                    sections,
-                    more,
-                })
-            }
-            Ok(_) => {
-                log::warn!("the personal home feed was empty");
-                self.public_home(std::future::ready(genres)).await
-            }
-            Err(e) => {
-                log::warn!("could not load the personal home feed: {e}");
-                self.public_home(std::future::ready(genres)).await
-            }
+        let (mut sections, token) = feed?;
+        if sections.is_empty() {
+            return Err("the personal home feed was empty".into());
         }
+        let more = token.map(|token| {
+            More::Shelves(MoreShelves {
+                token,
+                pages_left: home_feed::CONTINUATIONS,
+                trailing: genres.clone().into_iter().collect(),
+            })
+        });
+        if more.is_none() {
+            sections.extend(genres);
+        }
+        Ok(Page {
+            header: None,
+            sections,
+            more,
+        })
     }
 
     /// Home for everyone: the charts and new releases.

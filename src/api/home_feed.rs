@@ -502,10 +502,31 @@ pub fn next_page(json: &str) -> Result<(Vec<Section>, Option<String>), String> {
     Ok((list.shelves(), list.continuation()))
 }
 
+/// Requests made for one page of the feed before giving up.
+const ATTEMPTS: u32 = 4;
+
+/// YouTube refuses a share of requests for the signed-in feed, in bursts,
+/// with "400: Request contains an invalid argument", and answers the same
+/// request a moment later. The rest of the account, and the feed signed
+/// out, are unaffected, so it is YouTube building the feed that fails.
+fn refused(e: &rustypipe::error::Error) -> bool {
+    matches!(e, rustypipe::error::Error::HttpStatus(400, _))
+}
+
 async fn browse(q: &RustyPipeQuery, body: &serde_json::Value) -> Result<String, String> {
-    q.raw(ClientType::DesktopMusic, "browse", body)
-        .await
-        .map_err(|e| e.to_string())
+    let mut attempt = 1;
+    loop {
+        match q.raw(ClientType::DesktopMusic, "browse", body).await {
+            Ok(json) => return Ok(json),
+            Err(e) if attempt < ATTEMPTS && refused(&e) => {
+                log::debug!("the home feed was refused, asking again: {e}");
+                let wait = std::time::Duration::from_millis(300 * u64::from(attempt));
+                tokio::time::sleep(wait).await;
+                attempt += 1;
+            }
+            Err(e) => return Err(e.to_string()),
+        }
+    }
 }
 
 /// The feed's first page, with the token of the next. `q` must send the
@@ -579,6 +600,15 @@ mod tests {
         assert_eq!(tracks[0].artist_names(), "Rich The Kid");
         assert_eq!(tracks[0].album.as_ref().unwrap().0, "MPREb_1");
         assert!(!tracks[0].video);
+    }
+
+    #[test]
+    fn retries_only_refusals() {
+        use rustypipe::error::Error;
+        assert!(refused(&Error::HttpStatus(400, "invalid argument".into())));
+        assert!(!refused(&Error::HttpStatus(401, "".into())));
+        assert!(!refused(&Error::HttpStatus(404, "".into())));
+        assert!(!refused(&Error::Other("network".into())));
     }
 
     #[test]

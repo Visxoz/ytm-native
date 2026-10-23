@@ -195,6 +195,34 @@ impl Session {
     }
 }
 
+fn home_path() -> PathBuf {
+    data_dir().join("home.json")
+}
+
+/// The signed-in home feed as it last loaded in full. YouTube refuses some
+/// requests for the feed while the rest of the account works, so Home shows
+/// this at once and while a fresh copy cannot be had.
+pub fn load_home() -> Option<Vec<crate::api::Section>> {
+    let bytes = std::fs::read(home_path()).ok()?;
+    let sections: Vec<crate::api::Section> = serde_json::from_slice(&bytes).ok()?;
+    (!sections.is_empty()).then_some(sections)
+}
+
+pub fn save_home(sections: &[crate::api::Section]) {
+    let written = serde_json::to_vec(sections)
+        .map_err(std::io::Error::other)
+        .and_then(|json| std::fs::write(home_path(), json));
+    if let Err(e) = written {
+        log::warn!("could not save the home feed: {e}");
+    }
+}
+
+/// Drops the saved feed, which belongs to the account signed in when it was
+/// saved.
+pub fn remove_home() {
+    let _ = std::fs::remove_file(home_path());
+}
+
 /// The songs played, newest first, one entry per song. Changes are kept in
 /// memory until `save`, which the app calls a moment after the last one
 /// and on exit, so a song's start never waits on the disk.
@@ -265,6 +293,64 @@ mod tests {
         assert_eq!(settings.volume, 0.5);
         assert!(settings.normalise);
         assert_eq!(settings.quality, Quality::High);
+    }
+
+    #[test]
+    fn home_feed_survives_saving() {
+        use crate::api::{Card, CardKind, CardLayout, QueueMode, Section, Track};
+        let track = Track {
+            id: "44zDzdf08s4".into(),
+            title: "Matt Hardy 999".into(),
+            artists: Vec::new(),
+            album: None,
+            duration: None,
+            thumb: Some("https://lh3.googleusercontent.com/x".into()),
+            track_nr: None,
+            video: true,
+        };
+        let sections = vec![
+            Section::Cards {
+                title: "Listen again".into(),
+                cards: vec![Card {
+                    kind: CardKind::Song,
+                    id: track.id.clone(),
+                    title: track.title.clone(),
+                    subtitle: "Song".into(),
+                    thumb: None,
+                    color: Some(0x5c0f1c),
+                    track: Some(track.clone()),
+                }],
+                layout: CardLayout::Carousel,
+            },
+            Section::Tracks {
+                title: "Quick picks".into(),
+                tracks: vec![track],
+                mode: QueueMode::Section,
+                numbered: false,
+            },
+        ];
+        let json = serde_json::to_vec(&sections).unwrap();
+        let back: Vec<Section> = serde_json::from_slice(&json).unwrap();
+        let Section::Cards {
+            title,
+            cards,
+            layout,
+        } = &back[0]
+        else {
+            panic!("expected cards")
+        };
+        assert_eq!(title, "Listen again");
+        assert_eq!(*layout, CardLayout::Carousel);
+        assert_eq!(cards[0].kind, CardKind::Song);
+        assert_eq!(cards[0].color, Some(0x5c0f1c));
+        assert!(cards[0].track.as_ref().is_some_and(|t| t.video));
+        assert!(matches!(
+            &back[1],
+            Section::Tracks {
+                mode: QueueMode::Section,
+                ..
+            }
+        ));
     }
 
     #[test]

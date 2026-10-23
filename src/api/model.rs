@@ -42,7 +42,7 @@ impl Track {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum CardKind {
     Album,
     Playlist,
@@ -64,7 +64,7 @@ impl CardKind {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct Card {
     pub kind: CardKind,
     pub id: String,
@@ -78,7 +78,7 @@ pub struct Card {
 }
 
 /// How a click on one track of a section fills the queue.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum QueueMode {
     /// Queue the whole section from the clicked track.
     Section,
@@ -86,7 +86,7 @@ pub enum QueueMode {
     Radio,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum CardLayout {
     Carousel,
     Grid,
@@ -95,7 +95,7 @@ pub enum CardLayout {
     Top,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub enum Section {
     Tracks {
         title: String,

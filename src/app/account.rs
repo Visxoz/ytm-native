@@ -31,6 +31,8 @@ impl App {
                     Ok(()) => {
                         app.state.borrow_mut().signed_in = true;
                         app.state.borrow_mut().page_cache.clear();
+                        // It may be another account's.
+                        settings::remove_home();
                         app.load_library();
                         app.load_account_photo();
                         settings::save_cookie(&header);
@@ -176,6 +178,7 @@ impl App {
             state.page_cache.clear();
             state.route == Route::Home
         };
+        settings::remove_home();
         self.library.set_vec(Vec::new());
         let ui = self.ui();
         ui.set_signed_in(false);
@@ -208,6 +211,7 @@ impl App {
             app.state.borrow_mut().page_cache.clear();
             app.library.set_vec(Vec::new());
             settings::remove_cookie();
+            settings::remove_home();
             app.premium.set_cookie(None);
             app.update_settings(|s| s.premium_account = false);
             let ui = app.ui();

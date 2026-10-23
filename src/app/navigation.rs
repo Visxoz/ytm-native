@@ -11,6 +11,7 @@ use super::{App, HistoryEntry, s};
 use crate::{
     AppWindow,
     api::{Page, Route},
+    settings,
 };
 
 /// How long a loaded page is reused when navigating back to it.
@@ -75,6 +76,20 @@ impl App {
             return;
         }
 
+        // The feed as it last loaded shows while a fresh one is fetched, and
+        // stays should YouTube refuse it.
+        let personal_home = route == Route::Home && signed_in;
+        let saved = personal_home.then(settings::load_home).flatten();
+        let showing_saved = saved.is_some();
+        if let Some(sections) = saved {
+            ui.set_page_loading(false);
+            self.show_page(Page {
+                header: None,
+                sections,
+                more: None,
+            });
+        }
+
         let api = self.api.clone();
         self.spawn(
             async move { api.page(&route, signed_in).await.map(|page| (route, page)) },
@@ -83,12 +98,50 @@ impl App {
                     return;
                 }
                 let ui = app.ui();
-                ui.set_page_loading(false);
                 match result {
                     Ok((route, page)) => {
+                        if personal_home && page.more.is_none() {
+                            app.save_home(&page);
+                        }
                         app.cache_page(route, page.clone());
-                        app.show_page(page);
+                        // Swapped in only at the top, so the saved feed never
+                        // jumps under the reader; the next visit shows it.
+                        if !showing_saved || ui.get_page_scroll().abs() < 1.0 {
+                            ui.set_page_loading(false);
+                            app.show_page(page);
+                        }
                     }
+                    Err(e) if showing_saved => {
+                        log::warn!("kept the saved home feed: {e}");
+                    }
+                    Err(e) if personal_home => {
+                        log::warn!("could not load the personal home feed: {e}");
+                        app.show_public_home(generation);
+                    }
+                    Err(e) => {
+                        log::warn!("page failed: {e}");
+                        ui.set_page_loading(false);
+                        ui.set_page_error(e.into());
+                    }
+                }
+            },
+        );
+    }
+
+    /// The charts, in place of a personal feed that failed with none saved.
+    /// Not cached, so Home asks for the feed again next time.
+    fn show_public_home(self: &Rc<Self>, generation: u64) {
+        let api = self.api.clone();
+        self.spawn(
+            async move { api.page(&Route::Home, false).await },
+            move |app, result| {
+                if app.state.borrow().page_generation != generation {
+                    return;
+                }
+                let ui = app.ui();
+                ui.set_page_loading(false);
+                match result {
+                    Ok(page) => app.show_page(page),
                     Err(e) => {
                         log::warn!("page failed: {e}");
                         ui.set_page_error(e.into());
@@ -96,6 +149,16 @@ impl App {
                 }
             },
         );
+    }
+
+    /// Saves the signed-in feed once it has loaded in full, off the UI
+    /// thread.
+    pub(super) fn save_home(self: &Rc<Self>, page: &Page) {
+        if !self.state.borrow().signed_in {
+            return;
+        }
+        let sections = page.sections.clone();
+        self.spawn(async move { settings::save_home(&sections) }, |_, ()| {});
     }
 
     fn cache_page(&self, route: Route, page: Page) {

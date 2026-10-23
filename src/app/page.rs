@@ -243,6 +243,10 @@ impl App {
             if let Some((cached, _)) = app.state.borrow_mut().page_cache.get_mut(&route) {
                 *cached = page.clone();
             }
+            // Only the signed-in feed continues on Home; the charts arrive whole.
+            if route == Route::Home && page.more.is_none() {
+                app.save_home(&page);
+            }
             if app.state.borrow().page_generation == generation {
                 app.extend_page(page, route, generation);
             }
