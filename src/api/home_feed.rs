@@ -503,7 +503,7 @@ pub fn next_page(json: &str) -> Result<(Vec<Section>, Option<String>), String> {
 }
 
 /// Requests made for one page of the feed before giving up.
-const ATTEMPTS: u32 = 4;
+pub const ATTEMPTS: u32 = 4;
 
 /// YouTube refuses a share of requests for the signed-in feed, in bursts,
 /// with "400: Request contains an invalid argument", and answers the same
@@ -513,12 +513,16 @@ fn refused(e: &rustypipe::error::Error) -> bool {
     matches!(e, rustypipe::error::Error::HttpStatus(400, _))
 }
 
-async fn browse(q: &RustyPipeQuery, body: &serde_json::Value) -> Result<String, String> {
+async fn browse(
+    q: &RustyPipeQuery,
+    body: &serde_json::Value,
+    attempts: u32,
+) -> Result<String, String> {
     let mut attempt = 1;
     loop {
         match q.raw(ClientType::DesktopMusic, "browse", body).await {
             Ok(json) => return Ok(json),
-            Err(e) if attempt < ATTEMPTS && refused(&e) => {
+            Err(e) if attempt < attempts && refused(&e) => {
                 log::debug!("the home feed was refused, asking again: {e}");
                 let wait = std::time::Duration::from_millis(300 * u64::from(attempt));
                 tokio::time::sleep(wait).await;
@@ -529,10 +533,14 @@ async fn browse(q: &RustyPipeQuery, body: &serde_json::Value) -> Result<String, 
     }
 }
 
-/// The feed's first page, with the token of the next. `q` must send the
-/// sign-in cookie: the feed is personal.
-pub async fn first(q: &RustyPipeQuery) -> Result<(Vec<Section>, Option<String>), String> {
-    let json = browse(q, &serde_json::json!({ "browseId": "FEmusic_home" })).await?;
+/// The feed's first page, with the token of the next, in up to `attempts`
+/// requests. `q` must send the sign-in cookie: the feed is personal.
+pub async fn first(
+    q: &RustyPipeQuery,
+    attempts: u32,
+) -> Result<(Vec<Section>, Option<String>), String> {
+    let body = serde_json::json!({ "browseId": "FEmusic_home" });
+    let json = browse(q, &body, attempts).await?;
     first_page(&json)
 }
 
@@ -541,7 +549,7 @@ pub async fn next(
     q: &RustyPipeQuery,
     token: &str,
 ) -> Result<(Vec<Section>, Option<String>), String> {
-    let json = browse(q, &serde_json::json!({ "continuation": token })).await?;
+    let json = browse(q, &serde_json::json!({ "continuation": token }), ATTEMPTS).await?;
     next_page(&json)
 }
 

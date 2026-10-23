@@ -76,18 +76,9 @@ impl App {
             return;
         }
 
-        // The feed as it last loaded shows while a fresh one is fetched, and
-        // stays should YouTube refuse it.
-        let personal_home = route == Route::Home && signed_in;
-        let saved = personal_home.then(settings::load_home).flatten();
-        let showing_saved = saved.is_some();
-        if let Some(sections) = saved {
-            ui.set_page_loading(false);
-            self.show_page(Page {
-                header: None,
-                sections,
-                more: None,
-            });
+        if route == Route::Home && signed_in {
+            self.load_personal_home(generation);
+            return;
         }
 
         let api = self.api.clone();
@@ -98,32 +89,99 @@ impl App {
                     return;
                 }
                 let ui = app.ui();
+                ui.set_page_loading(false);
                 match result {
                     Ok((route, page)) => {
-                        if personal_home && page.more.is_none() {
-                            app.save_home(&page);
-                        }
                         app.cache_page(route, page.clone());
-                        // Swapped in only at the top, so the saved feed never
-                        // jumps under the reader; the next visit shows it.
-                        if !showing_saved || ui.get_page_scroll().abs() < 1.0 {
-                            ui.set_page_loading(false);
-                            app.show_page(page);
-                        }
-                    }
-                    Err(e) if showing_saved => {
-                        log::warn!("kept the saved home feed: {e}");
-                    }
-                    Err(e) if personal_home => {
-                        log::warn!("could not load the personal home feed: {e}");
-                        app.show_public_home(generation);
+                        app.show_page(page);
                     }
                     Err(e) => {
                         log::warn!("page failed: {e}");
-                        ui.set_page_loading(false);
                         ui.set_page_error(e.into());
                     }
                 }
+            },
+        );
+    }
+
+    /// The signed-in feed in one request. Should YouTube refuse it, the feed
+    /// as it last loaded shows at once while the retries go on behind it,
+    /// and what they fetch waits for the next visit, so the page never
+    /// changes under the reader.
+    fn load_personal_home(self: &Rc<Self>, generation: u64) {
+        let api = self.api.clone();
+        self.spawn(
+            async move { api.home_first_try().await },
+            move |app, result| {
+                if app.state.borrow().page_generation != generation {
+                    return;
+                }
+                match result {
+                    Ok(page) => app.show_personal_home(page),
+                    Err(e) => {
+                        log::debug!("the personal home feed failed at first: {e}");
+                        match settings::load_home() {
+                            Some(sections) => {
+                                app.ui().set_page_loading(false);
+                                app.show_page(Page {
+                                    header: None,
+                                    sections,
+                                    more: None,
+                                });
+                                app.refresh_personal_home();
+                            }
+                            None => app.retry_personal_home(generation),
+                        }
+                    }
+                }
+            },
+        );
+    }
+
+    fn show_personal_home(self: &Rc<Self>, page: Page) {
+        if page.more.is_none() {
+            self.save_home(&page);
+        }
+        self.ui().set_page_loading(false);
+        self.cache_page(Route::Home, page.clone());
+        self.show_page(page);
+    }
+
+    /// With nothing saved to show, waits out the retries, then the charts.
+    fn retry_personal_home(self: &Rc<Self>, generation: u64) {
+        let api = self.api.clone();
+        self.spawn(
+            async move { api.page(&Route::Home, true).await },
+            move |app, result| {
+                if app.state.borrow().page_generation != generation {
+                    return;
+                }
+                match result {
+                    Ok(page) => app.show_personal_home(page),
+                    Err(e) => {
+                        log::warn!("could not load the personal home feed: {e}");
+                        app.show_public_home(generation);
+                    }
+                }
+            },
+        );
+    }
+
+    /// Fetches the feed behind the saved one, for the next visit. Kept
+    /// whole by the next `show_page`, which also completes and saves it.
+    fn refresh_personal_home(self: &Rc<Self>) {
+        let api = self.api.clone();
+        self.spawn(
+            async move { api.page(&Route::Home, true).await },
+            |app, result| match result {
+                Ok(page) if app.state.borrow().signed_in => {
+                    if page.more.is_none() {
+                        app.save_home(&page);
+                    }
+                    app.cache_page(Route::Home, page);
+                }
+                Ok(_) => {}
+                Err(e) => log::warn!("kept the saved home feed: {e}"),
             },
         );
     }

@@ -42,7 +42,7 @@ fn sections_page(sections: Vec<Section>) -> Page {
 impl Api {
     pub async fn page(&self, route: &Route, signed_in: bool) -> Result<Page> {
         match route {
-            Route::Home => self.home(signed_in).await,
+            Route::Home => self.home(signed_in, home_feed::ATTEMPTS).await,
             Route::Explore => self.explore().await,
             Route::Library => self.library().await,
             // Kept by the app itself; never fetched.
@@ -55,17 +55,23 @@ impl Api {
         }
     }
 
+    /// The signed-in feed in one request, so the app can show the saved
+    /// feed at once when YouTube refuses it rather than wait out retries.
+    pub async fn home_first_try(&self) -> Result<Page> {
+        self.home(true, 1).await
+    }
+
     /// Home: the personal feed when signed in, otherwise the charts. The
     /// feed's first page shows at once, and `complete` adds the next ones.
     /// Should the feed fail, the app decides what stands in for it.
-    async fn home(&self, signed_in: bool) -> Result<Page> {
+    async fn home(&self, signed_in: bool, attempts: u32) -> Result<Page> {
         let q = self.q();
         let genres = async { genre_section(q.music_genres().await.unwrap_or_default()) };
         if !signed_in {
             return self.public_home(genres).await;
         }
         let user = self.user_q();
-        let (feed, genres) = tokio::join!(home_feed::first(&user), genres);
+        let (feed, genres) = tokio::join!(home_feed::first(&user, attempts), genres);
         let (mut sections, token) = feed?;
         if sections.is_empty() {
             return Err("the personal home feed was empty".into());

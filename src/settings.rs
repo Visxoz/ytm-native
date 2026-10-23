@@ -201,7 +201,7 @@ fn home_path() -> PathBuf {
 
 /// The signed-in home feed as it last loaded in full. YouTube refuses some
 /// requests for the feed while the rest of the account works, so Home shows
-/// this at once and while a fresh copy cannot be had.
+/// this when a fresh copy cannot be had.
 pub fn load_home() -> Option<Vec<crate::api::Section>> {
     let bytes = std::fs::read(home_path()).ok()?;
     let sections: Vec<crate::api::Section> = serde_json::from_slice(&bytes).ok()?;
