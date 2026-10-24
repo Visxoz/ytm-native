@@ -25,7 +25,7 @@
 
 - **Light.** Starts in a moment and stays around 160 MB while you browse. No runtime to install, and nothing left running in the background.
 - **Sounds better.** The best stream YouTube offers, **256 kbps Opus** with Premium, or a lower quality when data is dear. Gapless playback or crossfade, and loudness levelling.
-- **Plays like YouTube Music.** Search finds songs and uploads alike, radio and autoplay keep going, Smart Shuffle mixes recommendations into your playlists, and shuffle, repeat, play next, history and the queue all work as you'd expect.
+- **Plays like YouTube Music.** Search finds songs and uploads alike, radio and autoplay keep going, Smart Shuffle mixes recommendations into your playlists, and shuffle, repeat, play next and history all work as you'd expect. The queue can be dragged into order, edited several songs at a time, and saved as a playlist.
 - **Feels at home.** A clean dark interface with headers tinted from the artwork, a collapsible library, smooth animations, and lyrics a click away.
 - **Made for Windows.** Media keys, the Windows media overlay, Discord status, and a window that remembers where you left off, down to the song and position.
 - **Your library, safely.** Sign in on Google's own page for your playlists, albums, artists and Liked music. The sign-in is stored encrypted, for your Windows account only.

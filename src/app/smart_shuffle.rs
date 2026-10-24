@@ -102,8 +102,10 @@ impl App {
             let mut index = current + 1;
             let mut changed = false;
             let mut dry = false;
-            loop {
-                if index < queue.len() && queue.is_recommended(index) {
+            // Only before one of the user's own tracks, never after the last:
+            // a cleared queue stays clear, and autoplay takes over at the end.
+            while index < queue.len() && ahead < LOOKAHEAD {
+                if queue.is_recommended(index) {
                     run = 0;
                     index += 1;
                     continue;
@@ -123,9 +125,6 @@ impl App {
                     changed = true;
                     index += 1;
                     continue;
-                }
-                if index >= queue.len() || ahead >= LOOKAHEAD {
-                    break;
                 }
                 run += 1;
                 ahead += 1;

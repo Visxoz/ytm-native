@@ -51,21 +51,25 @@ impl App {
         on!(on_toggle_mute, |app| app.toggle_mute());
         on!(on_toggle_shuffle, |app| app.toggle_shuffle());
         on!(on_cycle_repeat, |app| app.cycle_repeat());
-        on!(on_queue_play, |app, index| {
-            let found = app.state.borrow_mut().queue.jump(index as usize).is_some();
-            if found {
-                app.start_current();
-            }
+        on!(on_queue_clicked, |app, index, control, shift| app
+            .queue_clicked(index as usize, control, shift));
+        on!(on_queue_move, |app, from, to| app
+            .queue_move(from as usize, to as usize));
+        on!(on_queue_remove, |app, index| app
+            .queue_remove(vec![index as usize]));
+        on!(on_queue_remove_selected, |app| {
+            let rows = app.selected_rows();
+            app.queue_remove(rows);
         });
-        on!(on_queue_remove, |app, index| {
-            if app.state.borrow_mut().queue.remove(index as usize) {
-                app.refresh_queue();
-            }
+        on!(on_queue_play_next, |app, index| app
+            .queue_play_next(vec![index as usize]));
+        on!(on_queue_play_next_selected, |app| {
+            let rows = app.selected_rows();
+            app.queue_play_next(rows);
         });
-        on!(on_queue_clear, |app| {
-            app.state.borrow_mut().queue.clear_upcoming();
-            app.refresh_queue();
-        });
+        on!(on_queue_clear_selection, |app| app.clear_selection());
+        on!(on_queue_clear, |app| app.queue_clear());
+        on!(on_queue_save, |app| app.save_queue_as_playlist());
         on!(on_panel_tab_changed, |app, tab| {
             if tab == 1 {
                 app.load_lyrics();

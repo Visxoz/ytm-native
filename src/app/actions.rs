@@ -220,18 +220,20 @@ impl App {
         match action {
             "next" | "queue" => {
                 let empty = self.state.borrow().queue.is_empty();
-                {
+                let at = {
                     let mut state = self.state.borrow_mut();
                     if action == "next" {
                         state.queue.play_next(track.clone());
+                        state.queue.current_index().map_or(0, |c| c + 1)
                     } else {
                         state.queue.push(track.clone());
+                        state.queue.len() - 1
                     }
-                }
+                };
                 if empty {
                     self.start_current();
                 } else {
-                    self.refresh_queue();
+                    self.queue_inserted(at);
                     self.toast(if action == "next" {
                         format!("\u{201c}{}\u{201d} plays next", track.title)
                     } else {

@@ -25,7 +25,12 @@ fn quality_label(stream: &ResolvedStream) -> String {
 }
 
 /// The queue row for `track`, and whether its artwork still has to load.
-fn queue_item(track: &Track, current: bool, recommended: bool) -> (QueueItem, bool) {
+pub(super) fn queue_item(
+    track: &Track,
+    current: bool,
+    recommended: bool,
+    selected: bool,
+) -> (QueueItem, bool) {
     let art = track
         .thumb
         .as_deref()
@@ -38,6 +43,7 @@ fn queue_item(track: &Track, current: bool, recommended: bool) -> (QueueItem, bo
         art: art.unwrap_or_default(),
         current,
         recommended,
+        selected,
     };
     (item, needs_art)
 }
@@ -185,7 +191,7 @@ impl App {
             .entries()
             .enumerate()
             .map(|(i, (t, recommended))| {
-                let (item, needs_art) = queue_item(t, i as i32 == current, recommended);
+                let (item, needs_art) = queue_item(t, i as i32 == current, recommended, false);
                 if needs_art {
                     missing.push((i, t.thumb.clone()));
                 }
@@ -193,8 +199,9 @@ impl App {
             })
             .collect();
         self.queue_model.set_vec(items);
+        self.forget_selection();
         for (i, url) in missing {
-            self.load_queue_art(i, url, revision);
+            self.load_queue_art(i, url);
         }
     }
 
@@ -214,8 +221,16 @@ impl App {
                 let Some(track) = state.queue.get(i) else {
                     continue;
                 };
-                let (item, needs_art) =
-                    queue_item(track, i as i32 == current, state.queue.is_recommended(i));
+                let selected = self
+                    .queue_model
+                    .row_data(i)
+                    .is_some_and(|item| item.selected);
+                let (item, needs_art) = queue_item(
+                    track,
+                    i as i32 == current,
+                    state.queue.is_recommended(i),
+                    selected,
+                );
                 if needs_art {
                     missing.push((i, track.thumb.clone()));
                 }
@@ -223,26 +238,37 @@ impl App {
             }
         }
         for (i, url) in missing {
-            self.load_queue_art(i, url, revision);
+            self.load_queue_art(i, url);
         }
     }
 
-    fn load_queue_art(self: &Rc<Self>, index: usize, url: Option<String>, revision: u64) {
+    /// Loads the artwork of the entry at `index` into its row. The entry may
+    /// have moved meanwhile, or been replaced in place; the row that still
+    /// wants this artwork gets it.
+    pub(super) fn load_queue_art(self: &Rc<Self>, index: usize, url: Option<String>) {
         let Some(url) = url else { return };
         let expected = url.clone();
         self.load_image(Some(url), images::ROW, move |app, image| {
-            // The entry may have moved, or been replaced in place.
-            let same = app.queue_shown.get() == Some(revision)
-                && app
-                    .state
-                    .borrow()
-                    .queue
-                    .get(index)
-                    .and_then(|t| t.thumb.as_deref())
-                    == Some(expected.as_str());
-            if same && let Some(mut item) = app.queue_model.row_data(index) {
+            let row = {
+                let state = app.state.borrow();
+                let wants = |i: usize| {
+                    state.queue.get(i).and_then(|t| t.thumb.as_deref()) == Some(expected.as_str())
+                        && app
+                            .queue_model
+                            .row_data(i)
+                            .is_some_and(|item| item.art.size().width == 0)
+                };
+                if wants(index) {
+                    Some(index)
+                } else {
+                    (0..state.queue.len()).find(|&i| wants(i))
+                }
+            };
+            if let Some(row) = row
+                && let Some(mut item) = app.queue_model.row_data(row)
+            {
                 item.art = image;
-                app.queue_model.set_row_data(index, item);
+                app.queue_model.set_row_data(row, item);
             }
         });
     }

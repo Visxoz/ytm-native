@@ -330,19 +330,95 @@ impl<T: Clone> Queue<T> {
         }
     }
 
-    /// Removes an entry other than the current one.
-    pub fn remove(&mut self, index: usize) -> bool {
+    /// Removes the entries at `indices`, all but the current one. Returns
+    /// the indices removed, in order.
+    pub fn remove_many(&mut self, indices: impl IntoIterator<Item = usize>) -> Vec<usize> {
         let Some(current) = self.current else {
-            return false;
+            return Vec::new();
         };
-        if index >= self.entries.len() || index == current {
+        let mut drop = vec![false; self.entries.len()];
+        for index in indices {
+            if index != current && index < drop.len() {
+                drop[index] = true;
+            }
+        }
+        let removed: Vec<usize> = (0..drop.len()).filter(|&i| drop[i]).collect();
+        if removed.is_empty() {
+            return removed;
+        }
+        self.revision += 1;
+        let mut index = 0;
+        self.entries.retain(|_| {
+            let keep = !drop[index];
+            index += 1;
+            keep
+        });
+        let before = removed.iter().take_while(|&&i| i < current).count();
+        self.current = Some(current - before);
+        removed
+    }
+
+    /// Moves the entry at `from` so that it sits at `to`. The current track
+    /// may move too; its index follows it.
+    pub fn move_to(&mut self, from: usize, to: usize) -> bool {
+        if from == to || from >= self.entries.len() || to >= self.entries.len() {
             return false;
         }
         self.revision += 1;
-        self.entries.remove(index);
-        if index < current {
-            self.current = Some(current - 1);
+        if from < to {
+            self.entries[from..=to].rotate_left(1);
+        } else {
+            self.entries[to..=from].rotate_right(1);
         }
+        if let Some(current) = self.current {
+            self.current = Some(if current == from {
+                to
+            } else if from < current && current <= to {
+                current - 1
+            } else if to <= current && current < from {
+                current + 1
+            } else {
+                current
+            });
+        }
+        true
+    }
+
+    /// Moves the entries at `indices`, in their queue order, to right after
+    /// the current track. Returns whether anything moved.
+    pub fn play_next_many(&mut self, indices: impl IntoIterator<Item = usize>) -> bool {
+        let Some(current) = self.current else {
+            return false;
+        };
+        let mut pick = vec![false; self.entries.len()];
+        for index in indices {
+            if index != current && index < pick.len() {
+                pick[index] = true;
+            }
+        }
+        let picked = pick.iter().filter(|&&p| p).count();
+        let already_next = pick[..current].iter().all(|&p| !p)
+            && pick[current + 1..].iter().take(picked).all(|&p| p);
+        if picked == 0 || already_next {
+            return false;
+        }
+        self.revision += 1;
+        let mut kept = Vec::with_capacity(self.entries.len());
+        let mut moved = Vec::with_capacity(picked);
+        let mut after = Vec::with_capacity(self.entries.len() - current - 1);
+        for (index, entry) in std::mem::take(&mut self.entries).into_iter().enumerate() {
+            if pick[index] {
+                moved.push(entry);
+            } else if index <= current {
+                kept.push(entry);
+            } else {
+                after.push(entry);
+            }
+        }
+        self.current = Some(kept.len() - 1);
+        kept.append(&mut moved);
+        kept.append(&mut after);
+        self.entries = kept;
         true
     }
 
@@ -537,6 +613,89 @@ mod tests {
     }
 
     #[test]
+    fn moves_entries_and_the_current_index_follows() {
+        let mut q = queue(6);
+        q.jump(2);
+        let revision = q.revision();
+        assert!(q.move_to(4, 1), "a later entry to before the current");
+        assert_eq!(items(&q), [0, 4, 1, 2, 3, 5]);
+        assert_eq!(q.current(), Some(&2));
+        assert_eq!(q.current_index(), Some(3));
+        assert_ne!(q.revision(), revision);
+
+        assert!(q.move_to(0, 5), "an earlier entry to after the current");
+        assert_eq!(items(&q), [4, 1, 2, 3, 5, 0]);
+        assert_eq!(q.current_index(), Some(2));
+
+        assert!(q.move_to(2, 0), "the current track itself");
+        assert_eq!(items(&q), [2, 4, 1, 3, 5, 0]);
+        assert_eq!(q.current_index(), Some(0));
+        assert_eq!(q.current(), Some(&2));
+
+        let revision = q.revision();
+        assert!(!q.move_to(1, 1));
+        assert!(!q.move_to(1, 9));
+        assert_eq!(q.revision(), revision, "nothing to move changes nothing");
+    }
+
+    #[test]
+    fn moving_while_shuffled_restores_the_original_order() {
+        let mut q = queue(8);
+        q.jump(1);
+        q.set_shuffle(true);
+        q.move_to(7, 2);
+        q.move_to(3, 6);
+        q.advance(false);
+        let playing = *q.current().unwrap();
+        q.set_shuffle(false);
+        assert_eq!(items(&q), (0..8).collect::<Vec<_>>());
+        assert_eq!(q.current(), Some(&playing));
+    }
+
+    #[test]
+    fn removes_many_but_never_the_current() {
+        let mut q = queue(7);
+        q.jump(3);
+        assert_eq!(q.remove_many([5, 0, 3, 1, 99, 5]), [0, 1, 5]);
+        assert_eq!(items(&q), [2, 3, 4, 6]);
+        assert_eq!(q.current(), Some(&3));
+        assert_eq!(q.current_index(), Some(1));
+        let revision = q.revision();
+        assert!(q.remove_many([1]).is_empty(), "only the current: nothing");
+        assert_eq!(q.revision(), revision);
+    }
+
+    #[test]
+    fn plays_a_selection_next_in_queue_order() {
+        let mut q = queue(8);
+        q.jump(3);
+        assert!(q.play_next_many([6, 1, 3, 7]));
+        assert_eq!(items(&q), [0, 2, 3, 1, 6, 7, 4, 5]);
+        assert_eq!(q.current(), Some(&3));
+        assert_eq!(q.current_index(), Some(2));
+        assert_eq!(q.peek_next(), Some(&1));
+
+        let revision = q.revision();
+        assert!(!q.play_next_many([3, 4, 5]), "already next, in that order");
+        assert!(!q.play_next_many([2]), "the current track never moves");
+        assert!(!q.play_next_many([]));
+        assert_eq!(q.revision(), revision);
+    }
+
+    #[test]
+    fn plays_a_selection_next_through_shuffle() {
+        let mut q = queue(10);
+        q.jump(4);
+        q.set_shuffle(true);
+        let shuffled = items(&q);
+        assert!(q.play_next_many([8, 9]));
+        assert_eq!(q.peek_next(), Some(&shuffled[8]));
+        q.set_shuffle(false);
+        assert_eq!(items(&q), (0..10).collect::<Vec<_>>());
+        assert_eq!(q.current(), Some(&4));
+    }
+
+    #[test]
     fn marks_restored_recommendations() {
         let mut q = queue(4);
         q.mark_recommended([1, 3, 9]);
@@ -556,10 +715,10 @@ mod tests {
         q.play_next(7);
         assert_eq!(items(&q), [0, 7, 1, 2]);
         q.jump(2);
-        assert!(q.remove(0));
+        assert_eq!(q.remove_many([0]), [0]);
         assert_eq!(q.current(), Some(&1));
         assert!(
-            !q.remove(q.current_index().unwrap()),
+            q.remove_many([q.current_index().unwrap()]).is_empty(),
             "cannot remove the current track"
         );
     }

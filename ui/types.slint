@@ -56,6 +56,8 @@ export struct QueueItem {
     current: bool,
     /// Mixed in by Smart Shuffle.
     recommended: bool,
+    /// Picked with Ctrl- or Shift-click.
+    selected: bool,
 }
 
 /// Calls from anywhere in the UI into Rust, and state many components read.
