@@ -175,6 +175,11 @@ impl PlayerResponse {
         user_agent: &str,
         premium: bool,
     ) -> ResolvedStream {
+        let (mime, codec) = if format.is_opus() {
+            ("audio/webm", "Opus")
+        } else {
+            ("audio/mp4", "AAC")
+        };
         ResolvedStream {
             url,
             size: format
@@ -182,14 +187,9 @@ impl PlayerResponse {
                 .as_deref()
                 .and_then(|n| n.parse().ok())
                 .unwrap_or(0),
-            mime: if format.is_opus() {
-                "audio/webm"
-            } else {
-                "audio/mp4"
-            }
-            .into(),
+            mime: mime.into(),
             headers: vec![("User-Agent".into(), user_agent.into())],
-            codec: if format.is_opus() { "Opus" } else { "AAC" }.into(),
+            codec: codec.into(),
             bitrate_kbps: Some(format.bitrate as f64 / 1000.0),
             duration: format
                 .approx_duration_ms

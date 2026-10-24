@@ -108,7 +108,7 @@ impl App {
             playback.generation += 1;
             playback.started = true;
             playback.failures = 0;
-            playback.duration = track.duration.map_or(0.0, f64::from);
+            playback.duration = track.seconds();
             playback.requested_at = None;
             playback.queue_tried = None;
             playback.resume = None;
@@ -129,14 +129,9 @@ mod tests {
 
     fn track(album: Option<&str>, track_nr: Option<u16>) -> Track {
         Track {
-            id: "id".into(),
-            title: "Title".into(),
-            artists: Vec::new(),
             album: album.map(|id| (id.into(), "Album".into())),
-            duration: Some(200),
-            thumb: None,
             track_nr,
-            video: false,
+            ..Default::default()
         }
     }
 

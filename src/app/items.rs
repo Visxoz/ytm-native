@@ -12,13 +12,9 @@ fn track_item(track: &Track, number: usize) -> TrackItem {
         id: s(&track.id),
         title: s(&track.title),
         artists: s(track.artist_names()),
-        album: s(track.album.as_ref().map_or("", |(_, name)| name.as_str())),
+        album: s(track.album_name()),
         duration: s(track.duration.map(api::format_duration).unwrap_or_default()),
-        art: track
-            .thumb
-            .as_deref()
-            .and_then(|url| images::cached(url, images::ROW))
-            .unwrap_or_default(),
+        art: images::cached_or_empty(track.thumb.as_deref(), images::ROW),
         number: s(number.to_string()),
         has_artist: track.first_artist_id().is_some(),
         has_album: track.album.is_some(),
@@ -51,11 +47,7 @@ pub(super) fn card_item(card: &Card, edge: u32) -> CardItem {
         id: s(&card.id),
         title: s(&card.title),
         subtitle: s(&card.subtitle),
-        art: card
-            .thumb
-            .as_deref()
-            .and_then(|url| images::cached(url, edge))
-            .unwrap_or_default(),
+        art: images::cached_or_empty(card.thumb.as_deref(), edge),
         round: card.kind == CardKind::Artist,
         tint,
     }

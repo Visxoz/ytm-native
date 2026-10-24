@@ -7,7 +7,7 @@ use slint::{ComponentHandle, Model};
 
 use super::{App, s};
 use crate::{
-    Api as ApiGlobal, QueueItem,
+    Api as ApiGlobal, AppWindow, QueueItem,
     api::{self, Track},
     images, presence,
     streams::ResolvedStream,
@@ -53,24 +53,10 @@ impl App {
     /// queue, the media overlay, Discord, the lyrics and the saved session.
     pub(super) fn present(self: &Rc<Self>, track: &Track, position: f64) {
         let ui = self.ui();
-        ui.set_has_track(true);
-        ui.set_np_title(s(&track.title));
-        ui.set_np_artists(s(track.artist_names()));
-        ui.set_np_album(s(track.album.as_ref().map_or("", |(_, n)| n.as_str())));
-        ui.set_np_has_artist(track.first_artist_id().is_some());
-        ui.set_np_has_album(track.album.is_some());
-        ui.set_np_duration(self.state.borrow().playback.duration as f32);
-        ui.set_np_position(position as f32);
+        self.show_track_details(&ui, track, position);
         ui.set_np_buffered(0.0);
         self.show_playing(true);
-        ui.set_np_art(
-            track
-                .thumb
-                .as_deref()
-                .and_then(|u| images::cached(u, images::ROW))
-                .unwrap_or_default(),
-        );
-        ui.global::<ApiGlobal>().set_playing_id(s(&track.id));
+        ui.set_np_art(images::cached_or_empty(track.thumb.as_deref(), images::ROW));
         let id = track.id.clone();
         let art = track.thumb.clone();
         self.load_image(art.clone(), images::PLAYER, move |app, image| {
@@ -98,9 +84,9 @@ impl App {
             media.set_track(
                 &track.title,
                 &track.artist_names(),
-                track.album.as_ref().map_or("", |(_, n)| n.as_str()),
+                track.album_name(),
                 large.as_deref(),
-                track.duration.unwrap_or(0) as f64,
+                track.seconds(),
             );
         }
         self.refresh_queue();
@@ -110,6 +96,20 @@ impl App {
         if ui.get_panel_open() && ui.get_panel_tab() == 1 {
             self.load_lyrics();
         }
+    }
+
+    /// Puts `track` on the player bar at `position`, with the length the
+    /// playback has for it.
+    pub(super) fn show_track_details(&self, ui: &AppWindow, track: &Track, position: f64) {
+        ui.set_has_track(true);
+        ui.set_np_title(s(&track.title));
+        ui.set_np_artists(s(track.artist_names()));
+        ui.set_np_album(s(track.album_name()));
+        ui.set_np_has_artist(track.first_artist_id().is_some());
+        ui.set_np_has_album(track.album.is_some());
+        ui.set_np_duration(self.state.borrow().playback.duration as f32);
+        ui.set_np_position(position as f32);
+        ui.global::<ApiGlobal>().set_playing_id(s(&track.id));
     }
 
     /// Shows the stream's quality, and fills in a length the track lacked.

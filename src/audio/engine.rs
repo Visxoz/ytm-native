@@ -103,6 +103,11 @@ impl Fade {
     }
 }
 
+/// Interleaved samples in `secs` of audio, in whole frames.
+fn samples_in(secs: f64, rate: u32, channels: usize) -> usize {
+    (secs * f64::from(rate)) as usize * channels
+}
+
 fn same_format(decoder: &Decoder, output: &Output) -> bool {
     decoder.rate == output.rate && decoder.channels == output.channels
 }
@@ -222,10 +227,7 @@ impl Engine {
                 Some(Command::Queue(spec, download, crossfade_secs)) => {
                     self.queue(spec, download, crossfade_secs)
                 }
-                Some(Command::ClearNext) => {
-                    self.undo_switch();
-                    self.next = None;
-                }
+                Some(Command::ClearNext) => self.drop_next(),
                 Some(Command::Seek(secs)) => self.seek(secs),
                 Some(Command::Stop) => self.clear(),
                 None => {
@@ -253,16 +255,14 @@ impl Engine {
     }
 
     fn queue(&mut self, spec: StreamSpec, download: Arc<Download>, crossfade_secs: f64) {
-        // A replaced queued track may already have taken over decoding.
-        self.undo_switch();
-        self.next = None;
+        self.drop_next();
         let (rate, channels) = {
             let output = self.shared.output.lock().unwrap();
-            (f64::from(output.rate), output.channels)
+            (output.rate, output.channels)
         };
-        let fade = (crossfade_secs * rate) as usize * channels;
+        let fade = samples_in(crossfade_secs, rate, channels);
         let hold = if fade > 0 {
-            fade + (SILENCE_TRIM_SECS * rate) as usize * channels
+            fade + samples_in(SILENCE_TRIM_SECS, rate, channels)
         } else {
             0
         };
@@ -289,6 +289,12 @@ impl Engine {
             hold,
             fade,
         });
+    }
+
+    /// Drops the queued track, which may already have taken over decoding.
+    fn drop_next(&mut self) {
+        self.undo_switch();
+        self.next = None;
     }
 
     fn poll_next(&mut self) {
@@ -354,7 +360,7 @@ impl Engine {
             started: true,
         };
         if same_format {
-            let trim = (SILENCE_TRIM_SECS * f64::from(rate)) as usize * channels;
+            let trim = samples_in(SILENCE_TRIM_SECS, rate, channels);
             let tail = take_tail(&mut self.held, &mut output.samples, channels, fade, trim);
             let queued = (output.samples.len() / channels) as u64;
             output.switch_at = Some(output.frames_played + queued);
@@ -450,7 +456,7 @@ impl Engine {
             return;
         }
         let mut output = self.shared.output.lock().unwrap();
-        let low = (LOW_WATER_SECS * f64::from(output.rate)) as usize * output.channels;
+        let low = samples_in(LOW_WATER_SECS, output.rate, output.channels);
         let short = low.saturating_sub(output.samples.len());
         let keep = self.hold().saturating_sub(short);
         if let Some(excess) = self.held.len().checked_sub(keep) {
@@ -612,20 +618,18 @@ impl Engine {
 
     /// Opens the device at the track's format; Windows resamples if needed.
     fn ensure_stream(&mut self, rate: u32, channels: usize) -> Result<(), String> {
-        if let Some((_, r, c)) = &self.stream
-            && *r == rate
-            && *c == channels
-        {
-            let mut output = self.shared.output.lock().unwrap();
-            output.rate = rate;
-            output.channels = channels;
-            return Ok(());
+        // A device open at another format closes before the format changes
+        // under its callback.
+        if !matches!(&self.stream, Some((_, r, c)) if *r == rate && *c == channels) {
+            self.stream = None;
         }
-        self.stream = None;
         {
             let mut output = self.shared.output.lock().unwrap();
             output.rate = rate;
             output.channels = channels;
+        }
+        if self.stream.is_some() {
+            return Ok(());
         }
 
         let host = cpal::default_host();

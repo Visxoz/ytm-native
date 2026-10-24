@@ -63,6 +63,12 @@ fn log_path() -> std::path::PathBuf {
     crate::settings::data_dir().join("premium.log")
 }
 
+fn unix_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |d| d.as_secs())
+}
+
 /// Appends a line to `premium.log`, for checking what the Premium path did.
 /// Never records cookies or URLs.
 pub fn diag(line: impl AsRef<str>) {
@@ -75,10 +81,7 @@ pub fn diag(line: impl AsRef<str>) {
         .truncate(truncate)
         .open(&path);
     if let Ok(mut file) = file {
-        let secs = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
-        let _ = writeln!(file, "[{secs}] {}", line.as_ref());
+        let _ = writeln!(file, "[{}] {}", unix_secs(), line.as_ref());
     }
     log::info!("{}", line.as_ref());
 }
@@ -148,13 +151,10 @@ async fn player_request(
         .header("X-YouTube-Client-Version", client.version)
         .header("X-Goog-Visitor-Id", visitor_data);
     if let Some(cookie) = cookie {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_or(0, |d| d.as_secs());
         request = request
             .header("Cookie", cookie)
             .header("X-Goog-AuthUser", "0");
-        if let Some(auth) = authorization(cookie, &origin, now) {
+        if let Some(auth) = authorization(cookie, &origin, unix_secs()) {
             request = request.header("Authorization", auth);
         }
     }

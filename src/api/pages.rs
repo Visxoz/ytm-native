@@ -262,23 +262,14 @@ impl Api {
 
         let mut sections = Vec::new();
         // The top result leads, as on YouTube Music.
-        match main.ok().and_then(|m| m.items.items.into_iter().next()) {
-            Some(MusicItem::Artist(a)) => sections.extend(card_section(
-                "Top result",
-                vec![artist_card(a)],
-                CardLayout::Top,
-            )),
-            Some(MusicItem::Album(a)) => sections.extend(card_section(
-                "Top result",
-                vec![album_card(a)],
-                CardLayout::Top,
-            )),
-            Some(MusicItem::Playlist(p)) => sections.extend(card_section(
-                "Top result",
-                vec![playlist_card(p)],
-                CardLayout::Top,
-            )),
-            _ => {}
+        let top = match main.ok().and_then(|m| m.items.items.into_iter().next()) {
+            Some(MusicItem::Artist(a)) => Some(artist_card(a)),
+            Some(MusicItem::Album(a)) => Some(album_card(a)),
+            Some(MusicItem::Playlist(p)) => Some(playlist_card(p)),
+            _ => None,
+        };
+        if let Some(card) = top {
+            sections.extend(card_section("Top result", vec![card], CardLayout::Top));
         }
         sections.extend(track_section(
             "Songs",

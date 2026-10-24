@@ -47,10 +47,9 @@ impl App {
             let playback = &mut state.playback;
             playback.generation += 1;
             playback.started = false;
-            playback.duration = track.duration.unwrap_or(0) as f64;
+            playback.duration = track.seconds();
             playback.requested_at = Some(Instant::now());
-            playback.queued = None;
-            playback.queue_tried = None;
+            playback.forget_queued();
             playback.generation
         };
         self.player.stop();
@@ -81,13 +80,7 @@ impl App {
 
     /// A stream resolved ahead of time for `id`, if still fresh.
     pub(super) fn take_prefetched(&self, id: &str) -> Option<ResolvedStream> {
-        self.state
-            .borrow_mut()
-            .playback
-            .prefetched
-            .remove(id)
-            .filter(|(_, at)| at.elapsed() < PREFETCH_FRESH)
-            .map(|(stream, _)| stream)
+        self.state.borrow_mut().playback.take_prefetched(id)
     }
 
     fn load_stream(self: &Rc<Self>, stream: ResolvedStream) {
@@ -163,11 +156,7 @@ impl App {
                 self.prefetch_next();
             }
             "advanced" => self.advance_gapless(),
-            "next-dropped" => {
-                let mut state = self.state.borrow_mut();
-                state.playback.queued = None;
-                state.playback.queue_tried = None;
-            }
+            "next-dropped" => self.state.borrow_mut().playback.forget_queued(),
             "ended" => self.next(false),
             "error" => {
                 let title = self
@@ -205,12 +194,9 @@ impl App {
             let Some(next) = state.queue.peek_next().cloned() else {
                 return;
             };
-            let fresh = state
-                .playback
-                .prefetched
-                .get(&next.id)
-                .is_some_and(|(_, at)| at.elapsed() < PREFETCH_FRESH);
-            if fresh || state.playback.prefetching.contains(&next.id) {
+            if state.playback.has_prefetched(&next.id)
+                || state.playback.prefetching.contains(&next.id)
+            {
                 return;
             }
             next
@@ -225,12 +211,7 @@ impl App {
             let mut state = app.state.borrow_mut();
             state.playback.prefetching.remove(&next.id);
             match result {
-                Ok(stream) => {
-                    // Streams of tracks skipped past would otherwise stay.
-                    let prefetched = &mut state.playback.prefetched;
-                    prefetched.retain(|_, (_, at)| at.elapsed() < PREFETCH_FRESH);
-                    prefetched.insert(next.id, (stream, Instant::now()));
-                }
+                Ok(stream) => state.playback.store_prefetched(next.id, stream),
                 Err(e) => log::debug!("prefetch failed: {e}"),
             }
         });

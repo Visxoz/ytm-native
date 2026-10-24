@@ -10,7 +10,7 @@ pub struct ArtistRef {
     pub name: String,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Track {
     pub id: String,
     pub title: String,
@@ -32,6 +32,16 @@ impl Track {
 
     pub fn first_artist_id(&self) -> Option<&str> {
         self.artists.iter().find_map(|a| a.id.as_deref())
+    }
+
+    /// The album's name, or empty for a track without one.
+    pub fn album_name(&self) -> &str {
+        self.album.as_ref().map_or("", |(_, name)| name.as_str())
+    }
+
+    /// The length in seconds, or zero when YouTube did not say.
+    pub fn seconds(&self) -> f64 {
+        self.duration.map_or(0.0, f64::from)
     }
 
     /// A larger rendition of the thumbnail for the player and Discord.

@@ -10,7 +10,7 @@ use serde_json::value::RawValue;
 
 use super::{
     ArtistRef, Card, CardKind, CardLayout, QueueMode, Section, Track,
-    convert::{CARD_THUMB, ROW_THUMB, resize_thumb},
+    convert::{CARD_THUMB, ROW_THUMB, fit_thumb},
 };
 
 /// Longest list shelf shown, such as Quick picks.
@@ -242,12 +242,7 @@ impl ThumbnailRenderer {
     /// The smallest rendition at least `edge` wide, sized to `edge`.
     fn pick(&self, edge: u32) -> Option<String> {
         let thumbs = &self.music_thumbnail_renderer.thumbnail.thumbnails;
-        let best = thumbs
-            .iter()
-            .filter(|t| t.width >= edge)
-            .min_by_key(|t| t.width)
-            .or_else(|| thumbs.iter().max_by_key(|t| t.width))?;
-        Some(resize_thumb(&best.url, edge))
+        fit_thumb(thumbs.iter().map(|t| (t.width, t.url.as_str())), edge)
     }
 }
 
@@ -481,8 +476,11 @@ impl SectionList {
     }
 }
 
+/// A page's shelves and the continuation token of the next page.
+type Shelves = Result<(Vec<Section>, Option<String>), String>;
+
 /// Shelves from the first page and the token for the next one.
-pub fn first_page(json: &str) -> Result<(Vec<Section>, Option<String>), String> {
+pub fn first_page(json: &str) -> Shelves {
     let response: Response = serde_json::from_str(json).map_err(|e| e.to_string())?;
     let list = response
         .contents
@@ -496,7 +494,7 @@ pub fn first_page(json: &str) -> Result<(Vec<Section>, Option<String>), String> 
 }
 
 /// Shelves from a continuation page and the token for the next one.
-pub fn next_page(json: &str) -> Result<(Vec<Section>, Option<String>), String> {
+pub fn next_page(json: &str) -> Shelves {
     let response: Response = serde_json::from_str(json).map_err(|e| e.to_string())?;
     let list = response.continuation_contents.section_list_continuation;
     Ok((list.shelves(), list.continuation()))
@@ -535,20 +533,14 @@ async fn browse(
 
 /// The feed's first page, with the token of the next, in up to `attempts`
 /// requests. `q` must send the sign-in cookie: the feed is personal.
-pub async fn first(
-    q: &RustyPipeQuery,
-    attempts: u32,
-) -> Result<(Vec<Section>, Option<String>), String> {
+pub async fn first(q: &RustyPipeQuery, attempts: u32) -> Shelves {
     let body = serde_json::json!({ "browseId": "FEmusic_home" });
     let json = browse(q, &body, attempts).await?;
     first_page(&json)
 }
 
 /// The page `token` continues with, and the token of the one after.
-pub async fn next(
-    q: &RustyPipeQuery,
-    token: &str,
-) -> Result<(Vec<Section>, Option<String>), String> {
+pub async fn next(q: &RustyPipeQuery, token: &str) -> Shelves {
     let json = browse(q, &serde_json::json!({ "continuation": token }), ATTEMPTS).await?;
     next_page(&json)
 }

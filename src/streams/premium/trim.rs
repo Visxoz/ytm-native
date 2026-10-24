@@ -298,12 +298,10 @@ fn multi_try(solvers: &[String], field: &str) -> String {
     )
 }
 
+/// A miniature player with the same shape as YouTube's, with code the
+/// scrambler does not need.
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// A miniature player with the same shape as YouTube's.
-    const PLAYER: &str = r#"var _yt_player={};(function(g){var window=this;
+pub(super) const TEST_PLAYER: &str = r#"var _yt_player={};(function(g){var window=this;
 var helper = function(x) { return x.split("").reverse().join(""); };
 var unused = function() { return 42; };
 function Url(base) { this.params = {}; }
@@ -317,9 +315,13 @@ g.other = function() { return unused(); };
 init();
 })(_yt_player);"#;
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
     #[test]
     fn keeps_only_what_the_scrambler_needs() {
-        let script = trim(PLAYER).unwrap();
+        let script = trim(TEST_PLAYER).unwrap();
         assert!(script.contains("var helper"));
         assert!(script.contains("Url.prototype.unscramble"));
         assert!(script.contains("g.make"));

@@ -25,12 +25,21 @@ pub fn join_artists(artists: &[ArtistRef]) -> String {
 
 /// Picks the smallest thumbnail at least `edge` pixels wide.
 pub fn pick_thumb(thumbs: &[Thumbnail], edge: u32) -> Option<String> {
-    let best = thumbs
-        .iter()
-        .filter(|t| t.width >= edge)
-        .min_by_key(|t| t.width)
-        .or_else(|| thumbs.iter().max_by_key(|t| t.width))?;
-    Some(resize_thumb(&best.url, edge))
+    fit_thumb(thumbs.iter().map(|t| (t.width, t.url.as_str())), edge)
+}
+
+/// Of thumbnails given as (width, URL), the smallest at least `edge`
+/// pixels wide, else the largest, sized to `edge`.
+pub fn fit_thumb<'a>(
+    thumbs: impl Iterator<Item = (u32, &'a str)> + Clone,
+    edge: u32,
+) -> Option<String> {
+    let (_, url) = thumbs
+        .clone()
+        .filter(|(width, _)| *width >= edge)
+        .min_by_key(|(width, _)| *width)
+        .or_else(|| thumbs.max_by_key(|(width, _)| *width))?;
+    Some(resize_thumb(url, edge))
 }
 
 /// googleusercontent thumbnails render at any size given in the URL suffix.

@@ -3,11 +3,10 @@
 
 use std::{rc::Rc, time::Duration};
 
-use slint::{ComponentHandle, TimerMode};
+use slint::TimerMode;
 
-use super::{App, State, s};
+use super::{App, State};
 use crate::{
-    Api as ApiGlobal,
     api::{self, Header, Page, QueueMode, Section},
     images, settings,
 };
@@ -72,6 +71,7 @@ impl App {
         self.save_session();
         self.state.borrow_mut().history.save();
     }
+
     /// The restored position, if the current track is the restored one.
     pub(super) fn take_resume_position(&self) -> f64 {
         let mut state = self.state.borrow_mut();
@@ -117,18 +117,8 @@ impl App {
             state.playback.resume = Some((track.id.clone(), session.position));
             state.playback.duration = track.duration.map_or(session.duration, f64::from);
         }
-        let duration = self.state.borrow().playback.duration;
-        let ui = self.ui();
-        ui.set_has_track(true);
-        ui.set_np_title(s(&track.title));
-        ui.set_np_artists(s(track.artist_names()));
-        ui.set_np_album(s(track.album.as_ref().map_or("", |(_, n)| n.as_str())));
-        ui.set_np_has_artist(track.first_artist_id().is_some());
-        ui.set_np_has_album(track.album.is_some());
-        ui.set_np_duration(duration as f32);
-        ui.set_np_position(session.position as f32);
+        self.show_track_details(&self.ui(), &track, session.position);
         self.show_playing(false);
-        ui.global::<ApiGlobal>().set_playing_id(s(&track.id));
         self.load_image(track.thumb.clone(), images::PLAYER, |app, image| {
             app.ui().set_np_art(image);
         });

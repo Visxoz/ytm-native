@@ -193,8 +193,7 @@ impl App {
                 .as_ref()
                 .is_some_and(|(id, _)| Some(id.as_str()) != next);
             if stale {
-                playback.queued = None;
-                playback.queue_tried = None;
+                playback.forget_queued();
             }
             (queue.revision(), queue.current_index(), stale)
         };
@@ -220,8 +219,7 @@ impl App {
         if ids.is_empty() {
             return;
         }
-        let today =
-            time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
+        let today = super::local_now();
         let title = format!("Queue {} {} {}", today.day(), today.month(), today.year());
         self.toast(format!(
             "Saving {} as a playlist…",

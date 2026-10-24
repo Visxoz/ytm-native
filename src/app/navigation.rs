@@ -10,7 +10,7 @@ use slint::{ModelRc, SharedString, TimerMode, VecModel};
 use super::{App, HistoryEntry, s};
 use crate::{
     AppWindow,
-    api::{Page, Route},
+    api::{self, Page, Route},
     settings,
 };
 
@@ -83,25 +83,39 @@ impl App {
 
         let api = self.api.clone();
         self.spawn(
-            async move { api.page(&route, signed_in).await.map(|page| (route, page)) },
-            move |app, result| {
-                if app.state.borrow().page_generation != generation {
-                    return;
-                }
-                let ui = app.ui();
-                ui.set_page_loading(false);
-                match result {
-                    Ok((route, page)) => {
-                        app.cache_page(route, page.clone());
-                        app.show_page(page);
-                    }
-                    Err(e) => {
-                        log::warn!("page failed: {e}");
-                        ui.set_page_error(e.into());
-                    }
-                }
+            async move {
+                let page = api.page(&route, signed_in).await;
+                (route, page)
             },
+            move |app, (route, result)| app.page_loaded(generation, result, Some(route)),
         );
+    }
+
+    /// Shows a page that has loaded, or why it did not, unless the user
+    /// has moved on meanwhile. With `cache_as`, it is kept for going back.
+    fn page_loaded(
+        self: &Rc<Self>,
+        generation: u64,
+        result: api::Result<Page>,
+        cache_as: Option<Route>,
+    ) {
+        if self.state.borrow().page_generation != generation {
+            return;
+        }
+        let ui = self.ui();
+        ui.set_page_loading(false);
+        match result {
+            Ok(page) => {
+                if let Some(route) = cache_as {
+                    self.cache_page(route, page.clone());
+                }
+                self.show_page(page);
+            }
+            Err(e) => {
+                log::warn!("page failed: {e}");
+                ui.set_page_error(e.into());
+            }
+        }
     }
 
     /// The signed-in feed in one request. Should YouTube refuse it, the feed
@@ -192,20 +206,7 @@ impl App {
         let api = self.api.clone();
         self.spawn(
             async move { api.page(&Route::Home, false).await },
-            move |app, result| {
-                if app.state.borrow().page_generation != generation {
-                    return;
-                }
-                let ui = app.ui();
-                ui.set_page_loading(false);
-                match result {
-                    Ok(page) => app.show_page(page),
-                    Err(e) => {
-                        log::warn!("page failed: {e}");
-                        ui.set_page_error(e.into());
-                    }
-                }
-            },
+            move |app, result| app.page_loaded(generation, result, None),
         );
     }
 
@@ -251,35 +252,32 @@ impl App {
     }
 
     pub(super) fn go_back(self: &Rc<Self>) {
-        let scroll = self.ui().get_page_scroll();
-        let entry = {
-            let mut state = self.state.borrow_mut();
-            let Some(entry) = state.back.pop() else {
-                return;
-            };
-            let current = HistoryEntry {
-                route: state.route.clone(),
-                scroll,
-            };
-            state.forward.push(current);
-            state.restore_scroll = Some(entry.scroll);
-            entry
-        };
-        self.navigate(entry.route, false);
+        self.step_history(false);
     }
 
     pub(super) fn go_forward(self: &Rc<Self>) {
+        self.step_history(true);
+    }
+
+    /// Returns to the page one step back or forward, where it was scrolled,
+    /// leaving the current one on the other side.
+    fn step_history(self: &Rc<Self>, forward: bool) {
         let scroll = self.ui().get_page_scroll();
         let entry = {
             let mut state = self.state.borrow_mut();
-            let Some(entry) = state.forward.pop() else {
+            let state = &mut *state;
+            let (from, to) = if forward {
+                (&mut state.forward, &mut state.back)
+            } else {
+                (&mut state.back, &mut state.forward)
+            };
+            let Some(entry) = from.pop() else {
                 return;
             };
-            let current = HistoryEntry {
+            to.push(HistoryEntry {
                 route: state.route.clone(),
                 scroll,
-            };
-            state.back.push(current);
+            });
             state.restore_scroll = Some(entry.scroll);
             entry
         };

@@ -9,15 +9,20 @@ use crate::{Api as ApiGlobal, AppWindow, api::Route, settings::Quality};
 
 impl App {
     pub(super) fn bind(self: &Rc<Self>, ui: &AppWindow) {
+        // `on!(on_x, ...)` binds a window callback, `on!(api.on_x, ...)` one
+        // of the `Api` global's.
         macro_rules! on {
-            ($setter:ident, |$app:ident $(, $arg:ident)*| $body:expr) => {{
+            ($target:ident . $setter:ident, |$app:ident $(, $arg:ident)*| $body:expr) => {{
                 let weak = Rc::downgrade(self);
-                ui.$setter(move |$($arg),*| {
+                $target.$setter(move |$($arg),*| {
                     if let Some($app) = weak.upgrade() {
                         $body
                     }
                 });
             }};
+            ($setter:ident, $($rest:tt)*) => {
+                on!(ui.$setter, $($rest)*)
+            };
         }
 
         on!(on_go, |app, nav| match nav.as_str() {
@@ -112,10 +117,9 @@ impl App {
             // Streams resolved ahead at the old quality are dropped; the
             // playing song carries on as it is.
             {
-                let mut state = app.state.borrow_mut();
-                state.playback.prefetched.clear();
-                state.playback.queued = None;
-                state.playback.queue_tried = None;
+                let playback = &mut app.state.borrow_mut().playback;
+                playback.prefetched.clear();
+                playback.forget_queued();
             }
             app.player.clear_next();
             app.warm_premium();
@@ -123,11 +127,7 @@ impl App {
         on!(on_set_crossfade, |app, value| {
             app.update_settings(|s| s.crossfade = value);
             // A track queued with the old setting is queued again.
-            {
-                let mut state = app.state.borrow_mut();
-                state.playback.queued = None;
-                state.playback.queue_tried = None;
-            }
+            app.state.borrow_mut().playback.forget_queued();
             app.player.clear_next();
         });
         on!(on_set_autoplay, |app, value| app
@@ -159,17 +159,7 @@ impl App {
         );
 
         let api = ui.global::<ApiGlobal>();
-        macro_rules! on_api {
-            ($setter:ident, |$app:ident $(, $arg:ident)*| $body:expr) => {{
-                let weak = Rc::downgrade(self);
-                api.$setter(move |$($arg),*| {
-                    if let Some($app) = weak.upgrade() {
-                        $body
-                    }
-                });
-            }};
-        }
-        on_api!(on_navigate, |app, kind, id, title| {
+        on!(api.on_navigate, |app, kind, id, title| {
             let id = id.to_string();
             if kind == "song" {
                 app.play_song_card(&id);
@@ -184,20 +174,21 @@ impl App {
             };
             app.navigate(route, true);
         });
-        on_api!(on_play_track, |app, section, index| app
+        on!(api.on_play_track, |app, section, index| app
             .play_from_section(section as usize, index as usize));
-        on_api!(on_track_action, |app, action, section, index| app
+        on!(api.on_track_action, |app, action, section, index| app
             .track_action(&action, section as usize, index as usize));
-        on_api!(on_play_card, |app, kind, id| app.play_card(
+        on!(api.on_play_card, |app, kind, id| app.play_card(
             &kind,
             id.to_string(),
             false
         ));
-        on_api!(on_card_radio, |app, kind, id| app.play_card(
+        on!(api.on_card_radio, |app, kind, id| app.play_card(
             &kind,
             id.to_string(),
             true
         ));
-        on_api!(on_header_action, |app, action| app.header_action(&action));
+        on!(api.on_header_action, |app, action| app
+            .header_action(&action));
     }
 }

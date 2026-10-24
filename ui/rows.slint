@@ -26,6 +26,26 @@ export global Layout {
     public pure function card-height(width: length) -> length {
         return width - 2 * self.card-padding + self.card-text + 2 * self.card-padding;
     }
+
+    // How many cards a grid `width` wide fits in a row, and how wide each is
+    // then: the grid and its row height must agree.
+    public pure function card-columns(width: length) -> int {
+        return max(1, floor((width + self.card-gap) / (self.card-width + self.card-gap)));
+    }
+
+    public pure function card-cell(width: length) -> length {
+        return (width + 2 * self.card-padding - (self.card-columns(width) - 1) * self.card-gap) / self.card-columns(width);
+    }
+
+    public pure function chip-columns(width: length) -> int {
+        return max(1, floor((width + self.chip-gap) / (self.chip-min-width + self.chip-gap)));
+    }
+
+    // A page header's height above its buttons: a banner, large artwork, or
+    // just the title.
+    public pure function header-art-height(row: RowItem) -> length {
+        return row.banner ? self.banner-height : row.art.width > 0 || row.can-play ? self.header-height : 160px;
+    }
 }
 
 component Link inherits Text {
@@ -404,6 +424,16 @@ component GenreTile inherits Rectangle {
     }
 }
 
+/// A carousel's scroll button, dark so it shows over any artwork.
+component CarouselArrow inherits IconButton {
+    y: (Layout.card-width - Layout.card-padding) / 2 - self.height / 2;
+    size: 36px;
+    icon-size: 22px;
+    color: Theme.text;
+    background: #000000b0;
+    hover-background: #000000e0;
+}
+
 /// A row of cards scrolled with arrow buttons that appear on hover, or by
 /// dragging the cards themselves.
 export component Carousel {
@@ -411,6 +441,8 @@ export component Carousel {
     property <length> step: Layout.card-width + Layout.card-gap;
     property <length> content-width: root.cards.length * root.step - Layout.card-gap;
     property <length> max-offset: max(0px, root.content-width - root.width);
+    /// What an arrow scrolls by: the whole cards in view, at least one.
+    property <length> page: max(1, floor(root.width / root.step)) * root.step;
     property <length> offset;
     property <bool> dragging;
     /// The offset as the drag began, which the pointer's movement is added to.
@@ -455,34 +487,22 @@ export component Carousel {
         }
     }
 
-    if root.offset > 0: IconButton {
+    if root.offset > 0: CarouselArrow {
         x: -14px;
-        y: (Layout.card-width - Layout.card-padding) / 2 - self.height / 2;
         icon: Icons.back;
-        size: 36px;
-        icon-size: 22px;
-        color: Theme.text;
-        background: #000000b0;
-        hover-background: #000000e0;
-        clicked => { root.offset = max(0px, root.offset - max(1, floor(root.width / root.step)) * root.step); }
+        clicked => { root.offset = max(0px, root.offset - root.page); }
     }
-    if root.offset < root.max-offset: IconButton {
+    if root.offset < root.max-offset: CarouselArrow {
         x: root.width - self.width + 14px;
-        y: (Layout.card-width - Layout.card-padding) / 2 - self.height / 2;
         icon: Icons.forward;
-        size: 36px;
-        icon-size: 22px;
-        color: Theme.text;
-        background: #000000b0;
-        hover-background: #000000e0;
-        clicked => { root.offset = min(root.max-offset, root.offset + max(1, floor(root.width / root.step)) * root.step); }
+        clicked => { root.offset = min(root.max-offset, root.offset + root.page); }
     }
 }
 
 export component CardGrid {
     in property <[CardItem]> cards;
-    out property <int> columns: max(1, floor((root.width + Layout.card-gap) / (Layout.card-width + Layout.card-gap)));
-    property <length> cell: (root.width + 2 * Layout.card-padding - (root.columns - 1) * Layout.card-gap) / root.columns;
+    out property <int> columns: Layout.card-columns(root.width);
+    property <length> cell: Layout.card-cell(root.width);
     for card[i] in root.cards: Card {
         x: -Layout.card-padding + mod(i, root.columns) * (root.cell + Layout.card-gap);
         y: floor(i / root.columns) * (Layout.card-height(root.cell) + Layout.card-gap);
@@ -493,7 +513,7 @@ export component CardGrid {
 
 export component GenreGrid {
     in property <[CardItem]> cards;
-    property <int> columns: max(1, floor((root.width + Layout.chip-gap) / (Layout.chip-min-width + Layout.chip-gap)));
+    property <int> columns: Layout.chip-columns(root.width);
     property <length> cell: (root.width - (root.columns - 1) * Layout.chip-gap) / root.columns;
     for card[i] in root.cards: GenreTile {
         x: mod(i, root.columns) * (root.cell + Layout.chip-gap);
@@ -572,7 +592,7 @@ export component PageHeader {
     in property <RowItem> data;
     in property <length> full-width;
     property <bool> has-art: root.data.art.width > 0 || root.data.can-play;
-    property <length> art-height: root.data.banner ? Layout.banner-height : root.has-art ? Layout.header-height : 160px;
+    property <length> art-height: Layout.header-art-height(root.data);
     property <length> title-size: root.data.title.character-count <= 12 ? 76px : root.data.title.character-count <= 18 ? 60px : root.data.title.character-count <= 28 ? 44px : 34px;
 
     if root.data.banner: Rectangle {
@@ -691,9 +711,7 @@ export global Rows {
             return 76px;
         }
         if row.kind == RowKind.header {
-            let has-art = row.art.width > 0 || row.can-play;
-            let base = row.banner ? Layout.banner-height : has-art ? Layout.header-height : 160px;
-            return base + (row.can-play || row.can-radio ? Layout.actions-height : 8px);
+            return Layout.header-art-height(row) + (row.can-play || row.can-radio ? Layout.actions-height : 8px);
         }
         if row.kind == RowKind.title {
             return 68px;
@@ -711,12 +729,9 @@ export global Rows {
             return Layout.top-height;
         }
         if row.kind == RowKind.grid {
-            let columns = max(1, floor((inner + Layout.card-gap) / (Layout.card-width + Layout.card-gap)));
-            let cell = (inner + 2 * Layout.card-padding - (columns - 1) * Layout.card-gap) / columns;
-            return ceil(row.cards.length / columns) * (Layout.card-height(cell) + Layout.card-gap);
+            return ceil(row.cards.length / Layout.card-columns(inner)) * (Layout.card-height(Layout.card-cell(inner)) + Layout.card-gap);
         }
-        let columns = max(1, floor((inner + Layout.chip-gap) / (Layout.chip-min-width + Layout.chip-gap)));
-        return ceil(row.cards.length / columns) * (Layout.chip-height + Layout.chip-gap);
+        return ceil(row.cards.length / Layout.chip-columns(inner)) * (Layout.chip-height + Layout.chip-gap);
     }
 }
 

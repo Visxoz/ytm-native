@@ -76,14 +76,8 @@ mod tests {
     #[test]
     fn totals_running_time() {
         let t = |d| Track {
-            id: String::new(),
-            title: String::new(),
-            artists: Vec::new(),
-            album: None,
             duration: Some(d),
-            thumb: None,
-            track_nr: None,
-            video: false,
+            ..Default::default()
         };
         assert_eq!(
             total_time(&[t(1500), t(2401)]).as_deref(),

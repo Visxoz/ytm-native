@@ -565,6 +565,16 @@ component SettingRow inherits HorizontalLayout {
     @children
 }
 
+component ToggleRow inherits SettingRow {
+    in property <bool> checked;
+    callback toggled(bool);
+    Toggle {
+        y: (parent.height - self.height) / 2;
+        checked: root.checked;
+        toggled(v) => { root.toggled(v); }
+    }
+}
+
 export component AppWindow inherits Window {
     title: "YouTube Music";
     icon: @image-url("../app-icon.png");
@@ -1619,44 +1629,32 @@ export component AppWindow inherits Window {
                 }
             }
 
-            SettingRow {
+            ToggleRow {
                 label: "Normalise volume";
                 detail: "Plays every track at a similar loudness, as YouTube Music does.";
-                Toggle {
-                    y: (parent.height - self.height) / 2;
-                    checked: root.normalise;
-                    toggled(v) => { root.set-normalise(v); }
-                }
+                checked: root.normalise;
+                toggled(v) => { root.set-normalise(v); }
             }
 
-            SettingRow {
+            ToggleRow {
                 label: "Crossfade";
                 detail: "Fades each track into the next. Tracks of an album played in order still run straight on.";
-                Toggle {
-                    y: (parent.height - self.height) / 2;
-                    checked: root.crossfade;
-                    toggled(v) => { root.set-crossfade(v); }
-                }
+                checked: root.crossfade;
+                toggled(v) => { root.set-crossfade(v); }
             }
 
-            SettingRow {
+            ToggleRow {
                 label: "Autoplay";
                 detail: "Keeps playing similar music when the queue ends.";
-                Toggle {
-                    y: (parent.height - self.height) / 2;
-                    checked: root.autoplay;
-                    toggled(v) => { root.set-autoplay(v); }
-                }
+                checked: root.autoplay;
+                toggled(v) => { root.set-autoplay(v); }
             }
 
-            SettingRow {
+            ToggleRow {
                 label: "Discord Rich Presence";
                 detail: "Shows what you are listening to on Discord.";
-                Toggle {
-                    y: (parent.height - self.height) / 2;
-                    checked: root.discord;
-                    toggled(v) => { root.set-discord(v); }
-                }
+                checked: root.discord;
+                toggled(v) => { root.set-discord(v); }
             }
 
             SettingRow {

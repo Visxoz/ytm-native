@@ -29,8 +29,11 @@ impl App {
                 ui.set_signing_in(false);
                 match result {
                     Ok(()) => {
-                        app.state.borrow_mut().signed_in = true;
-                        app.state.borrow_mut().page_cache.clear();
+                        {
+                            let mut state = app.state.borrow_mut();
+                            state.signed_in = true;
+                            state.page_cache.clear();
+                        }
                         // It may be another account's.
                         settings::remove_home();
                         app.load_library();
@@ -172,20 +175,25 @@ impl App {
     /// Drops back to signed out when YouTube rejects the stored cookie.
     pub(super) fn sign_in_expired(self: &Rc<Self>) {
         log::warn!("the stored sign-in was rejected");
-        let on_home = {
+        self.show_signed_out();
+        if self.state.borrow().route == Route::Home {
+            self.reload();
+        }
+    }
+
+    /// Drops what belonged to the account: its pages, saved feed, library
+    /// and picture.
+    fn show_signed_out(&self) {
+        {
             let mut state = self.state.borrow_mut();
             state.signed_in = false;
             state.page_cache.clear();
-            state.route == Route::Home
-        };
+        }
         settings::remove_home();
         self.library.set_vec(Vec::new());
         let ui = self.ui();
         ui.set_signed_in(false);
         ui.set_account_photo(Image::default());
-        if on_home {
-            self.reload();
-        }
     }
 
     /// Puts the account's profile picture on the account button.
@@ -207,17 +215,11 @@ impl App {
     pub(super) fn sign_out(self: &Rc<Self>) {
         let api = self.api.clone();
         self.spawn(async move { api.sign_out().await }, |app, ()| {
-            app.state.borrow_mut().signed_in = false;
-            app.state.borrow_mut().page_cache.clear();
-            app.library.set_vec(Vec::new());
+            app.show_signed_out();
             settings::remove_cookie();
-            settings::remove_home();
             app.premium.set_cookie(None);
             app.update_settings(|s| s.premium_account = false);
-            let ui = app.ui();
-            ui.set_account_photo(Image::default());
-            ui.set_signed_in(false);
-            ui.set_settings_open(false);
+            app.ui().set_settings_open(false);
             app.toast("Signed out");
             app.show_fresh(Route::Home);
         });

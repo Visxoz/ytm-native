@@ -3,9 +3,9 @@
 //! stream is prefetched, and the song is swapped in only once its own stream
 //! is ready, so nothing ever waits for it.
 
-use std::{rc::Rc, time::Instant};
+use std::rc::Rc;
 
-use super::{App, playback::PREFETCH_FRESH};
+use super::App;
 use crate::api::Track;
 
 /// Most videos remembered; past it the cache starts over.
@@ -74,10 +74,7 @@ impl App {
             if playback.prefetching.contains(&song.id) {
                 return;
             }
-            let ready = playback
-                .prefetched
-                .get(&song.id)
-                .is_some_and(|(_, at)| at.elapsed() < PREFETCH_FRESH);
+            let ready = playback.has_prefetched(&song.id);
             if !ready {
                 playback.prefetching.insert(song.id.clone());
             }
@@ -94,11 +91,7 @@ impl App {
                 let playback = &mut state.playback;
                 playback.prefetching.remove(&song.id);
                 match result {
-                    Ok(stream) => {
-                        playback
-                            .prefetched
-                            .insert(song.id.clone(), (stream, Instant::now()));
-                    }
+                    Ok(stream) => playback.store_prefetched(song.id.clone(), stream),
                     Err(e) => {
                         log::debug!("{}: the song version did not resolve: {e}", song.id);
                         return;

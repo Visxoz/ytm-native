@@ -132,11 +132,7 @@ impl App {
                 subtitle: s(&header.subtitle),
                 meta: s(&header.meta),
                 description: s(&header.description),
-                art: header
-                    .thumb
-                    .as_deref()
-                    .and_then(|url| images::cached(url, header_edge))
-                    .unwrap_or_default(),
+                art: images::cached_or_empty(header.thumb.as_deref(), header_edge),
                 round: header.round,
                 banner: header.banner,
                 can_play: has_tracks,
@@ -318,8 +314,7 @@ impl App {
 
 /// "Good morning" and so on, by the local time.
 fn greeting() -> &'static str {
-    let now = time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc());
-    greeting_for(now.hour())
+    greeting_for(super::local_now().hour())
 }
 
 fn greeting_for(hour: u8) -> &'static str {

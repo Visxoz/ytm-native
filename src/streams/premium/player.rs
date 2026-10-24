@@ -168,20 +168,10 @@ mod tests {
 
     #[test]
     fn solves_with_a_trimmed_player() {
-        let source = r#"var _yt_player={};(function(g){var window=this;
-var helper = function(x) { return x.split("").reverse().join(""); };
-function Url(base) { this.params = {}; }
-Url.prototype.set = function(k, v) { this.params[k] = v; };
-Url.prototype.get = function(k) { return this.params[k]; };
-Url.prototype.clone = function() { return this; };
-Url.prototype.unscramble = function() { if (this.params.n) this.params.n = helper(this.params.n); if (this.params.s) this.params.s = encodeURIComponent(helper(decodeURIComponent(this.params.s))); };
-var marker = { mark: function() {} };
-g.make = function(base, key, value) { marker.mark("alr", "yes"); var u = new Url(base); if (value !== undefined) u.set(key, value); return u; };
-})(_yt_player);"#;
         let player = Player {
             id: "test".into(),
             sts: 1,
-            code: trim::trim(source).unwrap(),
+            code: trim::trim(trim::TEST_PLAYER).unwrap(),
         };
         let (n, sig) = player.solve("abc", Some("x/y")).unwrap();
         assert_eq!(n, "cba");

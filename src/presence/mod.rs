@@ -131,14 +131,7 @@ fn trusted_artwork_url(raw: &str) -> Option<String> {
         return None;
     }
     let url = Url::parse(raw).ok()?;
-    let host = url.host_str()?;
-    let trusted_host = ARTWORK_DOMAINS.iter().any(|domain| {
-        host == *domain
-            || host
-                .strip_suffix(domain)
-                .is_some_and(|sub| sub.ends_with('.'))
-    });
-    (url.scheme() == "https" && trusted_host).then(|| url.into())
+    crate::http::within(&url, ARTWORK_DOMAINS).then(|| url.into())
 }
 
 impl Track {

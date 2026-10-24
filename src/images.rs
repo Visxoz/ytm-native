@@ -82,7 +82,17 @@ fn permits() -> &'static Arc<Semaphore> {
 
 /// Returns a cached image without fetching. `edge` is in logical pixels.
 pub fn cached(url: &str, edge: u32) -> Option<Image> {
-    CACHE.with(|c| c.borrow().images.get(&key(url, edge)).cloned())
+    cached_key(&key(url, edge))
+}
+
+fn cached_key(key: &str) -> Option<Image> {
+    CACHE.with(|c| c.borrow().images.get(key).cloned())
+}
+
+/// The cached artwork for `url`, or an empty image, which the UI shows as a
+/// placeholder until it loads.
+pub fn cached_or_empty(url: Option<&str>, edge: u32) -> Image {
+    url.and_then(|url| cached(url, edge)).unwrap_or_default()
 }
 
 /// A colour from the artwork for backgrounds behind it, once loaded.
@@ -101,10 +111,10 @@ fn physical(edge: u32) -> u32 {
 /// Fetches `url` and scales it to `edge` logical pixels. Call on the UI thread.
 /// Requests for an image already on its way wait for that one.
 pub async fn load(rt: &Handle, url: &str, edge: u32) -> Option<Image> {
-    if let Some(image) = cached(url, edge) {
+    let key = key(url, edge);
+    if let Some(image) = cached_key(&key) {
         return Some(image);
     }
-    let key = key(url, edge);
     let waiting = PENDING.with(|p| {
         let mut pending = p.borrow_mut();
         match pending.get_mut(&key) {

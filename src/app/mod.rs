@@ -82,6 +82,38 @@ struct Playback {
     queue_tried: Option<String>,
 }
 
+impl Playback {
+    /// Forgets the track queued in the player, so the next one is queued
+    /// afresh. The player's own copy is dropped with `Player::clear_next`.
+    fn forget_queued(&mut self) {
+        self.queued = None;
+        self.queue_tried = None;
+    }
+
+    /// Whether a stream for `id` was resolved ahead and is still fresh.
+    fn has_prefetched(&self, id: &str) -> bool {
+        self.prefetched
+            .get(id)
+            .is_some_and(|(_, at)| at.elapsed() < playback::PREFETCH_FRESH)
+    }
+
+    /// Takes the stream resolved ahead for `id`, if still fresh.
+    fn take_prefetched(&mut self, id: &str) -> Option<ResolvedStream> {
+        self.prefetched
+            .remove(id)
+            .filter(|(_, at)| at.elapsed() < playback::PREFETCH_FRESH)
+            .map(|(stream, _)| stream)
+    }
+
+    /// Keeps a stream resolved ahead for `id`, dropping stale ones, such as
+    /// those of tracks skipped past.
+    fn store_prefetched(&mut self, id: String, stream: ResolvedStream) {
+        self.prefetched
+            .retain(|_, (_, at)| at.elapsed() < playback::PREFETCH_FRESH);
+        self.prefetched.insert(id, (stream, Instant::now()));
+    }
+}
+
 struct State {
     settings: Settings,
     signed_in: bool,
@@ -143,6 +175,11 @@ pub struct App {
 
 fn s(text: impl AsRef<str>) -> SharedString {
     SharedString::from(text.as_ref())
+}
+
+/// The local date and time, or UTC when Windows will not say the offset.
+fn local_now() -> time::OffsetDateTime {
+    time::OffsetDateTime::now_local().unwrap_or_else(|_| time::OffsetDateTime::now_utc())
 }
 
 impl App {

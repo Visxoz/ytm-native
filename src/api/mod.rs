@@ -226,11 +226,7 @@ mod tests {
                     name: (*name).into(),
                 })
                 .collect(),
-            album: None,
-            duration: None,
-            thumb: None,
-            track_nr: None,
-            video: false,
+            ..Default::default()
         }
     }
 
