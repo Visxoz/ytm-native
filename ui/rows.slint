@@ -254,6 +254,10 @@ component Columns {
 
 export component Card {
     in property <CardItem> card;
+    /// The pointer dragged sideways by `dx` since it pressed, for a carousel
+    /// to scroll by; a release after a drag is not a click.
+    callback dragged(dx: length);
+    callback drag-ended();
     width: Layout.card-width;
     height: Layout.card-height(self.width);
     property <length> art-size: root.width - 2 * Layout.card-padding;
@@ -279,8 +283,28 @@ export component Card {
         }
 
         touch := TouchArea {
-            mouse-cursor: pointer;
-            clicked => { Api.navigate(root.card.kind, root.card.id, root.card.title); }
+            property <length> pressed-at;
+            property <bool> dragging;
+            mouse-cursor: self.dragging ? MouseCursor.grabbing : MouseCursor.pointer;
+            pointer-event(ev) => {
+                if ev.button != PointerEventButton.left {
+                    return;
+                }
+                if ev.kind == PointerEventKind.down {
+                    self.pressed-at = self.mouse-x;
+                } else if self.dragging {
+                    self.dragging = false;
+                    root.drag-ended();
+                } else if ev.kind == PointerEventKind.up {
+                    Api.navigate(root.card.kind, root.card.id, root.card.title);
+                }
+            }
+            moved => {
+                if self.pressed && (self.dragging || abs(self.mouse-x - self.pressed-at) > 6px) {
+                    self.dragging = true;
+                    root.dragged(self.mouse-x - self.pressed-at);
+                }
+            }
         }
 
         Art {
@@ -377,13 +401,17 @@ component GenreTile inherits Rectangle {
     }
 }
 
-/// A row of cards scrolled with arrow buttons that appear on hover.
+/// A row of cards scrolled with arrow buttons that appear on hover, or by
+/// dragging the cards themselves.
 export component Carousel {
     in property <[CardItem]> cards;
     property <length> step: Layout.card-width + Layout.card-gap;
     property <length> content-width: root.cards.length * root.step - Layout.card-gap;
     property <length> max-offset: max(0px, root.content-width - root.width);
     property <length> offset;
+    property <bool> dragging;
+    /// The offset as the drag began, which the pointer's movement is added to.
+    property <length> drag-from;
     height: Layout.card-height(Layout.card-width);
 
     Rectangle {
@@ -392,14 +420,23 @@ export component Carousel {
         clip: true;
         Rectangle {
             x: -root.offset;
+            // The arrows glide; a drag follows the pointer at once.
             animate x {
-                duration: 400ms;
+                duration: root.dragging ? 0ms : 400ms;
                 easing: ease-in-out;
             }
             for card[i] in root.cards: Card {
                 x: i * root.step;
                 y: 0;
                 card: card;
+                dragged(dx) => {
+                    if !root.dragging {
+                        root.dragging = true;
+                        root.drag-from = root.offset;
+                    }
+                    root.offset = clamp(root.drag-from - dx, 0px, root.max-offset);
+                }
+                drag-ended => { root.dragging = false; }
             }
         }
     }
