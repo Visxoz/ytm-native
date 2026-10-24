@@ -283,6 +283,9 @@ export component Card {
         }
 
         touch := TouchArea {
+            // Measured in window coordinates: the card itself moves with
+            // the carousel as it is dragged, so its own would cancel out.
+            property <length> pointer-x: self.absolute-position.x + self.mouse-x;
             property <length> pressed-at;
             property <bool> dragging;
             mouse-cursor: self.dragging ? MouseCursor.grabbing : MouseCursor.pointer;
@@ -291,7 +294,7 @@ export component Card {
                     return;
                 }
                 if ev.kind == PointerEventKind.down {
-                    self.pressed-at = self.mouse-x;
+                    self.pressed-at = self.pointer-x;
                 } else if self.dragging {
                     self.dragging = false;
                     root.drag-ended();
@@ -300,9 +303,9 @@ export component Card {
                 }
             }
             moved => {
-                if self.pressed && (self.dragging || abs(self.mouse-x - self.pressed-at) > 6px) {
+                if self.pressed && (self.dragging || abs(self.pointer-x - self.pressed-at) > 6px) {
                     self.dragging = true;
-                    root.dragged(self.mouse-x - self.pressed-at);
+                    root.dragged(self.pointer-x - self.pressed-at);
                 }
             }
         }
@@ -415,28 +418,39 @@ export component Carousel {
     height: Layout.card-height(Layout.card-width);
 
     Rectangle {
-        x: -Layout.card-padding;
-        width: root.width + 2 * Layout.card-padding;
+        // At rest the row is on whole cards, and an end card's hover
+        // background may show in the padding; while dragging, cards sit
+        // part-way, so the clip tightens to the row.
+        x: root.dragging ? 0 : -Layout.card-padding;
+        width: root.dragging ? root.width : root.width + 2 * Layout.card-padding;
         clip: true;
         Rectangle {
-            x: -root.offset;
-            // The arrows glide; a drag follows the pointer at once.
-            animate x {
-                duration: root.dragging ? 0ms : 400ms;
-                easing: ease-in-out;
-            }
-            for card[i] in root.cards: Card {
-                x: i * root.step;
-                y: 0;
-                card: card;
-                dragged(dx) => {
-                    if !root.dragging {
-                        root.dragging = true;
-                        root.drag-from = root.offset;
-                    }
-                    root.offset = clamp(root.drag-from - dx, 0px, root.max-offset);
+            // Keeps the cards where they are as the clip moves.
+            x: -Layout.card-padding - parent.x;
+            Rectangle {
+                x: -root.offset;
+                // The arrows glide; a drag follows the pointer at once.
+                animate x {
+                    duration: root.dragging ? 0ms : 400ms;
+                    easing: ease-in-out;
                 }
-                drag-ended => { root.dragging = false; }
+                for card[i] in root.cards: Card {
+                    x: i * root.step;
+                    y: 0;
+                    card: card;
+                    dragged(dx) => {
+                        if !root.dragging {
+                            root.dragging = true;
+                            root.drag-from = root.offset;
+                        }
+                        root.offset = clamp(root.drag-from - dx, 0px, root.max-offset);
+                    }
+                    // Settles on whole cards, as the arrows leave it.
+                    drag-ended => {
+                        root.dragging = false;
+                        root.offset = clamp(round(root.offset / root.step) * root.step, 0px, root.max-offset);
+                    }
+                }
             }
         }
     }
