@@ -158,8 +158,7 @@ impl App {
                     }
                 }
                 self.ui().set_np_loading(false);
-                self.update_media_state();
-                self.update_presence();
+                self.report_playback();
                 self.extend_with_radio_if_ending();
                 self.prefetch_next();
             }
@@ -316,8 +315,7 @@ impl App {
         let ui = self.ui();
         self.show_playing(false);
         ui.set_np_loading(false);
-        self.update_media_state();
-        self.update_presence();
+        self.report_playback();
     }
 
     pub(super) fn toggle_play(self: &Rc<Self>) {
@@ -336,8 +334,7 @@ impl App {
     pub(super) fn set_paused(self: &Rc<Self>, paused: bool) {
         self.player.set_paused(paused);
         self.show_playing(!paused);
-        self.update_media_state();
-        self.update_presence();
+        self.report_playback();
     }
 
     pub(super) fn seek_to(self: &Rc<Self>, secs: f64) {
@@ -349,8 +346,7 @@ impl App {
         };
         self.player.seek(secs);
         self.ui().set_np_position(secs as f32);
-        self.update_media_state();
-        self.update_presence();
+        self.report_playback_at(secs);
     }
 
     pub(super) fn set_volume(&self, volume: f32) {

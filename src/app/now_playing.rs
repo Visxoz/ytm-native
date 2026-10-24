@@ -129,17 +129,37 @@ impl App {
     }
 
     pub(super) fn update_media_state(&self) {
+        self.update_media_state_at(self.player.position());
+    }
+
+    fn update_media_state_at(&self, position: f64) {
         let playing = if self.ui().get_has_track() {
             Some(!self.player.is_paused())
         } else {
             None
         };
         if let Some(media) = self.media.borrow_mut().as_mut() {
-            media.set_state(playing, self.player.position());
+            media.set_state(playing, position);
         }
     }
 
     pub(super) fn update_presence(&self) {
+        self.update_presence_at(self.player.position());
+    }
+
+    /// Tells the media overlay and Discord whether and where it is playing.
+    pub(super) fn report_playback(&self) {
+        self.report_playback_at(self.player.position());
+    }
+
+    /// Reports `position` rather than the player's, which still reports the
+    /// old one until the engine has carried out a seek.
+    pub(super) fn report_playback_at(&self, position: f64) {
+        self.update_media_state_at(position);
+        self.update_presence_at(position);
+    }
+
+    fn update_presence_at(&self, position: f64) {
         let state = self.state.borrow();
         let track = match state.queue.current() {
             Some(track) if state.settings.discord && self.ui().get_has_track() => {
@@ -150,7 +170,7 @@ impl App {
                     album: track.album.as_ref().map(|(_, name)| name.clone()),
                     artwork_url: track.large_thumb(),
                     duration: state.playback.duration,
-                    position: self.player.position().min(state.playback.duration.max(0.0)),
+                    position: position.min(state.playback.duration.max(0.0)),
                     paused: self.player.is_paused() || !state.playback.started,
                 })
             }
