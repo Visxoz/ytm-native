@@ -87,6 +87,9 @@ pub struct Settings {
     pub discord: bool,
     pub autoplay: bool,
     pub shuffle: bool,
+    /// Shuffle with recommended tracks mixed in; a kind of shuffle, so it
+    /// goes off with it.
+    pub smart_shuffle: bool,
     pub repeat: i32,
     pub sidebar_collapsed: bool,
     pub quality: Quality,
@@ -113,6 +116,7 @@ impl Default for Settings {
             discord: true,
             autoplay: true,
             shuffle: false,
+            smart_shuffle: false,
             repeat: 0,
             sidebar_collapsed: false,
             quality: Quality::High,
@@ -143,6 +147,13 @@ impl Settings {
         self.premium_audio = quality == Quality::High;
     }
 
+    pub fn set_shuffle(&mut self, on: bool) {
+        self.shuffle = on;
+        if !on {
+            self.smart_shuffle = false;
+        }
+    }
+
     pub fn save(&self) {
         let result = std::fs::create_dir_all(data_dir()).and_then(|()| {
             let json = serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?;
@@ -163,6 +174,13 @@ pub struct Session {
     /// Length of the current track, which feed cards do not carry.
     #[serde(default)]
     pub duration: f64,
+    /// Queue entries Smart Shuffle put in.
+    #[serde(default)]
+    pub recommended: Vec<usize>,
+    /// The queue is a collection of the user's choosing, which Smart
+    /// Shuffle mixes recommendations into, rather than a radio.
+    #[serde(default)]
+    pub collection: bool,
 }
 
 /// Longest queue kept between runs.
@@ -186,6 +204,12 @@ impl Session {
             let end = (start + SESSION_QUEUE_LIMIT).min(self.queue.len());
             self.queue = self.queue[start..end].to_vec();
             self.index -= start;
+            self.recommended = self
+                .recommended
+                .iter()
+                .filter(|&&i| (start..end).contains(&i))
+                .map(|i| i - start)
+                .collect();
         }
         match serde_json::to_vec(&self) {
             Ok(json) => {

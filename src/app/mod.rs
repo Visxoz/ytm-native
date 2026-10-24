@@ -13,6 +13,7 @@ mod page;
 mod playback;
 mod resolve;
 mod session;
+mod smart_shuffle;
 mod song_version;
 mod updates;
 
@@ -99,6 +100,19 @@ struct State {
     song_versions: HashMap<String, SongVersion>,
     /// The songs played, saved between runs.
     history: settings::History,
+    /// The queue is a collection of the user's choosing, a playlist, album
+    /// or section, rather than a radio; Smart Shuffle mixes into those only.
+    queue_collection: bool,
+    smart: smart_shuffle::Smart,
+}
+
+impl State {
+    /// Replaces the queue; see `queue_collection`.
+    fn set_queue(&mut self, tracks: Vec<Track>, start: usize, shuffle: bool, collection: bool) {
+        self.queue.set(tracks, start, shuffle);
+        self.queue_collection = collection;
+        self.smart.reset();
+    }
 }
 
 pub struct App {
@@ -179,6 +193,8 @@ impl App {
                 page_cache: HashMap::new(),
                 song_versions: HashMap::new(),
                 history: settings::History::load(),
+                queue_collection: false,
+                smart: smart_shuffle::Smart::default(),
             }),
             rows: Rc::new(VecModel::default()),
             library: Rc::new(VecModel::default()),
@@ -271,6 +287,7 @@ impl App {
         ui.set_volume(settings.volume);
         ui.set_muted(settings.muted);
         ui.set_shuffle(settings.shuffle);
+        ui.set_smart_shuffle(settings.smart_shuffle);
         ui.set_repeat_mode(settings.repeat);
         ui.set_normalise(settings.normalise);
         ui.set_discord(settings.discord);

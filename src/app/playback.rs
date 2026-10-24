@@ -186,6 +186,9 @@ impl App {
 
     /// Resolves the next track's stream ahead of time to skip the wait.
     pub(super) fn prefetch_next(self: &Rc<Self>) {
+        // Smart Shuffle places its recommendations first, as the next track
+        // may be one of them.
+        self.smart_top_up();
         // Never waits: a music video is looked up alongside, and its song
         // version swapped in once found and prefetched.
         let video = self
@@ -371,10 +374,28 @@ impl App {
         self.ui().set_muted(muted);
     }
 
+    /// Cycles the shuffle button: off, shuffle, Smart Shuffle.
     pub(super) fn toggle_shuffle(self: &Rc<Self>) {
-        let on = !self.state.borrow().settings.shuffle;
-        self.state.borrow_mut().queue.set_shuffle(on);
-        self.update_settings(|s| s.shuffle = on);
+        let (shuffle, smart) = {
+            let settings = &self.state.borrow().settings;
+            match (settings.shuffle, settings.smart_shuffle) {
+                (false, _) => (true, false),
+                (true, false) => (true, true),
+                (true, true) => (false, false),
+            }
+        };
+        {
+            let mut state = self.state.borrow_mut();
+            if !smart {
+                state.queue.remove_recommended();
+                state.smart.reset();
+            }
+            state.queue.set_shuffle(shuffle);
+        }
+        self.update_settings(|s| {
+            s.set_shuffle(shuffle);
+            s.smart_shuffle = smart;
+        });
         self.refresh_queue();
         self.prefetch_next();
     }

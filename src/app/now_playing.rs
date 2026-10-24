@@ -25,7 +25,7 @@ fn quality_label(stream: &ResolvedStream) -> String {
 }
 
 /// The queue row for `track`, and whether its artwork still has to load.
-fn queue_item(track: &Track, current: bool) -> (QueueItem, bool) {
+fn queue_item(track: &Track, current: bool, recommended: bool) -> (QueueItem, bool) {
     let art = track
         .thumb
         .as_deref()
@@ -37,6 +37,7 @@ fn queue_item(track: &Track, current: bool) -> (QueueItem, bool) {
         duration: s(track.duration.map(api::format_duration).unwrap_or_default()),
         art: art.unwrap_or_default(),
         current,
+        recommended,
     };
     (item, needs_art)
 }
@@ -181,10 +182,10 @@ impl App {
             .state
             .borrow()
             .queue
-            .items()
+            .entries()
             .enumerate()
-            .map(|(i, t)| {
-                let (item, needs_art) = queue_item(t, i as i32 == current);
+            .map(|(i, (t, recommended))| {
+                let (item, needs_art) = queue_item(t, i as i32 == current, recommended);
                 if needs_art {
                     missing.push((i, t.thumb.clone()));
                 }
@@ -213,7 +214,8 @@ impl App {
                 let Some(track) = state.queue.get(i) else {
                     continue;
                 };
-                let (item, needs_art) = queue_item(track, i as i32 == current);
+                let (item, needs_art) =
+                    queue_item(track, i as i32 == current, state.queue.is_recommended(i));
                 if needs_art {
                     missing.push((i, track.thumb.clone()));
                 }

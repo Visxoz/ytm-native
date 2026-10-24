@@ -54,6 +54,8 @@ export struct QueueItem {
     duration: string,
     art: image,
     current: bool,
+    /// Mixed in by Smart Shuffle.
+    recommended: bool,
 }
 
 /// Calls from anywhere in the UI into Rust, and state many components read.

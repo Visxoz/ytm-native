@@ -1,5 +1,7 @@
 //! The play queue. Shuffle reorders what comes after the current track, as
 //! YouTube Music does, and turning it off restores the original order.
+//! Smart Shuffle mixes recommended tracks in among the user's own, marked
+//! so they can be taken out again.
 
 use std::{
     collections::HashMap,
@@ -40,6 +42,8 @@ impl Repeat {
 struct Entry<T> {
     uid: u64,
     item: T,
+    /// Mixed in by Smart Shuffle rather than chosen by the user.
+    recommended: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -91,6 +95,7 @@ impl<T: Clone> Queue<T> {
         Entry {
             uid: self.next_uid,
             item,
+            recommended: false,
         }
     }
 
@@ -142,9 +147,22 @@ impl<T: Clone> Queue<T> {
                     .enumerate()
                     .map(|(i, uid)| (uid, i))
                     .collect();
-                // Entries added while shuffled keep their place at the end.
-                self.entries
-                    .sort_by_key(|e| rank.get(&e.uid).copied().unwrap_or(usize::MAX));
+                // Entries added while shuffled have no place in the old
+                // order, so they stay behind the entry they followed; the
+                // one playing then never jumps to the end.
+                let mut anchor = None;
+                let mut keyed: Vec<_> = std::mem::take(&mut self.entries)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, e)| {
+                        if let Some(&r) = rank.get(&e.uid) {
+                            anchor = Some(r);
+                        }
+                        ((anchor, i), e)
+                    })
+                    .collect();
+                keyed.sort_by_key(|(key, _)| *key);
+                self.entries = keyed.into_iter().map(|(_, e)| e).collect();
                 self.current =
                     current_uid.and_then(|uid| self.entries.iter().position(|e| e.uid == uid));
             }
@@ -154,6 +172,10 @@ impl<T: Clone> Queue<T> {
 
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.entries.len()
     }
 
     pub fn current_index(&self) -> Option<usize> {
@@ -168,8 +190,72 @@ impl<T: Clone> Queue<T> {
         self.entries.iter().map(|e| &e.item)
     }
 
+    /// Every item, with whether Smart Shuffle put it there.
+    pub fn entries(&self) -> impl Iterator<Item = (&T, bool)> {
+        self.entries.iter().map(|e| (&e.item, e.recommended))
+    }
+
     pub fn get(&self, index: usize) -> Option<&T> {
         self.entries.get(index).map(|e| &e.item)
+    }
+
+    pub fn is_recommended(&self, index: usize) -> bool {
+        self.entries.get(index).is_some_and(|e| e.recommended)
+    }
+
+    /// Indices of the entries Smart Shuffle put in.
+    pub fn recommended(&self) -> impl Iterator<Item = usize> {
+        self.entries
+            .iter()
+            .enumerate()
+            .filter_map(|(i, e)| e.recommended.then_some(i))
+    }
+
+    /// Marks the entries at `indices` as Smart Shuffle's, as restored from
+    /// a saved queue.
+    pub fn mark_recommended(&mut self, indices: impl IntoIterator<Item = usize>) {
+        for index in indices {
+            if let Some(entry) = self.entries.get_mut(index) {
+                entry.recommended = true;
+            }
+        }
+    }
+
+    /// Puts a recommendation at `index`, which must be after the current
+    /// track.
+    pub fn insert_recommended(&mut self, index: usize, item: T) {
+        let Some(current) = self.current else { return };
+        if index <= current || index > self.entries.len() {
+            return;
+        }
+        let mut entry = self.entry(item);
+        entry.recommended = true;
+        self.entries.insert(index, entry);
+    }
+
+    /// Takes out every recommendation but the one playing, leaving the
+    /// user's own order as it was. Returns whether any was removed.
+    pub fn remove_recommended(&mut self) -> bool {
+        let Some(current) = self.current else {
+            return false;
+        };
+        let before = self.entries.len();
+        let removed_before = self.entries[..current]
+            .iter()
+            .filter(|e| e.recommended)
+            .count();
+        let mut index = 0;
+        self.entries.retain(|e| {
+            let keep = !e.recommended || index == current;
+            index += 1;
+            keep
+        });
+        if self.entries.len() == before {
+            return false;
+        }
+        self.revision += 1;
+        self.current = Some(current - removed_before);
+        true
     }
 
     /// The entry that `advance` would move to, without moving.
@@ -361,12 +447,107 @@ mod tests {
     }
 
     #[test]
-    fn unshuffle_keeps_tracks_added_while_shuffled() {
+    fn unshuffle_keeps_tracks_added_while_shuffled_behind_their_neighbour() {
         let mut q = queue(5);
         q.set_shuffle(true);
         q.push(99);
+        let after = items(&q)[4];
         q.set_shuffle(false);
-        assert_eq!(items(&q), [0, 1, 2, 3, 4, 99]);
+        let order = items(&q);
+        assert_eq!(order.len(), 6);
+        let at = order.iter().position(|&i| i == 99).unwrap();
+        assert_eq!(
+            order[at - 1],
+            after,
+            "still follows the track it was added after"
+        );
+
+        let mut q = queue(5);
+        q.jump(2);
+        q.set_shuffle(true);
+        q.play_next(99);
+        q.advance(false);
+        assert_eq!(q.current(), Some(&99));
+        q.set_shuffle(false);
+        assert_eq!(items(&q), [0, 1, 2, 99, 3, 4]);
+        assert_eq!(
+            q.current(),
+            Some(&99),
+            "the playing track stays where it is"
+        );
+        assert_eq!(q.advance(false), Some(&3));
+    }
+
+    #[test]
+    fn recommendations_go_after_the_current_track_only() {
+        let mut q = queue(4);
+        q.jump(1);
+        let revision = q.revision();
+        q.insert_recommended(1, 50);
+        q.insert_recommended(0, 50);
+        assert_eq!(items(&q), [0, 1, 2, 3], "never at or before the current");
+        assert_eq!(q.revision(), revision);
+        q.insert_recommended(2, 50);
+        q.insert_recommended(5, 51);
+        assert_eq!(items(&q), [0, 1, 50, 2, 3, 51]);
+        assert_eq!(q.current(), Some(&1));
+        assert!(q.is_recommended(2) && q.is_recommended(5));
+        assert!(!q.is_recommended(1));
+        assert_eq!(q.recommended().collect::<Vec<_>>(), [2, 5]);
+        assert_ne!(q.revision(), revision);
+    }
+
+    #[test]
+    fn removing_recommendations_restores_the_users_order() {
+        let mut q = queue(6);
+        q.jump(1);
+        q.set_shuffle(true);
+        let shuffled = items(&q);
+        q.insert_recommended(2, 50);
+        q.insert_recommended(5, 51);
+        q.advance(false);
+        q.advance(false);
+        assert_eq!(q.current(), Some(&shuffled[2]));
+        let revision = q.revision();
+        assert!(q.remove_recommended());
+        assert_eq!(items(&q), shuffled, "the user's shuffled order is back");
+        assert_eq!(
+            q.current(),
+            Some(&shuffled[2]),
+            "the index moved with the track"
+        );
+        assert_ne!(q.revision(), revision);
+        assert!(!q.remove_recommended(), "nothing left to remove");
+
+        q.set_shuffle(false);
+        assert_eq!(items(&q), [0, 1, 2, 3, 4, 5]);
+    }
+
+    #[test]
+    fn a_playing_recommendation_is_kept() {
+        let mut q = queue(3);
+        q.insert_recommended(1, 50);
+        q.insert_recommended(3, 51);
+        q.advance(false);
+        assert_eq!(q.current(), Some(&50));
+        assert!(q.remove_recommended());
+        assert_eq!(items(&q), [0, 50, 1, 2]);
+        assert_eq!(q.current(), Some(&50));
+        assert!(q.is_recommended(1), "still marked as one");
+    }
+
+    #[test]
+    fn marks_restored_recommendations() {
+        let mut q = queue(4);
+        q.mark_recommended([1, 3, 9]);
+        assert_eq!(q.recommended().collect::<Vec<_>>(), [1, 3]);
+        assert_eq!(
+            q.entries()
+                .filter(|(_, r)| *r)
+                .map(|(i, _)| *i)
+                .collect::<Vec<_>>(),
+            [1, 3]
+        );
     }
 
     #[test]

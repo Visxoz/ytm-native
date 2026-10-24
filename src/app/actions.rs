@@ -33,8 +33,10 @@ impl App {
         };
         match whole {
             Some(tracks) => {
-                let shuffle = self.state.borrow().settings.shuffle;
-                self.state.borrow_mut().queue.set(tracks, index, shuffle);
+                let mut state = self.state.borrow_mut();
+                let shuffle = state.settings.shuffle;
+                state.set_queue(tracks, index, shuffle, true);
+                drop(state);
                 self.start_current();
             }
             None => self.play_with_radio(track),
@@ -46,7 +48,7 @@ impl App {
         let id = track.id.clone();
         {
             let mut state = self.state.borrow_mut();
-            state.queue.set(vec![track], 0, false);
+            state.set_queue(vec![track], 0, false, false);
             // Autoplay would otherwise fetch the same radio once this starts.
             state.playback.extending = true;
         }
@@ -86,8 +88,10 @@ impl App {
             };
             let shuffle = state.settings.shuffle;
             state.queue.extend(fresh);
-            // Keep newly added tracks in the shuffle.
+            // Keep newly added tracks in the shuffle. Recommendations are
+            // taken out first, as they are placed again where they are due.
             if shuffle {
+                state.queue.remove_recommended();
                 state.queue.set_shuffle(false);
                 state.queue.set_shuffle(true);
             }
@@ -106,8 +110,10 @@ impl App {
         } else {
             0
         };
-        self.update_settings(|s| s.shuffle = shuffle);
-        self.state.borrow_mut().queue.set(tracks, start, shuffle);
+        self.update_settings(|s| s.set_shuffle(shuffle));
+        self.state
+            .borrow_mut()
+            .set_queue(tracks, start, shuffle, true);
         self.start_current();
     }
 

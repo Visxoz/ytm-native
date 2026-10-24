@@ -320,11 +320,22 @@ component QueueRow inherits Rectangle {
             color: root.item.current ? Theme.accent : Theme.text;
         }
 
-        Text {
-            text: root.item.artists;
-            overflow: elide;
-            font-size: 13px;
-            color: Theme.text-secondary;
+        HorizontalLayout {
+            spacing: 4px;
+            // Marks a track Smart Shuffle mixed in.
+            if root.item.recommended: Icon {
+                y: (parent.height - self.height) / 2;
+                path: Icons.sparkle;
+                size: 12px;
+                color: Theme.text-secondary;
+            }
+
+            Text {
+                text: root.item.artists;
+                overflow: elide;
+                font-size: 13px;
+                color: Theme.text-secondary;
+            }
         }
     }
 
@@ -484,6 +495,7 @@ export component AppWindow inherits Window {
     in-out property <float> volume: 0.8;
     in property <bool> muted;
     in property <bool> shuffle;
+    in property <bool> smart-shuffle;
     in property <int> repeat-mode;
 
     // Panels
@@ -1217,9 +1229,10 @@ export component AppWindow inherits Window {
                     HorizontalLayout {
                         alignment: center;
                         spacing: 16px;
+                        // Off, shuffle, then Smart Shuffle, shown as sparkles.
                         IconButton {
                             y: (parent.height - self.height) / 2;
-                            icon: Icons.shuffle;
+                            icon: root.smart-shuffle ? Icons.sparkle : Icons.shuffle;
                             size: 32px;
                             icon-size: 18px;
                             active: root.shuffle;
