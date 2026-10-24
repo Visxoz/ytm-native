@@ -40,7 +40,7 @@ time = { version = "0.3.55", features = ["local-offset"] }
 tokio = { version = "1.54.0", features = ["rt-multi-thread", "macros", "sync", "time"] }
 unsafe-libopus = "0.2.0"
 url = "2.5"
-windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging", "Win32_Security", "Win32_Security_Cryptography"] }
+windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_System_Pipes", "Win32_System_Threading", "Win32_UI_WindowsAndMessaging", "Win32_Security", "Win32_Security_Cryptography"] }
 wry = { version = "0.57", default-features = false }
 
 [profile.release]

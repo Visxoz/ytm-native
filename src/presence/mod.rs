@@ -5,11 +5,15 @@ use std::{
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 
-use discord_rich_presence::{
-    DiscordIpc, DiscordIpcClient,
-    activity::{Activity, ActivityType, Assets, Button, StatusDisplayType, Timestamps},
+use discord_rich_presence::activity::{
+    Activity, ActivityType, Assets, Button, StatusDisplayType, Timestamps,
 };
+use serde_json::Value;
 use url::Url;
+
+use ipc::{Ipc, OP_CLOSE};
+
+mod ipc;
 
 const DISCORD_CLIENT_ID: &str = "1282436714408841276";
 
@@ -41,9 +45,6 @@ const PAUSED_TEXT: &str = "⏸︎";
 const LISTEN_BUTTON_LABEL: &str = "Listen on YouTube Music";
 const WATCH_URL: &str = "https://music.youtube.com/watch?v=";
 
-/// Discord IPC opcodes.
-const OPCODE_CLOSE: u32 = 2;
-const OPCODE_PING: u8 = 3;
 const EVENT_ERROR: &str = "ERROR";
 
 const VIDEO_ID_LEN: usize = 11;
@@ -233,7 +234,7 @@ impl Presence {
 /// Owns the Discord connection on its own thread so IPC never blocks the UI.
 struct Worker {
     rx: Receiver<Message>,
-    client: Option<DiscordIpcClient>,
+    client: Option<Ipc>,
     reconnect_at: Instant,
     backoff: Duration,
     wanted: Option<Presence>,
@@ -317,7 +318,7 @@ impl Worker {
             self.sync(now);
         }
         if self.shown.is_some() && now >= self.last_contact + HEARTBEAT {
-            self.command(|client| client.send(Default::default(), OPCODE_PING));
+            self.command(Ipc::ping);
         }
     }
 
@@ -331,9 +332,8 @@ impl Worker {
     }
 
     fn connect(&mut self, now: Instant) {
-        let mut client = DiscordIpcClient::new(DISCORD_CLIENT_ID);
-        match client.connect() {
-            Ok(()) => {
+        match Ipc::connect(DISCORD_CLIENT_ID) {
+            Ok(client) => {
                 log::debug!("connected to Discord");
                 self.client = Some(client);
                 self.backoff = RECONNECT_MIN;
@@ -378,7 +378,7 @@ impl Worker {
         }
         self.recent_sends.push_back(now);
 
-        let accepted = self.command(|client| client.set_activity(wanted.activity()));
+        let accepted = self.command(|client| client.set_activity(Some(&wanted.activity())));
         if accepted {
             match wanted.span {
                 Some((start, end)) => log::debug!(
@@ -401,25 +401,23 @@ impl Worker {
     fn clear(&mut self) {
         self.paused_since = None;
         if self.shown.take().is_some() {
-            self.command(|client| client.clear_activity());
+            self.command(|client| client.set_activity(None));
         }
     }
 
     /// Sends one command and drains Discord's reply. Returns whether Discord
     /// accepted it; a broken connection schedules a reconnect.
-    fn command(
-        &mut self,
-        send: impl FnOnce(&mut DiscordIpcClient) -> Result<(), discord_rich_presence::error::Error>,
-    ) -> bool {
+    fn command(&mut self, send: impl FnOnce(&mut Ipc) -> std::io::Result<(u32, Value)>) -> bool {
         let Some(client) = self.client.as_mut() else {
             return false;
         };
-        let reply = send(client).and_then(|()| client.recv());
-        self.last_contact = Instant::now();
+        let reply = send(client);
+        let now = Instant::now();
+        self.last_contact = now;
         match reply {
-            Ok((OPCODE_CLOSE, body)) => {
+            Ok((OP_CLOSE, body)) => {
                 log::warn!("Discord closed the connection: {body}");
-                self.schedule_reconnect(Instant::now());
+                self.schedule_reconnect(now);
                 false
             }
             Ok((_, body)) if body["evt"] == EVENT_ERROR => {
@@ -429,7 +427,7 @@ impl Worker {
             Ok(_) => true,
             Err(e) => {
                 log::debug!("lost connection to Discord: {e}");
-                self.schedule_reconnect(Instant::now());
+                self.schedule_reconnect(now);
                 false
             }
         }
