@@ -177,10 +177,6 @@ pub struct Session {
     /// Queue entries Smart Shuffle put in.
     #[serde(default)]
     pub recommended: Vec<usize>,
-    /// The queue is a collection of the user's choosing, which Smart
-    /// Shuffle mixes recommendations into, rather than a radio.
-    #[serde(default)]
-    pub collection: bool,
 }
 
 /// Longest queue kept between runs.

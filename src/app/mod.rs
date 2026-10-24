@@ -101,17 +101,13 @@ struct State {
     song_versions: HashMap<String, SongVersion>,
     /// The songs played, saved between runs.
     history: settings::History,
-    /// The queue is a collection of the user's choosing, a playlist, album
-    /// or section, rather than a radio; Smart Shuffle mixes into those only.
-    queue_collection: bool,
     smart: smart_shuffle::Smart,
 }
 
 impl State {
-    /// Replaces the queue; see `queue_collection`.
-    fn set_queue(&mut self, tracks: Vec<Track>, start: usize, shuffle: bool, collection: bool) {
+    /// Replaces the queue, dropping Smart Shuffle's batch for the old one.
+    fn set_queue(&mut self, tracks: Vec<Track>, start: usize, shuffle: bool) {
         self.queue.set(tracks, start, shuffle);
-        self.queue_collection = collection;
         self.smart.reset();
     }
 }
@@ -195,7 +191,6 @@ impl App {
                 page_cache: HashMap::new(),
                 song_versions: HashMap::new(),
                 history: settings::History::load(),
-                queue_collection: false,
                 smart: smart_shuffle::Smart::default(),
             }),
             rows: Rc::new(VecModel::default()),

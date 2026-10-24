@@ -1,8 +1,8 @@
-//! Smart Shuffle: while shuffling a playlist, album or other collection of
-//! the user's own, recommended tracks are mixed in, one after every few of
-//! theirs. They come from the radio of one of the user's tracks, a batch at
-//! a time as the queue runs, and are marked in the queue so that turning
-//! Smart Shuffle off takes them out again.
+//! Smart Shuffle: while shuffling, recommended tracks are mixed into the
+//! queue, one after every few of the user's own, whether it is a playlist,
+//! album or radio. They come from the radio of one of the queue's tracks, a
+//! batch at a time as the queue runs, and are marked in the queue so that
+//! turning Smart Shuffle off takes them out again.
 
 use std::{
     collections::{HashSet, VecDeque},
@@ -81,7 +81,7 @@ impl App {
     pub(super) fn smart_top_up(self: &Rc<Self>) {
         let (changed, fetch) = {
             let mut state = self.state.borrow_mut();
-            if !(state.settings.smart_shuffle && state.queue_collection) {
+            if !state.settings.smart_shuffle {
                 return;
             }
             let State {

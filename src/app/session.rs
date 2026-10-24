@@ -100,7 +100,6 @@ impl App {
             position,
             duration: state.playback.duration,
             recommended: state.queue.recommended().collect(),
-            collection: state.queue_collection,
         }
         .save();
     }
@@ -113,7 +112,7 @@ impl App {
         let track = session.queue[session.index].clone();
         {
             let mut state = self.state.borrow_mut();
-            state.set_queue(session.queue, session.index, false, session.collection);
+            state.set_queue(session.queue, session.index, false);
             state.queue.mark_recommended(session.recommended);
             state.playback.resume = Some((track.id.clone(), session.position));
             state.playback.duration = track.duration.map_or(session.duration, f64::from);

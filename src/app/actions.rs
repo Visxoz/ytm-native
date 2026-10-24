@@ -32,13 +32,7 @@ impl App {
             }
         };
         match whole {
-            Some(tracks) => {
-                let mut state = self.state.borrow_mut();
-                let shuffle = state.settings.shuffle;
-                state.set_queue(tracks, index, shuffle, true);
-                drop(state);
-                self.start_current();
-            }
+            Some(tracks) => self.play_queue(tracks, Some(index)),
             None => self.play_with_radio(track),
         }
     }
@@ -48,7 +42,7 @@ impl App {
         let id = track.id.clone();
         {
             let mut state = self.state.borrow_mut();
-            state.set_queue(vec![track], 0, false, false);
+            state.set_queue(vec![track], 0, false);
             // Autoplay would otherwise fetch the same radio once this starts.
             state.playback.extending = true;
         }
@@ -100,20 +94,34 @@ impl App {
         self.prefetch_next();
     }
 
+    /// Plays `tracks`, shuffled if the shuffle button is on. A Shuffle button
+    /// turns it on, and Play leaves it, and Smart Shuffle, as they are.
     fn play_tracks(self: &Rc<Self>, tracks: Vec<Track>, shuffle: bool) {
         if tracks.is_empty() {
             self.toast("Nothing to play here");
             return;
         }
-        let start = if shuffle {
-            self.state.borrow_mut().queue.random_below(tracks.len())
-        } else {
-            0
-        };
-        self.update_settings(|s| s.set_shuffle(shuffle));
-        self.state
-            .borrow_mut()
-            .set_queue(tracks, start, shuffle, true);
+        // Saving the settings writes to disk, so only for a change.
+        if shuffle && !self.state.borrow().settings.shuffle {
+            self.update_settings(|s| s.set_shuffle(true));
+        }
+        self.play_queue(tracks, None);
+    }
+
+    /// Replaces the queue with `tracks` and plays it from `start`, or, for
+    /// `None`, from a random track if shuffling and the first if not. With
+    /// the shuffle button on, the tracks after the first are shuffled.
+    fn play_queue(self: &Rc<Self>, tracks: Vec<Track>, start: Option<usize>) {
+        {
+            let mut state = self.state.borrow_mut();
+            let shuffle = state.settings.shuffle;
+            let start = match start {
+                Some(start) => start,
+                None if shuffle => state.queue.random_below(tracks.len()),
+                None => 0,
+            };
+            state.set_queue(tracks, start, shuffle);
+        }
         self.start_current();
     }
 
