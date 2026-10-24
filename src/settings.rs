@@ -1,8 +1,12 @@
 //! Preferences persisted as JSON in the app's data directory.
 
-use std::{collections::VecDeque, path::PathBuf};
+use std::{
+    collections::VecDeque,
+    io,
+    path::{Path, PathBuf},
+};
 
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 /// `%APPDATA%\ytm-native`, where settings and caches live.
 pub fn data_dir() -> PathBuf {
@@ -10,6 +14,30 @@ pub fn data_dir() -> PathBuf {
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir)
         .join("ytm-native")
+}
+
+/// Writes `bytes` to a temporary file and renames it over `path`, so a
+/// crash or a full disk midway leaves the old file whole.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let partial = path.with_extension("tmp");
+    std::fs::write(&partial, bytes)?;
+    std::fs::rename(partial, path)
+}
+
+fn read_json<T: DeserializeOwned>(path: &Path) -> Option<T> {
+    serde_json::from_slice(&std::fs::read(path).ok()?).ok()
+}
+
+/// Saves `value` as JSON, returning whether it was saved. A failure is
+/// logged as `what` that could not be saved.
+fn save_json(path: &Path, value: &impl Serialize, what: &str) -> bool {
+    let written = serde_json::to_vec(value)
+        .map_err(io::Error::other)
+        .and_then(|json| write_atomic(path, &json));
+    if let Err(e) = &written {
+        log::warn!("could not save {what}: {e}");
+    }
+    written.is_ok()
 }
 
 /// The signed-in session's `Cookie` header, for Premium stream requests.
@@ -131,10 +159,7 @@ impl Default for Settings {
 
 impl Settings {
     pub fn load() -> Self {
-        let mut settings: Self = std::fs::read(settings_path())
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default();
+        let mut settings: Self = read_json(&settings_path()).unwrap_or_default();
         // Premium audio turned off by an older version means Normal.
         if !settings.premium_audio && settings.quality == Quality::High {
             settings.quality = Quality::Normal;
@@ -155,9 +180,10 @@ impl Settings {
     }
 
     pub fn save(&self) {
+        // Pretty, as people open this file to look at it.
         let result = std::fs::create_dir_all(data_dir()).and_then(|()| {
-            let json = serde_json::to_vec_pretty(self).map_err(std::io::Error::other)?;
-            std::fs::write(settings_path(), json)
+            let json = serde_json::to_vec_pretty(self).map_err(io::Error::other)?;
+            write_atomic(&settings_path(), &json)
         });
         if let Err(e) = result {
             log::warn!("could not save settings: {e}");
@@ -188,9 +214,7 @@ fn session_path() -> PathBuf {
 
 impl Session {
     pub fn load() -> Option<Self> {
-        let bytes = std::fs::read(session_path()).ok()?;
-        let session: Self = serde_json::from_slice(&bytes).ok()?;
-        (session.index < session.queue.len()).then_some(session)
+        read_json::<Self>(&session_path()).filter(|s| s.index < s.queue.len())
     }
 
     pub fn save(mut self) {
@@ -207,14 +231,7 @@ impl Session {
                 .map(|i| i - start)
                 .collect();
         }
-        match serde_json::to_vec(&self) {
-            Ok(json) => {
-                if let Err(e) = std::fs::write(session_path(), json) {
-                    log::warn!("could not save the session: {e}");
-                }
-            }
-            Err(e) => log::warn!("could not save the session: {e}"),
-        }
+        save_json(&session_path(), &self, "the session");
     }
 }
 
@@ -226,18 +243,11 @@ fn home_path() -> PathBuf {
 /// requests for the feed while the rest of the account works, so Home shows
 /// this when a fresh copy cannot be had.
 pub fn load_home() -> Option<Vec<crate::api::Section>> {
-    let bytes = std::fs::read(home_path()).ok()?;
-    let sections: Vec<crate::api::Section> = serde_json::from_slice(&bytes).ok()?;
-    (!sections.is_empty()).then_some(sections)
+    read_json::<Vec<crate::api::Section>>(&home_path()).filter(|sections| !sections.is_empty())
 }
 
 pub fn save_home(sections: &[crate::api::Section]) {
-    let written = serde_json::to_vec(sections)
-        .map_err(std::io::Error::other)
-        .and_then(|json| std::fs::write(home_path(), json));
-    if let Err(e) = written {
-        log::warn!("could not save the home feed: {e}");
-    }
+    save_json(&home_path(), &sections, "the home feed");
 }
 
 /// Drops the saved feed, which belongs to the account signed in when it was
@@ -264,10 +274,7 @@ fn history_path() -> PathBuf {
 
 impl History {
     pub fn load() -> Self {
-        std::fs::read(history_path())
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default()
+        read_json(&history_path()).unwrap_or_default()
     }
 
     pub fn is_empty(&self) -> bool {
@@ -293,15 +300,8 @@ impl History {
 
     /// Writes the history, if it changed since the last save.
     pub fn save(&mut self) {
-        if !self.changed {
-            return;
-        }
-        let written = serde_json::to_vec(self)
-            .map_err(std::io::Error::other)
-            .and_then(|json| std::fs::write(history_path(), json));
-        match written {
-            Ok(()) => self.changed = false,
-            Err(e) => log::warn!("could not save the history: {e}"),
+        if self.changed && save_json(&history_path(), self, "the history") {
+            self.changed = false;
         }
     }
 }
@@ -320,17 +320,30 @@ mod tests {
     }
 
     #[test]
+    fn replaces_files_whole() {
+        let dir = std::env::temp_dir().join(format!("ytm-settings-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("history.json");
+        write_atomic(&path, b"[1]").unwrap();
+        write_atomic(&path, b"[1,2]").unwrap();
+        assert_eq!(read_json::<Vec<u8>>(&path), Some(vec![1, 2]));
+        assert!(
+            !path.with_extension("tmp").exists(),
+            "the partial file is renamed into place"
+        );
+        assert_eq!(read_json::<Vec<u8>>(&dir.join("missing.json")), None);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn home_feed_survives_saving() {
         use crate::api::{Card, CardKind, CardLayout, QueueMode, Section, Track};
         let track = Track {
             id: "44zDzdf08s4".into(),
             title: "Matt Hardy 999".into(),
-            artists: Vec::new(),
-            album: None,
-            duration: None,
             thumb: Some("https://lh3.googleusercontent.com/x".into()),
-            track_nr: None,
             video: true,
+            ..Default::default()
         };
         let sections = vec![
             Section::Cards {

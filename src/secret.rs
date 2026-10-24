@@ -79,9 +79,7 @@ pub fn read(path: &Path) -> Option<String> {
 pub fn write(path: &Path, text: &str) -> io::Result<()> {
     let data = crypt(text.as_bytes(), true)
         .ok_or_else(|| io::Error::other("Windows could not encrypt the data"))?;
-    let partial = path.with_extension("tmp");
-    std::fs::write(&partial, data)?;
-    std::fs::rename(partial, path)
+    crate::settings::write_atomic(path, &data)
 }
 
 /// Reads `path`, or failing that the plain-text `legacy` file an older
