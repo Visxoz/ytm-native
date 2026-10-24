@@ -135,7 +135,10 @@ impl Download {
             let end = (offset + CHUNK).min(total) - 1;
             request = request.header(reqwest::header::RANGE, format!("bytes={offset}-{end}"));
         }
-        let mut response = request.send()?.error_for_status()?;
+        let mut response = request
+            .send()
+            .and_then(|r| r.error_for_status())
+            .map_err(reqwest::Error::without_url)?;
         if total == 0 {
             let length = response.content_length().unwrap_or(0);
             let mut state = self.state.lock().unwrap();
