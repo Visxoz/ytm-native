@@ -129,7 +129,7 @@ pub struct App {
     queue_model: Rc<VecModel<QueueItem>>,
     /// Queue revision the queue model shows.
     queue_shown: Cell<Option<u64>>,
-    selection: RefCell<queue_panel::Selection>,
+    selection: Cell<queue_panel::Selection>,
     tick: Timer,
     eq_timer: Timer,
     premium: Arc<PremiumShared>,
@@ -202,7 +202,7 @@ impl App {
             library: Rc::new(VecModel::default()),
             queue_model: Rc::new(VecModel::default()),
             queue_shown: Cell::new(None),
-            selection: RefCell::new(queue_panel::Selection::default()),
+            selection: Cell::new(queue_panel::Selection::default()),
             tick: Timer::default(),
             eq_timer: Timer::default(),
             premium: Arc::new(premium),

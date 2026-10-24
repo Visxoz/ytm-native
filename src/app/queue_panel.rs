@@ -7,12 +7,12 @@ use std::rc::Rc;
 
 use slint::Model;
 
-use super::{App, now_playing::queue_item};
+use super::{App, State, now_playing::queue_item};
 use crate::api;
 
 /// The rows picked with Ctrl- and Shift-click are flagged on the rows
 /// themselves; this is how many, and where a Shift-click selects from.
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 pub(super) struct Selection {
     count: usize,
     anchor: Option<usize>,
@@ -29,8 +29,7 @@ impl App {
             }
             return;
         }
-        let anchor = self.selection.borrow().anchor;
-        match anchor {
+        match self.selection.get().anchor {
             Some(anchor) if shift => {
                 for row in anchor.min(index)..=anchor.max(index) {
                     self.select(row, true);
@@ -42,7 +41,10 @@ impl App {
                     .row_data(index)
                     .is_some_and(|item| item.selected);
                 self.select(index, on);
-                self.selection.borrow_mut().anchor = Some(index);
+                self.selection.set(Selection {
+                    anchor: Some(index),
+                    ..self.selection.get()
+                });
             }
         }
         self.show_selection();
@@ -57,21 +59,22 @@ impl App {
         }
         item.selected = on;
         self.queue_model.set_row_data(row, item);
-        let mut selection = self.selection.borrow_mut();
+        let mut selection = self.selection.get();
         if on {
             selection.count += 1;
         } else {
             selection.count -= 1;
         }
+        self.selection.set(selection);
     }
 
     fn show_selection(&self) {
-        let count = self.selection.borrow().count;
-        self.ui().set_queue_selected(count as i32);
+        self.ui()
+            .set_queue_selected(self.selection.get().count as i32);
     }
 
     pub(super) fn clear_selection(&self) {
-        if self.selection.borrow().count > 0 {
+        if self.selection.get().count > 0 {
             for row in 0..self.queue_model.row_count() {
                 self.select(row, false);
             }
@@ -81,12 +84,12 @@ impl App {
 
     /// The rows were rebuilt or cleared, and carry no flags any more.
     pub(super) fn forget_selection(&self) {
-        *self.selection.borrow_mut() = Selection::default();
+        self.selection.set(Selection::default());
         self.show_selection();
     }
 
     pub(super) fn selected_rows(&self) -> Vec<usize> {
-        if self.selection.borrow().count == 0 {
+        if self.selection.get().count == 0 {
             return Vec::new();
         }
         (0..self.queue_model.row_count())
@@ -181,17 +184,19 @@ impl App {
         self.clear_selection();
         let (revision, current, stale) = {
             let mut state = self.state.borrow_mut();
-            let next = state.queue.peek_next().map(|t| t.id.clone());
-            let playback = &mut state.playback;
+            let State {
+                queue, playback, ..
+            } = &mut *state;
+            let next = queue.peek_next().map(|t| t.id.as_str());
             let stale = playback
                 .queued
                 .as_ref()
-                .is_some_and(|(id, _)| Some(id) != next.as_ref());
+                .is_some_and(|(id, _)| Some(id.as_str()) != next);
             if stale {
                 playback.queued = None;
                 playback.queue_tried = None;
             }
-            (state.queue.revision(), state.queue.current_index(), stale)
+            (queue.revision(), queue.current_index(), stale)
         };
         self.queue_shown.set(Some(revision));
         self.ui()
