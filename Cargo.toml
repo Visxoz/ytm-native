@@ -1,6 +1,6 @@
 [package]
 name = "ytm-native"
-version = "0.1.7"
+version = "0.1.8"
 description = "A native YouTube Music client for Windows"
 # rustypipe is GPL-3.0, so the app is too.
 license = "GPL-3.0-only"
