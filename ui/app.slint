@@ -510,6 +510,7 @@ export component AppWindow inherits Window {
     in property <bool> autoplay;
     /// 0 low, 1 normal, 2 high.
     in property <int> quality: 2;
+    in property <bool> crossfade;
     in property <string> premium-status;
     // A newer version to install, or empty, and the Updates row's text.
     in property <string> update-version;
@@ -552,6 +553,7 @@ export component AppWindow inherits Window {
     callback install-update();
     callback set-autoplay(value: bool);
     callback set-quality(value: int);
+    callback set-crossfade(value: bool);
     // Delivered from background threads through the event loop.
     callback player-event(kind: string, message: string);
     callback media-action(action: string, value: float);
@@ -1436,6 +1438,16 @@ export component AppWindow inherits Window {
                     y: (parent.height - self.height) / 2;
                     checked: root.normalise;
                     toggled(v) => { root.set-normalise(v); }
+                }
+            }
+
+            SettingRow {
+                label: "Crossfade";
+                detail: "Fades each track into the next. Tracks of an album played in order still run straight on.";
+                Toggle {
+                    y: (parent.height - self.height) / 2;
+                    checked: root.crossfade;
+                    toggled(v) => { root.set-crossfade(v); }
                 }
             }
 

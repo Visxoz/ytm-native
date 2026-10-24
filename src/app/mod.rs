@@ -276,6 +276,7 @@ impl App {
         ui.set_discord(settings.discord);
         ui.set_autoplay(settings.autoplay);
         ui.set_quality(settings.quality.index());
+        ui.set_crossfade(settings.crossfade);
         ui.set_sidebar_collapsed(settings.sidebar_collapsed);
         ui.set_check_updates(settings.check_updates);
         ui.set_update_status(updates::up_to_date_status(settings.check_updates).into());

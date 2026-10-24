@@ -19,6 +19,9 @@ pub(super) struct Output {
     pub(super) switch_at: Option<u64>,
     /// The queued track's loudness correction, applied as it starts.
     pub(super) next_loudness: f32,
+    /// Where the queued track's first queued sample lies, past any leading
+    /// silence cut for a crossfade.
+    pub(super) next_base_secs: f64,
     /// Set by the device callback once the queued track is audible.
     pub(super) advanced: bool,
 }
@@ -39,7 +42,7 @@ impl Output {
     }
 
     /// Counts `frames` as played. Returns the next track's loudness
-    /// correction when they cross into it, which then counts from zero.
+    /// correction when they cross into it, which then counts from its start.
     fn played(&mut self, frames: u64) -> Option<f32> {
         self.frames_played += frames;
         let at = self.switch_at?;
@@ -47,7 +50,7 @@ impl Output {
             return None;
         }
         self.frames_played -= at;
-        self.base_secs = 0.0;
+        self.base_secs = self.next_base_secs;
         self.switch_at = None;
         self.advanced = true;
         Some(self.next_loudness)
@@ -89,6 +92,7 @@ mod tests {
             underrun: false,
             switch_at: None,
             next_loudness: 0.5,
+            next_base_secs: 0.0,
             advanced: false,
         }
     }
@@ -111,5 +115,14 @@ mod tests {
         assert_eq!(out.switch_at, None);
         assert_eq!(out.frames_played, 200, "the next track's frames so far");
         assert_eq!(out.base_secs, 0.0);
+    }
+
+    #[test]
+    fn counts_the_queued_track_from_past_its_cut_silence() {
+        let mut out = output();
+        out.switch_at = Some(0);
+        out.next_base_secs = 1.5;
+        assert_eq!(out.played(24_000), Some(0.5));
+        assert_eq!(out.position(), 2.0);
     }
 }

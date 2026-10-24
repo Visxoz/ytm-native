@@ -97,6 +97,8 @@ pub struct Settings {
     /// The signed-in account has been served Premium formats, so songs
     /// without them, such as music videos, never mark it as not Premium.
     pub premium_account: bool,
+    /// Fade each track into the next, rather than playing them gaplessly.
+    pub crossfade: bool,
     /// Look for a newer version on GitHub now and then.
     pub check_updates: bool,
     pub window: Option<WindowGeometry>,
@@ -116,6 +118,7 @@ impl Default for Settings {
             quality: Quality::High,
             premium_audio: true,
             premium_account: false,
+            crossfade: false,
             check_updates: true,
             window: None,
         }
@@ -292,6 +295,7 @@ mod tests {
         let settings: Settings = serde_json::from_str(r#"{"volume":0.5}"#).unwrap();
         assert_eq!(settings.volume, 0.5);
         assert!(settings.normalise);
+        assert!(!settings.crossfade, "off until chosen");
         assert_eq!(settings.quality, Quality::High);
     }
 

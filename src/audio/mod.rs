@@ -7,6 +7,12 @@
 //! track runs out, the next one's samples follow in the same queue, and the
 //! device callback marks the sample where it becomes audible; only then does
 //! the app hear that the track changed.
+//!
+//! Crossfade: with a queued track to fade into, the engine holds the end of
+//! the current one back from the device. Once it is decoded to the end, its
+//! trailing silence is cut, and its last seconds are mixed under the next
+//! track's first, whose leading silence was cut as it opened. The mix sits
+//! in the queue like any samples, so the device callback does no more work.
 
 pub mod decode;
 mod engine;
@@ -27,6 +33,10 @@ use std::{
 use engine::Engine;
 use output::Output;
 use source::Download;
+
+/// The most silence cut from either side of a crossfade, so a quiet
+/// passage or a hidden track is not mistaken for the end.
+pub const SILENCE_TRIM_SECS: f64 = 4.0;
 
 /// A stream to play, as returned by the player endpoint.
 pub struct StreamSpec {
@@ -55,7 +65,7 @@ pub enum PlayerEvent {
 
 enum Command {
     Load(StreamSpec, Arc<Download>),
-    Queue(StreamSpec, Arc<Download>),
+    Queue(StreamSpec, Arc<Download>, f64),
     ClearNext,
     Seek(f64),
     Stop,
@@ -135,6 +145,7 @@ impl Player {
                 underrun: false,
                 switch_at: None,
                 next_loudness: 1.0,
+                next_base_secs: 0.0,
                 advanced: false,
             }),
             paused: AtomicBool::new(false),
@@ -164,13 +175,14 @@ impl Player {
         let _ = self.tx.send(Command::Load(spec, download));
     }
 
-    /// Queues the track to follow the current one without a gap, replacing
-    /// any queued before. Its download starts now.
-    pub fn queue_next(&self, spec: StreamSpec) {
+    /// Queues the track to follow the current one without a gap, or fading
+    /// into it over `crossfade_secs`, replacing any queued before. Its
+    /// download starts now.
+    pub fn queue_next(&self, spec: StreamSpec, crossfade_secs: f64) {
         self.shared.cancel_next();
         let download = Download::start(spec.url.clone(), spec.size, spec.headers.clone());
         *self.shared.next_download.lock().unwrap() = Some(Arc::clone(&download));
-        let _ = self.tx.send(Command::Queue(spec, download));
+        let _ = self.tx.send(Command::Queue(spec, download, crossfade_secs));
     }
 
     pub fn clear_next(&self) {

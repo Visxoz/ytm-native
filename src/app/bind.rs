@@ -120,6 +120,16 @@ impl App {
             app.player.clear_next();
             app.warm_premium();
         });
+        on!(on_set_crossfade, |app, value| {
+            app.update_settings(|s| s.crossfade = value);
+            // A track queued with the old setting is queued again.
+            {
+                let mut state = app.state.borrow_mut();
+                state.playback.queued = None;
+                state.playback.queue_tried = None;
+            }
+            app.player.clear_next();
+        });
         on!(on_set_autoplay, |app, value| app
             .update_settings(|s| s.autoplay = value));
         on!(on_set_check_updates, |app, value| {
