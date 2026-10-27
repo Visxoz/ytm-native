@@ -160,7 +160,13 @@ impl Download {
             self.changed.notify_all();
         }
         let state = self.state.lock().unwrap();
-        Ok(total == 0 || state.data.len() as u64 >= state.total)
+        let len = state.data.len() as u64;
+        // Only this thread adds to the data, so nothing past where the range
+        // started means an empty answer, which would be asked again forever.
+        if len == offset {
+            return Err("the server sent no bytes".into());
+        }
+        Ok(total == 0 || len >= state.total)
     }
 }
 
