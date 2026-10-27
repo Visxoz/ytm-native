@@ -12,7 +12,10 @@ use std::{
 };
 
 use super::App;
-use crate::streams::{self, ResolvedStream, premium};
+use crate::{
+    api::Api,
+    streams::{self, ResolvedStream, premium},
+};
 
 pub(super) const PREMIUM_UNKNOWN: u8 = 0;
 pub(super) const PREMIUM_YES: u8 = 1;
@@ -63,6 +66,12 @@ impl PremiumShared {
 
     pub(super) fn status(&self) -> u8 {
         self.status.load(Ordering::Relaxed)
+    }
+
+    /// The signed-in account's cookie, cloned so no lock is held across an
+    /// await.
+    fn cookie(&self) -> Option<String> {
+        self.cookie.read().unwrap().clone()
     }
 
     /// Takes the cookie of a new sign-in, or none on signing out, which says
@@ -177,131 +186,159 @@ async fn web_fallback(
     }
 }
 
+/// What a track's stream is resolved with, read from the app's state on the
+/// UI thread so the resolving can run, and run again, off it.
+struct Resolver {
+    api: Api,
+    premium: Arc<PremiumShared>,
+    video_id: String,
+    want_premium: bool,
+    max_kbps: Option<u64>,
+}
+
+impl Resolver {
+    /// Premium when signed in with Premium, otherwise the first plain-URL
+    /// client that answers, and signed in, the web client as a last resort.
+    async fn resolve(&self) -> Result<ResolvedStream, String> {
+        let Self {
+            api,
+            premium,
+            video_id,
+            want_premium,
+            ..
+        } = self;
+        let video_id = video_id.as_str();
+        let started = Instant::now();
+        let visitor = api.visitor_data(false).await?;
+        let cookie = premium.cookie().filter(|_| *want_premium);
+        if let Some(cookie) = cookie.as_deref().filter(|_| !premium.skipped()) {
+            match premium_player(premium).await {
+                Ok(player) => {
+                    match premium::resolve(video_id, Some(cookie), &visitor, &player, false, None)
+                        .await
+                    {
+                        Ok(premium::Outcome::Stream(stream)) => {
+                            premium.record_premium();
+                            log::info!(
+                                "{video_id}: Premium stream resolved in {} ms",
+                                started.elapsed().as_millis()
+                            );
+                            return Ok(stream);
+                        }
+                        Ok(premium::Outcome::NoPremiumFormats) => premium.record_miss(),
+                        Err(e) => {
+                            premium::diag(format!(
+                                "{video_id}: Premium path failed, using the free stream: {e}"
+                            ));
+                            premium.record_error();
+                        }
+                    }
+                }
+                Err(e) => premium::diag(format!("could not prepare the player: {e}")),
+            }
+        } else if let Some(cookie) = cookie.filter(|_| premium.take_recheck()) {
+            // Checked off the playback path: this song plays the free
+            // stream at once, and the next one gets Premium if it is back.
+            let premium = Arc::clone(premium);
+            let (video_id, visitor) = (video_id.to_owned(), visitor.clone());
+            tokio::spawn(async move {
+                let Ok(player) = premium_player(&premium).await else {
+                    return;
+                };
+                match premium::resolve(&video_id, Some(&cookie), &visitor, &player, false, None)
+                    .await
+                {
+                    Ok(premium::Outcome::Stream(_)) => premium.record_premium(),
+                    Ok(premium::Outcome::NoPremiumFormats) => premium.record_miss(),
+                    Err(e) => premium::diag(format!("{video_id}: Premium check failed: {e}")),
+                }
+            });
+        } else if !want_premium
+            && premium_dry_run()
+            && let Ok(player) = premium_player(premium).await
+        {
+            // Times the Premium path without an account; the result is
+            // discarded as YouTube won't serve it anonymously.
+            let dry = Instant::now();
+            let result = premium::resolve(video_id, None, &visitor, &player, false, None).await;
+            premium::diag(format!(
+                "{video_id}: dry run {} in {} ms",
+                if result.is_ok() { "resolved" } else { "failed" },
+                dry.elapsed().as_millis()
+            ));
+        }
+        self.free(&visitor).await
+    }
+
+    /// The first plain-URL client that answers, and signed in, the web
+    /// client as a last resort.
+    async fn free(&self, visitor: &str) -> Result<ResolvedStream, String> {
+        let Self {
+            api,
+            premium,
+            video_id,
+            max_kbps,
+            ..
+        } = self;
+        let (video_id, max_kbps) = (video_id.as_str(), *max_kbps);
+        let free = Instant::now();
+        let result = match streams::resolve(video_id, visitor, max_kbps).await {
+            Ok(stream) => Ok(stream),
+            // YouTube sometimes bot-checks a visitor ID; retry with a fresh one.
+            Err(e) => {
+                log::debug!("retrying with a new visitor ID: {e}");
+                let visitor = api.visitor_data(true).await?;
+                streams::resolve(video_id, &visitor, max_kbps).await
+            }
+        };
+        log::info!(
+            "{video_id}: free stream resolved in {} ms",
+            free.elapsed().as_millis()
+        );
+        match result {
+            Ok(stream) => Ok(stream),
+            // Signed in, the web client's scrambled URLs are a last
+            // resort, read by the Premium path's solver whether or not
+            // the account has Premium.
+            Err(e) => match premium.cookie() {
+                Some(cookie) => web_fallback(premium, video_id, &cookie, visitor, max_kbps)
+                    .await
+                    .map_err(|web| {
+                        log::debug!("{video_id}: web client fallback failed: {web}");
+                        e
+                    }),
+                None => Err(e),
+            },
+        }
+    }
+}
+
 impl App {
-    /// Resolves a stream: Premium when signed in with Premium, otherwise the
-    /// first plain-URL client that answers, and signed in, the web client as
-    /// a last resort. Reuses a prefetched one.
+    fn resolver(&self, video_id: String) -> Resolver {
+        let state = self.state.borrow();
+        let want_premium = state.signed_in
+            && state.settings.premium_audio
+            && state.playback.force_free.as_deref() != Some(video_id.as_str());
+        Resolver {
+            api: self.api.clone(),
+            premium: Arc::clone(&self.premium),
+            video_id,
+            want_premium,
+            max_kbps: state.settings.quality.max_kbps(),
+        }
+    }
+
+    /// Resolves a stream, or reuses a prefetched one.
     pub(super) fn resolve_future(
         &self,
         video_id: String,
         prefetched: Option<ResolvedStream>,
     ) -> impl Future<Output = Result<ResolvedStream, String>> + Send + 'static {
-        let api = self.api.clone();
-        let premium = Arc::clone(&self.premium);
-        let (want_premium, max_kbps) = {
-            let state = self.state.borrow();
-            let want_premium = state.signed_in
-                && state.settings.premium_audio
-                && state.playback.force_free.as_deref() != Some(video_id.as_str());
-            (want_premium, state.settings.quality.max_kbps())
-        };
-        let dry_run = !want_premium && premium_dry_run();
+        let resolver = self.resolver(video_id);
         async move {
-            if let Some(stream) = prefetched {
-                return Ok(stream);
-            }
-            let started = Instant::now();
-            let visitor = api.visitor_data(false).await?;
-            let cookie = premium
-                .cookie
-                .read()
-                .unwrap()
-                .clone()
-                .filter(|_| want_premium);
-            if let Some(cookie) = cookie.as_deref().filter(|_| !premium.skipped()) {
-                match premium_player(&premium).await {
-                    Ok(player) => {
-                        match premium::resolve(
-                            &video_id,
-                            Some(cookie),
-                            &visitor,
-                            &player,
-                            false,
-                            None,
-                        )
-                        .await
-                        {
-                            Ok(premium::Outcome::Stream(stream)) => {
-                                premium.record_premium();
-                                log::info!(
-                                    "{video_id}: Premium stream resolved in {} ms",
-                                    started.elapsed().as_millis()
-                                );
-                                return Ok(stream);
-                            }
-                            Ok(premium::Outcome::NoPremiumFormats) => premium.record_miss(),
-                            Err(e) => {
-                                premium::diag(format!(
-                                    "{video_id}: Premium path failed, using the free stream: {e}"
-                                ));
-                                premium.record_error();
-                            }
-                        }
-                    }
-                    Err(e) => premium::diag(format!("could not prepare the player: {e}")),
-                }
-            } else if let Some(cookie) = cookie.filter(|_| premium.take_recheck()) {
-                // Checked off the playback path: this song plays the free
-                // stream at once, and the next one gets Premium if it is back.
-                let premium = Arc::clone(&premium);
-                let (video_id, visitor) = (video_id.clone(), visitor.clone());
-                tokio::spawn(async move {
-                    let Ok(player) = premium_player(&premium).await else {
-                        return;
-                    };
-                    match premium::resolve(&video_id, Some(&cookie), &visitor, &player, false, None)
-                        .await
-                    {
-                        Ok(premium::Outcome::Stream(_)) => premium.record_premium(),
-                        Ok(premium::Outcome::NoPremiumFormats) => premium.record_miss(),
-                        Err(e) => premium::diag(format!("{video_id}: Premium check failed: {e}")),
-                    }
-                });
-            } else if dry_run && let Ok(player) = premium_player(&premium).await {
-                // Times the Premium path without an account; the result is
-                // discarded as YouTube won't serve it anonymously.
-                let dry = Instant::now();
-                let result =
-                    premium::resolve(&video_id, None, &visitor, &player, false, None).await;
-                premium::diag(format!(
-                    "{video_id}: dry run {} in {} ms",
-                    if result.is_ok() { "resolved" } else { "failed" },
-                    dry.elapsed().as_millis()
-                ));
-            }
-            let free = Instant::now();
-            let result = match streams::resolve(&video_id, &visitor, max_kbps).await {
-                Ok(stream) => Ok(stream),
-                // YouTube sometimes bot-checks a visitor ID; retry with a fresh one.
-                Err(e) => {
-                    log::debug!("retrying with a new visitor ID: {e}");
-                    let visitor = api.visitor_data(true).await?;
-                    streams::resolve(&video_id, &visitor, max_kbps).await
-                }
-            };
-            log::info!(
-                "{video_id}: free stream resolved in {} ms",
-                free.elapsed().as_millis()
-            );
-            match result {
-                Ok(stream) => Ok(stream),
-                // Signed in, the web client's scrambled URLs are a last
-                // resort, read by the Premium path's solver whether or not
-                // the account has Premium.
-                Err(e) => {
-                    let cookie = premium.cookie.read().unwrap().clone();
-                    match cookie {
-                        Some(cookie) => {
-                            web_fallback(&premium, &video_id, &cookie, &visitor, max_kbps)
-                                .await
-                                .map_err(|web| {
-                                    log::debug!("{video_id}: web client fallback failed: {web}");
-                                    e
-                                })
-                        }
-                        None => Err(e),
-                    }
-                }
+            match prefetched {
+                Some(stream) => Ok(stream),
+                None => resolver.resolve().await,
             }
         }
     }
