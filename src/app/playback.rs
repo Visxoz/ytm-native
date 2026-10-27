@@ -13,7 +13,6 @@ use super::{
     resolve::{PREMIUM_NO, PREMIUM_YES, premium_dry_run},
 };
 use crate::{
-    audio::{Opening, Source, StreamSpec},
     queue::Repeat,
     streams::{ResolvedStream, premium},
 };
@@ -23,21 +22,6 @@ const RESTART_AFTER_SECS: f64 = 3.0;
 /// Stream URLs last about six hours; refresh well before.
 pub(super) const PREFETCH_FRESH: Duration = Duration::from_secs(60 * 60);
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
-
-pub(super) fn stream_spec(stream: ResolvedStream, start_at: f64) -> StreamSpec {
-    StreamSpec {
-        source: Source {
-            url: stream.url,
-            size: stream.size,
-            headers: stream.headers,
-        },
-        opening: Opening {
-            mime: stream.mime,
-            loudness_db: stream.loudness_db,
-            start_at,
-        },
-    }
-}
 
 impl App {
     /// Loads and plays the queue's current track.
@@ -76,7 +60,7 @@ impl App {
                 return;
             }
             match result {
-                Ok(stream) => app.load_stream(stream),
+                Ok(stream) => app.load_stream(&track.id, stream),
                 Err(e) => app.playback_failed(&track.title, &e),
             }
         });
@@ -87,10 +71,10 @@ impl App {
         self.state.borrow_mut().playback.take_prefetched(id)
     }
 
-    fn load_stream(self: &Rc<Self>, stream: ResolvedStream) {
+    fn load_stream(self: &Rc<Self>, id: &str, stream: ResolvedStream) {
         self.show_stream(&stream);
         let start_at = self.take_resume_position();
-        self.player.load(stream_spec(stream, start_at));
+        self.player.load(self.stream_spec(id, stream, start_at));
     }
 
     fn playback_failed(self: &Rc<Self>, title: &str, error: &str) {

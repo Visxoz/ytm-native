@@ -3,7 +3,7 @@
 
 use std::rc::Rc;
 
-use super::{App, playback::stream_spec};
+use super::App;
 use crate::{api::Track, audio::SILENCE_TRIM_SECS};
 
 /// How long before a track ends the next one is queued to follow it with no
@@ -81,7 +81,7 @@ impl App {
             match result {
                 Ok(stream) if still_next => {
                     app.player
-                        .queue_next(stream_spec(stream.clone(), 0.0), crossfade);
+                        .queue_next(app.stream_spec(&next_id, stream.clone(), 0.0), crossfade);
                     app.state.borrow_mut().playback.queued = Some((next_id, stream));
                 }
                 Ok(_) => {}

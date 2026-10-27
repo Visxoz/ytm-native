@@ -14,6 +14,7 @@ use std::{
 use super::App;
 use crate::{
     api::Api,
+    audio::{Opening, Source, StreamSpec},
     streams::{self, ResolvedStream, premium},
 };
 
@@ -165,6 +166,33 @@ async fn premium_player(shared: &PremiumShared) -> Result<Arc<premium::Player>, 
     }
 }
 
+/// The web client's stream for `video_id` through the Premium path's
+/// solver, preparing the player first: a Premium one, or with `any_format`
+/// the best there is.
+async fn solved_stream(
+    shared: &PremiumShared,
+    video_id: &str,
+    cookie: &str,
+    visitor: &str,
+    any_format: bool,
+    max_kbps: Option<u64>,
+) -> Result<ResolvedStream, String> {
+    let player = premium_player(shared).await?;
+    match premium::resolve(
+        video_id,
+        Some(cookie),
+        visitor,
+        &player,
+        any_format,
+        max_kbps,
+    )
+    .await?
+    {
+        premium::Outcome::Stream(stream) => Ok(stream),
+        premium::Outcome::NoPremiumFormats => Err("no Premium formats".into()),
+    }
+}
+
 /// The best stream the web client has, through the Premium path's solver,
 /// for when no client hands out plain URLs.
 async fn web_fallback(
@@ -174,15 +202,19 @@ async fn web_fallback(
     visitor: &str,
     max_kbps: Option<u64>,
 ) -> Result<ResolvedStream, String> {
-    let player = premium_player(shared).await?;
-    match premium::resolve(video_id, Some(cookie), visitor, &player, true, max_kbps).await? {
-        premium::Outcome::Stream(stream) => {
-            premium::diag(format!(
-                "{video_id}: no client gave a plain URL; playing through the web client"
-            ));
-            Ok(stream)
-        }
-        premium::Outcome::NoPremiumFormats => Err("no formats".into()),
+    let stream = solved_stream(shared, video_id, cookie, visitor, true, max_kbps).await?;
+    premium::diag(format!(
+        "{video_id}: no client gave a plain URL; playing through the web client"
+    ));
+    Ok(stream)
+}
+
+/// The download's part of a stream.
+fn source(stream: ResolvedStream) -> Source {
+    Source {
+        url: stream.url,
+        size: stream.size,
+        headers: stream.headers,
     }
 }
 
@@ -270,6 +302,22 @@ impl Resolver {
         self.free(&visitor).await
     }
 
+    /// A fresh URL for a stream this resolved, asked for the same way so it
+    /// comes back as the same file. Counts nothing towards the Premium
+    /// path's state, as the song already counted when first resolved.
+    async fn refresh(&self, was_premium: bool) -> Result<ResolvedStream, String> {
+        let video_id = self.video_id.as_str();
+        premium::diag(format!(
+            "{video_id}: stream refused partway; asking for a fresh URL"
+        ));
+        let visitor = self.api.visitor_data(false).await?;
+        if !was_premium {
+            return self.free(&visitor).await;
+        }
+        let cookie = self.premium.cookie().ok_or("signed out")?;
+        solved_stream(&self.premium, video_id, &cookie, &visitor, false, None).await
+    }
+
     /// The first plain-URL client that answers, and signed in, the web
     /// client as a last resort.
     async fn free(&self, visitor: &str) -> Result<ResolvedStream, String> {
@@ -340,6 +388,38 @@ impl App {
                 Some(stream) => Ok(stream),
                 None => resolver.resolve().await,
             }
+        }
+    }
+
+    /// The player's spec for `video_id`'s stream. Should googlevideo refuse
+    /// its URL partway, the download's thread waits on a fresh one.
+    pub(super) fn stream_spec(
+        &self,
+        video_id: &str,
+        mut stream: ResolvedStream,
+        start_at: f64,
+    ) -> StreamSpec {
+        let resolver = Arc::new(self.resolver(video_id.to_owned()));
+        let (rt, was_premium) = (self.rt.clone(), stream.premium);
+        let refresh = Box::new(move || {
+            let resolver = Arc::clone(&resolver);
+            // Spawned and its handle waited on, rather than run here: a
+            // runtime shutting down as the app closes drops the task, which
+            // ends the wait with an error, where driving its requests from
+            // here would panic.
+            let task = rt.spawn(async move { resolver.refresh(was_premium).await });
+            rt.block_on(task)
+                .map_err(|_| "the refresh did not finish".to_owned())?
+                .map(source)
+        });
+        StreamSpec {
+            opening: Opening {
+                mime: std::mem::take(&mut stream.mime),
+                loudness_db: stream.loudness_db,
+                start_at,
+            },
+            refresh,
+            source: source(stream),
         }
     }
 

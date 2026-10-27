@@ -33,16 +33,17 @@ use std::{
 use engine::Engine;
 use output::Output;
 use source::Download;
-pub use source::Source;
+pub use source::{Refresh, Source};
 
 /// The most silence cut from either side of a crossfade, so a quiet
 /// passage or a hidden track is not mistaken for the end.
 pub const SILENCE_TRIM_SECS: f64 = 4.0;
 
-/// A stream to play: where its bytes come from and what the engine opens
-/// them with.
+/// A stream to play: where its bytes come from, how to ask for them again
+/// should googlevideo refuse the URL, and what the engine opens them with.
 pub struct StreamSpec {
     pub source: Source,
+    pub refresh: Refresh,
     pub opening: Opening,
 }
 
@@ -58,7 +59,7 @@ pub struct Opening {
 impl StreamSpec {
     /// Starts the download, handing it the source rather than a copy.
     fn start(self) -> (Arc<Download>, Opening) {
-        (Download::start(self.source), self.opening)
+        (Download::start(self.source, self.refresh), self.opening)
     }
 }
 
