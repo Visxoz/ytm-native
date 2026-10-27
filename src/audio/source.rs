@@ -19,6 +19,14 @@ const MAX_RESERVE: u64 = 64 * 1024 * 1024;
 const MAX_RETRIES: u32 = 4;
 const RETRY_DELAY: Duration = Duration::from_millis(500);
 
+/// Where a stream's bytes come from.
+pub struct Source {
+    pub url: String,
+    /// Length YouTube reports up front, or 0 if it did not.
+    pub size: u64,
+    pub headers: Vec<(String, String)>,
+}
+
 #[derive(Default)]
 struct State {
     data: Vec<u8>,
@@ -35,19 +43,19 @@ pub struct Download {
 }
 
 impl Download {
-    /// Starts fetching `url`, whose length YouTube reports up front.
-    pub fn start(url: String, total: u64, headers: Vec<(String, String)>) -> Arc<Self> {
+    /// Starts fetching `source`.
+    pub fn start(source: Source) -> Arc<Self> {
         let download = Arc::new(Self::default());
         {
             let mut state = download.state.lock().unwrap();
-            state.total = total;
+            state.total = source.size;
             // Sized once, as growing by doubling can hold twice the file.
-            state.data = Vec::with_capacity(total.min(MAX_RESERVE) as usize);
+            state.data = Vec::with_capacity(source.size.min(MAX_RESERVE) as usize);
         }
         let worker = Arc::clone(&download);
         thread::Builder::new()
             .name("stream-download".into())
-            .spawn(move || worker.run(&url, &headers))
+            .spawn(move || worker.run(&source.url, &source.headers))
             .expect("download thread spawns");
         download
     }

@@ -33,21 +33,33 @@ use std::{
 use engine::Engine;
 use output::Output;
 use source::Download;
+pub use source::Source;
 
 /// The most silence cut from either side of a crossfade, so a quiet
 /// passage or a hidden track is not mistaken for the end.
 pub const SILENCE_TRIM_SECS: f64 = 4.0;
 
-/// A stream to play, as returned by the player endpoint.
+/// A stream to play: where its bytes come from and what the engine opens
+/// them with.
 pub struct StreamSpec {
-    pub url: String,
-    pub size: u64,
+    pub source: Source,
+    pub opening: Opening,
+}
+
+/// What the engine opens a stream with, once the download has its source.
+pub struct Opening {
     pub mime: String,
-    pub headers: Vec<(String, String)>,
     /// Integrated loudness YouTube measured, used to even out volume.
     pub loudness_db: Option<f32>,
     /// Where to start, in seconds, when resuming a track.
     pub start_at: f64,
+}
+
+impl StreamSpec {
+    /// Starts the download, handing it the source rather than a copy.
+    fn start(self) -> (Arc<Download>, Opening) {
+        (Download::start(self.source), self.opening)
+    }
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -64,8 +76,8 @@ pub enum PlayerEvent {
 }
 
 enum Command {
-    Load(StreamSpec, Arc<Download>),
-    Queue(StreamSpec, Arc<Download>, f64),
+    Load(Opening, Arc<Download>),
+    Queue(Opening, Arc<Download>, f64),
     ClearNext,
     Seek(f64),
     Stop,
@@ -169,10 +181,10 @@ impl Player {
         // Cancel first so a decoder blocked on the old download wakes up.
         self.shared.cancel_current();
         self.shared.cancel_next();
-        let download = Download::start(spec.url.clone(), spec.size, spec.headers.clone());
+        let (download, opening) = spec.start();
         *self.shared.download.lock().unwrap() = Some(Arc::clone(&download));
         self.shared.paused.store(false, Ordering::Relaxed);
-        let _ = self.tx.send(Command::Load(spec, download));
+        let _ = self.tx.send(Command::Load(opening, download));
     }
 
     /// Queues the track to follow the current one without a gap, or fading
@@ -180,9 +192,11 @@ impl Player {
     /// download starts now.
     pub fn queue_next(&self, spec: StreamSpec, crossfade_secs: f64) {
         self.shared.cancel_next();
-        let download = Download::start(spec.url.clone(), spec.size, spec.headers.clone());
+        let (download, opening) = spec.start();
         *self.shared.next_download.lock().unwrap() = Some(Arc::clone(&download));
-        let _ = self.tx.send(Command::Queue(spec, download, crossfade_secs));
+        let _ = self
+            .tx
+            .send(Command::Queue(opening, download, crossfade_secs));
     }
 
     pub fn clear_next(&self) {

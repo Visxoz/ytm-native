@@ -13,7 +13,7 @@ use super::{
     resolve::{PREMIUM_NO, PREMIUM_YES, premium_dry_run},
 };
 use crate::{
-    audio::StreamSpec,
+    audio::{Opening, Source, StreamSpec},
     queue::Repeat,
     streams::{ResolvedStream, premium},
 };
@@ -26,12 +26,16 @@ const MAX_CONSECUTIVE_FAILURES: u32 = 3;
 
 pub(super) fn stream_spec(stream: ResolvedStream, start_at: f64) -> StreamSpec {
     StreamSpec {
-        url: stream.url,
-        size: stream.size,
-        mime: stream.mime,
-        headers: stream.headers,
-        loudness_db: stream.loudness_db,
-        start_at,
+        source: Source {
+            url: stream.url,
+            size: stream.size,
+            headers: stream.headers,
+        },
+        opening: Opening {
+            mime: stream.mime,
+            loudness_db: stream.loudness_db,
+            start_at,
+        },
     }
 }
 

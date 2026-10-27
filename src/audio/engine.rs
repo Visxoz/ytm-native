@@ -16,7 +16,7 @@ use std::{
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 
 use super::{
-    Command, PlayerEvent, SILENCE_TRIM_SECS, Shared, StreamSpec,
+    Command, Opening, PlayerEvent, SILENCE_TRIM_SECS, Shared,
     decode::{Decoded, Decoder},
     loudness_gain,
     output::{Output, fill},
@@ -223,9 +223,9 @@ impl Engine {
                 }
             };
             match command {
-                Some(Command::Load(spec, download)) => self.load(spec, download),
-                Some(Command::Queue(spec, download, crossfade_secs)) => {
-                    self.queue(spec, download, crossfade_secs)
+                Some(Command::Load(opening, download)) => self.load(opening, download),
+                Some(Command::Queue(opening, download, crossfade_secs)) => {
+                    self.queue(opening, download, crossfade_secs)
                 }
                 Some(Command::ClearNext) => self.drop_next(),
                 Some(Command::Seek(secs)) => self.seek(secs),
@@ -254,7 +254,7 @@ impl Engine {
         self.shared.output.lock().unwrap().reset(0.0);
     }
 
-    fn queue(&mut self, spec: StreamSpec, download: Arc<Download>, crossfade_secs: f64) {
+    fn queue(&mut self, opening: Opening, download: Arc<Download>, crossfade_secs: f64) {
         self.drop_next();
         let (rate, channels) = {
             let output = self.shared.output.lock().unwrap();
@@ -271,7 +271,7 @@ impl Engine {
             .reserve_exact(hold.saturating_sub(self.held.len()));
         let (tx, opened) = mpsc::channel();
         let reader = download.reader();
-        let mime = spec.mime;
+        let mime = opening.mime;
         let spawned = thread::Builder::new()
             .name("next-track".into())
             .spawn(move || {
@@ -283,7 +283,7 @@ impl Engine {
         }
         self.next = Some(Next {
             download,
-            loudness: loudness_gain(spec.loudness_db),
+            loudness: loudness_gain(opening.loudness_db),
             opened,
             ready: None,
             hold,
@@ -492,11 +492,11 @@ impl Engine {
         ahead < BUFFER_AHEAD_SECS || self.held.len() < self.hold()
     }
 
-    fn load(&mut self, spec: StreamSpec, download: Arc<Download>) {
+    fn load(&mut self, opening: Opening, download: Arc<Download>) {
         self.clear();
-        self.shared.set_loudness(loudness_gain(spec.loudness_db));
+        self.shared.set_loudness(loudness_gain(opening.loudness_db));
 
-        let mut decoder = match Decoder::open(download.reader(), &spec.mime) {
+        let mut decoder = match Decoder::open(download.reader(), &opening.mime) {
             Ok(decoder) => decoder,
             Err(e) => {
                 // A newer load cancelled this one; stay quiet.
@@ -513,14 +513,14 @@ impl Engine {
         }
         log::debug!(
             "playing {} at {} Hz, {} ch",
-            spec.mime,
+            opening.mime,
             decoder.rate,
             decoder.channels
         );
-        if spec.start_at > 0.0 {
-            match decoder.seek(spec.start_at) {
+        if opening.start_at > 0.0 {
+            match decoder.seek(opening.start_at) {
                 Ok(reached) => self.shared.output.lock().unwrap().reset(reached),
-                Err(e) => log::warn!("could not resume at {:.0} s: {e}", spec.start_at),
+                Err(e) => log::warn!("could not resume at {:.0} s: {e}", opening.start_at),
             }
         }
         self.track = Some(Track {
