@@ -6,6 +6,7 @@ use slint::ComponentHandle;
 use url::Url;
 use wry::{
     NewWindowResponse, PageLoadEvent, Rect, WebContext, WebView, WebViewBuilder,
+    WebViewBuilderExtWindows,
     dpi::{LogicalPosition, PhysicalSize},
 };
 
@@ -16,6 +17,18 @@ const START_URL: &str = "https://accounts.google.com/ServiceLogin?service=youtub
 const MUSIC_URL: &str = "https://music.youtube.com/";
 /// A signed-in session has one of these.
 const SESSION_COOKIES: &[&str] = &["SAPISID", "__Secure-3PAPISID"];
+/// Google sets __Secure-1PSIDRTS and __Secure-3PSIDRTS, which last minutes,
+/// only on a session bound to the browser.
+const BOUND_SESSION_COOKIE: &str = "PSIDRTS";
+/// Turns off Device Bound Session Credentials. With them, WebView2 binds the
+/// session to a key only it holds, and Google signs out the copy the app
+/// keeps once the window closes and nothing refreshes it. The runtime ignores
+/// feature names it lacks, so the list names each variant. Passing arguments
+/// replaces wry's own, so its msWebOOUI, msPdfOOUI and msSmartScreenProtection
+/// are repeated here; its autoplay switch is left out, as sign-in plays
+/// nothing.
+const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,\
+    DeviceBoundSessions,DeviceBoundSessionsForRestrictedSites,EnableBoundSessionCredentials";
 
 const MUSIC_HOST: &str = "music.youtube.com";
 /// Sign-in and cookie consent hosts, allowed on any path.
@@ -125,6 +138,7 @@ impl GoogleSignIn {
         let webview = WebViewBuilder::new_with_web_context(&mut self.context)
             .with_url(START_URL)
             .with_incognito(true)
+            .with_additional_browser_args(BROWSER_ARGS)
             .with_bounds(bounds(&self.window))
             .with_on_page_load_handler(move |event, _| {
                 if matches!(event, PageLoadEvent::Finished) {
@@ -164,6 +178,16 @@ impl GoogleSignIn {
         let cookies = webview.cookies_for_url(MUSIC_URL).ok()?;
         if !cookies.iter().any(|c| SESSION_COOKIES.contains(&c.name())) {
             return None;
+        }
+        if cookies
+            .iter()
+            .any(|c| c.name().ends_with(BOUND_SESSION_COOKIE))
+        {
+            // BROWSER_ARGS did not take: a runtime that renamed the feature,
+            // WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS or a policy replacing
+            // them, or an account that insists on binding. Kept rather than
+            // refused, as it works until the session goes unrefreshed.
+            log::warn!("Google bound the sign-in to the sign-in window, so it will lapse");
         }
         Some(
             cookies
