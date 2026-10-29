@@ -32,8 +32,10 @@ $crates = @(
         Hint    = 'Slint changed the renderer. Check whether it still copies font data, and update or drop the patch.'
     },
     @{
-        # Playlists the signed-in user owns, and no panic when YouTube refuses
-        # a visitor ID. Pinned with "=" in Cargo.toml, so read it from there.
+        # Playlists the signed-in user owns, and visitor IDs fetched from the
+        # visitor_id endpoint, once for requests arriving together, with an
+        # error rather than a panic when YouTube refuses. Pinned with "=" in
+        # Cargo.toml, so read it from there.
         Name    = 'rustypipe'
         Version = {
             if ($manifest -notmatch '(?m)^rustypipe = \{ version = "=([^"]+)"') {
@@ -41,7 +43,7 @@ $crates = @(
             }
             $Matches[1]
         }
-        Hint    = 'Check whether rustypipe now reads editable playlist headers and returns visitor data errors, and update or drop the patch.'
+        Hint    = 'Check whether rustypipe now reads editable playlist headers, and how it fetches visitor data, and update or drop the patch.'
     }
 )
 

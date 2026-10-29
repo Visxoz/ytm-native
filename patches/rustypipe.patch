@@ -1,3 +1,28 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 542a882..224a195 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -147,6 +147,7 @@ features = [
+     "macros",
+     "time",
+     "process",
++    "sync",
+ ]
+ 
+ [dependencies.tracing]
+diff --git a/src/client/mod.rs b/src/client/mod.rs
+index 06386bc..3904e76 100644
+--- a/src/client/mod.rs
++++ b/src/client/mod.rs
+@@ -348,7 +348,7 @@ const DISABLE_PRETTY_PRINT_PARAMETER: &str = "prettyPrint=false";
+ 
+ // Web client
+ const DESKTOP_CLIENT_VERSION: &str = "2.20241216.05.00";
+-const DESKTOP_MUSIC_CLIENT_VERSION: &str = "1.20241216.01.00";
++pub(crate) const DESKTOP_MUSIC_CLIENT_VERSION: &str = "1.20241216.01.00";
+ const MOBILE_CLIENT_VERSION: &str = "2.20241217.07.00";
+ const TV_CLIENT_VERSION: &str = "7.20241211.14.00";
+ 
 diff --git a/src/client/response/music_playlist.rs b/src/client/response/music_playlist.rs
 index 84202f0..63f2fdb 100644
 --- a/src/client/response/music_playlist.rs
@@ -52,10 +77,140 @@ index 84202f0..63f2fdb 100644
  #[derive(Debug, Deserialize)]
  #[serde(rename_all = "camelCase")]
 diff --git a/src/util/visitor_data.rs b/src/util/visitor_data.rs
-index 8bc64c7..2de2cfe 100644
+index 8bc64c7..0d050eb 100644
 --- a/src/util/visitor_data.rs
 +++ b/src/util/visitor_data.rs
-@@ -110,7 +110,7 @@ impl VisitorDataCache {
+@@ -1,20 +1,36 @@
+ use std::{
+     collections::HashMap,
+-    sync::{atomic::AtomicU32, Arc, RwLock},
++    sync::{
++        atomic::{AtomicU32, Ordering},
++        Arc, RwLock,
++    },
+ };
+ 
+ use once_cell::sync::Lazy;
+ use rand::Rng;
+ use regex::Regex;
+ use reqwest::{header, Client};
++use serde::Deserialize;
+ use time::OffsetDateTime;
+ 
+ use crate::{
+-    client::{PoToken, CONSENT_COOKIE, YOUTUBE_MUSIC_HOME_URL},
++    client::{
++        response::ResponseContext, PoToken, CONSENT_COOKIE, DESKTOP_MUSIC_CLIENT_VERSION,
++        YOUTUBE_MUSIC_HOME_URL,
++    },
+     error::{Error, ExtractionError},
+     util,
+ };
+ 
++const YOUTUBE_MUSIC_VISITOR_ID_URL: &str =
++    "https://music.youtube.com/youtubei/v1/visitor_id?prettyPrint=false";
++
++#[derive(Deserialize)]
++#[serde(rename_all = "camelCase")]
++struct VisitorIdResponse {
++    response_context: ResponseContext,
++}
++
+ /// To increase privacy and possibly circumvent rate limits, RustyPipe uses multiple
+ /// visitor data IDs. These are held in this cache object.
+ ///
+@@ -38,6 +54,11 @@ struct VisitorDataCacheRef {
+     req_limit: u32,
+     /// Maximum size of the cache
+     max_size: usize,
++    /// Held while filling an empty cache, so that requests arriving together
++    /// share one fetch. Holds the last finished attempt's error.
++    filling: tokio::sync::Mutex<Option<Error>>,
++    /// Attempts to fill an empty cache that have finished
++    fill_attempts: AtomicU32,
+ }
+ 
+ static VISITOR_DATA_REGEX: Lazy<Regex> =
+@@ -53,6 +74,8 @@ impl VisitorDataCache {
+                 http,
+                 req_limit,
+                 max_size: max_size - 1,
++                filling: Default::default(),
++                fill_attempts: Default::default(),
+             }
+             .into(),
+         }
+@@ -60,7 +83,68 @@ impl VisitorDataCache {
+ 
+     /// Fetch a new visitor data ID from YouTube
+     async fn fetch_visitor_data(&self) -> Result<String, Error> {
+-        tracing::debug!("getting YT visitor data");
++        // The visitor_id endpoint answers with a small JSON reply. The home
++        // page is only a fallback, as YouTube answers repeated loads of it
++        // with a redirect to google.com/sorry. When the request to the
++        // endpoint fails, or it is already refusing this IP with a 429 or a
++        // redirect, the page, on the same host, would fail too.
++        match self.fetch_visitor_data_api().await {
++            Err(e @ (Error::Http(_) | Error::HttpStatus(300..=399 | 429, _))) => Err(e),
++            Err(e) => {
++                tracing::warn!("visitor_id endpoint failed: {e}; trying the home page");
++                self.fetch_visitor_data_page().await
++            }
++            ok => ok,
++        }
++    }
++
++    /// Fetch a visitor data ID from the visitor_id endpoint
++    async fn fetch_visitor_data_api(&self) -> Result<String, Error> {
++        tracing::debug!("getting YT visitor data from the visitor_id endpoint");
++        let resp = self
++            .inner
++            .http
++            .post(YOUTUBE_MUSIC_VISITOR_ID_URL)
++            .header(header::ORIGIN, YOUTUBE_MUSIC_HOME_URL)
++            .header(header::REFERER, YOUTUBE_MUSIC_HOME_URL)
++            .json(&serde_json::json!({
++                "context": {
++                    "client": {
++                        "clientName": "WEB_REMIX",
++                        "clientVersion": DESKTOP_MUSIC_CLIENT_VERSION,
++                    }
++                }
++            }))
++            .send()
++            .await?;
++        let status = resp.status();
++        if !status.is_success() {
++            return Err(Error::HttpStatus(
++                status.as_u16(),
++                "visitor_id endpoint refused".into(),
++            ));
++        }
++        // Parsed here rather than by reqwest, so that a reply in another
++        // shape is invalid data, which falls back to the page, rather than
++        // an HTTP error, which does not
++        let body = resp.bytes().await?;
++        serde_json::from_slice::<VisitorIdResponse>(&body)
++            .map_err(ExtractionError::from)?
++            .response_context
++            .visitor_data
++            // Sent as a header with every request, which a value that cannot
++            // be one would fail without ever leaving the cache
++            .filter(|vd| !vd.is_empty() && header::HeaderValue::from_str(vd).is_ok())
++            .ok_or_else(|| {
++                Error::Extraction(ExtractionError::InvalidData(
++                    "visitor_id endpoint returned no visitor data".into(),
++                ))
++            })
++    }
++
++    /// Fetch a visitor data ID from the YouTube Music home page
++    async fn fetch_visitor_data_page(&self) -> Result<String, Error> {
++        tracing::debug!("getting YT visitor data from the home page");
+         let resp = self
+             .inner
+             .http
+@@ -110,7 +194,7 @@ impl VisitorDataCache {
  
      /// Fetch a new visitor data ID and store it in the cache
      pub async fn new_visitor_data(&self) -> Result<String, Error> {
@@ -64,3 +219,100 @@ index 8bc64c7..2de2cfe 100644
  
          self.inner
              .req_counter
+@@ -131,31 +215,52 @@ impl VisitorDataCache {
+ 
+     /// Get a visitor data ID from the cache
+     pub async fn get(&self) -> Result<String, Error> {
+-        // Request a new visitor data ID in the background after a set number of requests
+-        if self
+-            .inner
+-            .req_counter
+-            .fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+-            >= self.inner.req_limit
+-        {
+-            self.inner
+-                .req_counter
+-                .store(0, std::sync::atomic::Ordering::Relaxed);
+-            let nc = self.clone();
+-            tokio::spawn(async move { nc.new_visitor_data().await });
++        if let Some(vd) = self.pick() {
++            // Request a new visitor data ID in the background after a set number of requests.
++            // Only requests served from the cache count, so that those waiting on an empty
++            // one start no fetches of their own.
++            if self.inner.req_counter.fetch_add(1, Ordering::Relaxed) >= self.inner.req_limit {
++                self.inner.req_counter.store(0, Ordering::Relaxed);
++                let nc = self.clone();
++                tokio::spawn(async move {
++                    if let Err(e) = nc.new_visitor_data().await {
++                        tracing::warn!("could not refresh visitor data: {e}");
++                    }
++                });
++            }
++            return Ok(vd);
+         }
+-
+-        {
+-            let vds = self.inner.visitor_data.read().unwrap();
+-            if !vds.is_empty() {
+-                let mut rng = rand::rng();
+-                let vd = vds[rng.random_range(0..vds.len())].to_owned();
+-                tracing::debug!("visitor data {vd} picked from cache");
+-                return Ok(vd);
++        // Fetch new visitor data if the cache is empty, once for all the
++        // requests waiting on it. Should that fetch fail, they fail with it
++        // rather than each trying again in turn. Attempts are counted once
++        // finished, so that a request arriving while one runs shares its
++        // result, and one dropped part way counts for nothing.
++        let attempt = self.inner.fill_attempts.load(Ordering::Relaxed);
++        let mut failure = self.inner.filling.lock().await;
++        if let Some(vd) = self.pick() {
++            return Ok(vd);
++        }
++        if self.inner.fill_attempts.load(Ordering::Relaxed) != attempt {
++            if let Some(e) = &*failure {
++                return Err(shared_failure(e));
+             }
+         }
+-        // Fetch new visitor data if the cache is empty
+-        self.new_visitor_data().await
++        let result = self.new_visitor_data().await;
++        *failure = result.as_ref().err().map(shared_failure);
++        self.inner.fill_attempts.fetch_add(1, Ordering::Relaxed);
++        result
++    }
++
++    /// A random visitor data ID from the cache
++    fn pick(&self) -> Option<String> {
++        let vds = self.inner.visitor_data.read().unwrap();
++        if vds.is_empty() {
++            return None;
++        }
++        let mut rng = rand::rng();
++        let vd = vds[rng.random_range(0..vds.len())].to_owned();
++        tracing::debug!("visitor data {vd} picked from cache");
++        Some(vd)
+     }
+ 
+     /// Remove a visitor data ID from the cache.
+@@ -189,6 +294,21 @@ impl VisitorDataCache {
+     }
+ }
+ 
++/// A copy of a failed fetch's error for the requests that waited on it, as
++/// [`Error`] is not `Clone`. A fetch fails with one of these variants;
++/// anything else is carried as its message.
++fn shared_failure(e: &Error) -> Error {
++    match e {
++        Error::Http(msg) => Error::Http(msg.clone()),
++        Error::HttpStatus(status, msg) => Error::HttpStatus(*status, msg.clone()),
++        Error::Extraction(ExtractionError::InvalidData(msg)) => {
++            Error::Extraction(ExtractionError::InvalidData(msg.clone()))
++        }
++        Error::Other(msg) => Error::Other(msg.clone()),
++        e => Error::Other(e.to_string().into()),
++    }
++}
++
+ #[cfg(test)]
+ mod tests {
+     use std::time::Duration;
