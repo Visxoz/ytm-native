@@ -2,7 +2,7 @@
 
 use std::rc::Rc;
 
-use slint::{ComponentHandle, ModelRc};
+use slint::ComponentHandle;
 
 use super::{App, updates::up_to_date_status};
 use crate::{Api as ApiGlobal, AppWindow, api::Route, settings::Quality};
@@ -34,17 +34,10 @@ impl App {
         });
         on!(on_back, |app| app.go_back());
         on!(on_forward, |app| app.go_forward());
-        on!(on_search, |app, query| {
-            let query = query.trim().to_owned();
-            app.suggest_timer.stop();
-            app.state.borrow_mut().suggest_generation += 1;
-            app.ui().set_suggestions(ModelRc::default());
-            if !query.is_empty() {
-                app.navigate(Route::Search(query), true);
-            }
-        });
+        on!(on_search, |app, query| app.search(&query));
         on!(on_search_edited, |app, query| app
             .suggest(query.to_string()));
+        on!(on_forget_search, |app, query| app.forget_search(&query));
         on!(on_toggle_play, |app| app.toggle_play());
         on!(on_next, |app| app.next(true));
         on!(on_previous, |app| app.previous());

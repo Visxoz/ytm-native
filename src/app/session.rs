@@ -1,5 +1,5 @@
 //! What is kept between runs: the queue and position, restored on the next
-//! start, and the history of songs played.
+//! start, the history of songs played, and the recent searches.
 
 use std::{rc::Rc, time::Duration};
 
@@ -65,11 +65,14 @@ impl App {
             });
     }
 
-    /// Writes the session and history now, as on exit.
+    /// Writes the session and history now, as on exit, and the recent
+    /// searches should saving them as they changed have failed.
     pub(super) fn persist(&self) {
         self.persist_timer.stop();
         self.save_session();
-        self.state.borrow_mut().history.save();
+        let mut state = self.state.borrow_mut();
+        state.history.save();
+        state.searches.save();
     }
 
     /// The restored position, if the current track is the restored one.

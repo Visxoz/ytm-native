@@ -58,14 +58,34 @@ component Logo {
 component SearchBox inherits Rectangle {
     in-out property <string> text <=> input.text;
     in property <[string]> suggestions;
+    /// Recent searches, offered until the user types.
+    in property <[string]> recent;
     out property <bool> focused: input.has-focus;
     callback accepted(string);
     callback edited(string);
+    /// A recent search's remove button was clicked.
+    callback forget(string);
     /// The box is done with the keyboard; the window takes it back.
     callback release-focus();
     public function focus-input() {
+        root.typed = false;
         input.focus();
         input.select-all();
+    }
+    /// Hands the keyboard back to the window, so the next focus starts
+    /// with the recent searches again. Reset here rather than on focus,
+    /// which switching windows also takes and gives back.
+    public function close() {
+        root.typed = false;
+        root.release-focus();
+    }
+    /// Whether a point, in logical pixels from the window's corner, is on
+    /// the box or its open dropdown.
+    public pure function contains(x: length, y: length) -> bool {
+        x >= root.absolute-position.x && x < root.absolute-position.x + root.width
+            && y >= root.absolute-position.y
+            && y < root.absolute-position.y + root.height
+                + (root.open ? root.dropdown-gap + root.dropdown-height : 0px)
     }
 
     height: 48px;
@@ -98,12 +118,15 @@ component SearchBox inherits Rectangle {
         selection-background-color: #ff003380;
         accepted => {
             root.accepted(self.text);
-            root.release-focus();
+            root.close();
         }
-        edited => { root.edited(self.text); }
+        edited => {
+            root.typed = true;
+            root.edited(self.text);
+        }
         key-pressed(ev) => {
             if ev.text == Key.Escape {
-                root.release-focus();
+                root.close();
                 return accept;
             }
             reject
@@ -130,34 +153,48 @@ component SearchBox inherits Rectangle {
         }
     }
 
-    if input.has-focus && root.suggestions.length > 0: Rectangle {
-        y: root.height + 8px;
-        height: root.suggestions.length * 44px + 16px;
+    // Recent searches show from focusing the box until the user types, even
+    // over the last query, as clicking the box on a results page is the
+    // likeliest time to want them; typing swaps them for YouTube's
+    // suggestions, and clearing the box brings them back.
+    property <bool> typed;
+    property <bool> show-recent: input.text == "" || !root.typed;
+    property <[string]> choices: root.show-recent ? root.recent : root.suggestions;
+    property <bool> open: input.has-focus && root.choices.length > 0;
+    // Named once, as `contains` must match what is drawn.
+    property <length> dropdown-gap: 8px;
+    property <length> dropdown-padding: 8px;
+    property <length> choice-height: 44px;
+    property <length> dropdown-height: root.choices.length * root.choice-height + 2 * root.dropdown-padding;
+
+    if root.open: Rectangle {
+        y: root.height + root.dropdown-gap;
+        height: root.dropdown-height;
         border-radius: 12px;
         background: Theme.menu;
         drop-shadow-blur: 24px;
         drop-shadow-offset-y: 8px;
         drop-shadow-color: #000000a0;
-        for suggestion[i] in root.suggestions: Rectangle {
-            x: 8px;
-            y: 8px + i * 44px;
-            width: parent.width - 16px;
-            height: 44px;
+        for choice[i] in root.choices: Rectangle {
+            x: root.dropdown-padding;
+            y: root.dropdown-padding + i * root.choice-height;
+            width: parent.width - 2 * root.dropdown-padding;
+            height: root.choice-height;
             border-radius: 6px;
-            background: s-touch.has-hover ? Theme.hover : transparent;
+            background: s-touch.has-hover || forget-button.has-hover ? Theme.hover : transparent;
             Icon {
                 x: 12px;
-                path: Icons.search;
+                path: root.show-recent ? Icons.history : Icons.search;
                 size: 18px;
                 color: Theme.text-secondary;
             }
 
             Text {
                 x: 44px;
-                width: parent.width - 56px;
+                width: parent.width - 56px - (root.show-recent ? 32px : 0px);
                 height: 100%;
                 vertical-alignment: center;
-                text: suggestion;
+                text: choice;
                 font-size: 14px;
                 color: Theme.text;
                 overflow: elide;
@@ -166,10 +203,20 @@ component SearchBox inherits Rectangle {
             s-touch := TouchArea {
                 mouse-cursor: pointer;
                 clicked => {
-                    input.text = suggestion;
-                    root.accepted(suggestion);
-                    root.release-focus();
+                    input.text = choice;
+                    root.accepted(choice);
+                    root.close();
                 }
+            }
+
+            forget-button := IconButton {
+                x: parent.width - self.width - 6px;
+                visible: root.show-recent;
+                enabled: root.show-recent;
+                icon: Icons.close;
+                size: 32px;
+                icon-size: 16px;
+                clicked => { root.forget(choice); }
             }
         }
     }
@@ -597,6 +644,7 @@ export component AppWindow inherits Window {
     in property <bool> can-back;
     in property <bool> can-forward;
     in property <[string]> suggestions;
+    in property <[string]> recent-searches;
     in-out property <string> search-text;
     in-out property <length> page-scroll;
 
@@ -667,6 +715,7 @@ export component AppWindow inherits Window {
     callback forward();
     callback search(query: string);
     callback search-edited(query: string);
+    callback forget-search(query: string);
     callback toggle-play();
     callback next();
     callback previous();
@@ -768,6 +817,26 @@ export component AppWindow inherits Window {
 
     public function focus-search() {
         search-box.focus-input();
+    }
+
+    /// Hands the keyboard back from the search box, as when the page
+    /// changes.
+    public function close-search() {
+        if search-box.focused {
+            search-box.close();
+        }
+    }
+
+    /// Closes the search box on a press outside it and its dropdown, in
+    /// logical pixels from the window's corner. Only text inputs and focus
+    /// scopes take focus on a click, so the page's rows and cards would
+    /// leave the box focused, its dropdown over them. Focus is checked
+    /// first, so the far commoner press with the box unfocused skips the
+    /// hit test.
+    public function close-search-outside(x: length, y: length) {
+        if search-box.focused && !search-box.contains(x, y) {
+            search-box.close();
+        }
     }
 
     Rectangle {
@@ -876,7 +945,9 @@ export component AppWindow inherits Window {
                         horizontal-stretch: 1;
                         text <=> root.search-text;
                         suggestions: root.suggestions;
+                        recent: root.recent-searches;
                         accepted(q) => { root.search(q); }
+                        forget(q) => { root.forget-search(q); }
                         edited(q) => { root.search-edited(q); }
                         release-focus => { keys.focus(); }
                     }

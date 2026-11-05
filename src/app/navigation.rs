@@ -40,6 +40,7 @@ impl App {
             state.page_generation
         };
         self.update_nav(&ui);
+        ui.invoke_close_search();
         ui.set_page_loading(true);
         ui.set_page_error(SharedString::new());
         match &route {
@@ -291,17 +292,59 @@ impl App {
         ui.set_can_forward(!state.forward.is_empty());
     }
 
+    /// Searches for `query`, keeping it among the recent searches.
+    pub(super) fn search(self: &Rc<Self>, query: &str) {
+        self.drop_suggestions();
+        let query = query.trim();
+        if query.is_empty() {
+            return;
+        }
+        let recorded = self.state.borrow_mut().searches.record(query);
+        self.navigate(Route::Search(query.to_owned()), true);
+        if recorded {
+            self.recent_searches_changed();
+        }
+    }
+
+    pub(super) fn forget_search(&self, query: &str) {
+        let removed = self.state.borrow_mut().searches.remove(query);
+        if removed {
+            self.recent_searches_changed();
+        }
+    }
+
+    /// Saves the recent searches at once rather than through
+    /// `persist_soon`, which would rewrite the whole queue too.
+    fn recent_searches_changed(&self) {
+        self.state.borrow_mut().searches.save();
+        self.show_recent_searches();
+    }
+
+    pub(super) fn show_recent_searches(&self) {
+        let recent: VecModel<SharedString> =
+            self.state.borrow().searches.queries().map(s).collect();
+        self.ui()
+            .set_recent_searches(ModelRc::from(Rc::new(recent)));
+    }
+
+    /// Clears the suggestions, dropping any request for them still on its
+    /// way.
+    fn drop_suggestions(&self) {
+        self.suggest_timer.stop();
+        self.state.borrow_mut().suggest_generation += 1;
+        self.ui().set_suggestions(ModelRc::default());
+    }
+
     pub(super) fn suggest(self: &Rc<Self>, query: String) {
+        if query.trim().chars().count() < 2 {
+            self.drop_suggestions();
+            return;
+        }
         let generation = {
             let mut state = self.state.borrow_mut();
             state.suggest_generation += 1;
             state.suggest_generation
         };
-        if query.trim().chars().count() < 2 {
-            self.suggest_timer.stop();
-            self.ui().set_suggestions(ModelRc::default());
-            return;
-        }
         // Restarting the timer drops the previous keystroke's request.
         let weak = Rc::downgrade(self);
         self.suggest_timer

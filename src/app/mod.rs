@@ -133,6 +133,8 @@ struct State {
     song_versions: HashMap<String, SongVersion>,
     /// The songs played, saved between runs.
     history: settings::History,
+    /// The last few searches, offered in the search box until the user types.
+    searches: settings::Searches,
     smart: smart_shuffle::Smart,
 }
 
@@ -228,6 +230,7 @@ impl App {
                 page_cache: HashMap::new(),
                 song_versions: HashMap::new(),
                 history: settings::History::load(),
+                searches: settings::Searches::load(),
                 smart: smart_shuffle::Smart::default(),
             }),
             rows: Rc::new(VecModel::default()),
@@ -252,6 +255,7 @@ impl App {
         ui.set_rows(ModelRc::from(Rc::clone(&app.rows)));
         ui.set_library(ModelRc::from(Rc::clone(&app.library)));
         ui.set_queue(ModelRc::from(Rc::clone(&app.queue_model)));
+        app.show_recent_searches();
         app
     }
 

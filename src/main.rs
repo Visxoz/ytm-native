@@ -23,7 +23,13 @@ use std::{rc::Rc, time::Duration};
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use slint::{
     CloseRequestResponse, ComponentHandle, PhysicalPosition, PhysicalSize,
-    winit_030::WinitWindowAccessor,
+    winit_030::{
+        EventResult, WinitWindowAccessor,
+        winit::{
+            dpi,
+            event::{ElementState, TouchPhase, WindowEvent},
+        },
+    },
 };
 
 use crate::{app::App, settings::WindowGeometry};
@@ -81,6 +87,37 @@ fn is_minimized(ui: &AppWindow) -> bool {
         .with_winit_window(|window| window.is_minimized())
         .flatten()
         .unwrap_or_else(|| ui.window().is_minimized())
+}
+
+/// Closes the search box on a press anywhere outside it. Clicking a row or
+/// card takes no focus from it, so the box would stay focused, its dropdown
+/// over the page. Watching winit's events rather than catching the press in
+/// the UI lets that press go on to do what it was meant to. A window keeps
+/// one winit event filter, so anything else watching winit's events belongs
+/// in this one; a second would replace it.
+fn close_search_on_outside_press(ui: &AppWindow) {
+    let weak = ui.as_weak();
+    let mut cursor = dpi::PhysicalPosition::new(0.0_f64, 0.0);
+    ui.window().on_winit_window_event(move |window, event| {
+        let pressed_at = match event {
+            WindowEvent::CursorMoved { position, .. } => {
+                cursor = *position;
+                None
+            }
+            WindowEvent::MouseInput {
+                state: ElementState::Pressed,
+                ..
+            } => Some(cursor),
+            WindowEvent::Touch(touch) if touch.phase == TouchPhase::Started => Some(touch.location),
+            _ => None,
+        };
+        if let (Some(at), Some(ui)) = (pressed_at, weak.upgrade()) {
+            // Converted as Slint converts the same events, so both agree.
+            let at = at.to_logical::<f32>(window.scale_factor().into());
+            ui.invoke_close_search_outside(at.x, at.y);
+        }
+        EventResult::Propagate
+    });
 }
 
 /// Fonts Slint tries, character by character, for anything the UI font
@@ -160,6 +197,7 @@ fn main() {
     });
 
     ui.show().expect("window shows");
+    close_search_on_outside_press(&ui);
 
     let start_app = Rc::clone(&app);
     slint::Timer::single_shot(Duration::ZERO, move || start_app.start());
