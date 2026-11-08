@@ -60,7 +60,7 @@ opt-level = 3
 [profile.release.package.symphonia-codec-aac]
 opt-level = 3
 
-[profile.release.package.i-slint-renderer-software]
+[profile.release.package.i-slint-renderer-skia]
 opt-level = 3
 
 [profile.release.package.zune-jpeg]
