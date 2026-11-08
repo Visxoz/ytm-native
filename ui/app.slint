@@ -322,7 +322,7 @@ component Pill inherits Rectangle {
 }
 
 /// The queue row being dragged, where it would land, and whether it is
-/// past the list's top (-1) or bottom (1) edge, so the list scrolls.
+/// near or past the list's top (-1) or bottom (1) edge, so the list scrolls.
 global Drag {
     in-out property <int> from: -1;
     in-out property <int> target;
