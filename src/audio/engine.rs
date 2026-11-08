@@ -10,7 +10,7 @@ use std::{
         mpsc::{self, Receiver, RecvTimeoutError},
     },
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -32,6 +32,8 @@ const LOW_WATER_SECS: f64 = 1.0;
 /// About -60 dBFS: quieter than this, a frame counts as silence.
 const SILENCE: f32 = 0.001;
 const IDLE_POLL: Duration = Duration::from_millis(20);
+/// Long enough for the device to play out its buffer as silence.
+const PAUSE_AFTER: Duration = Duration::from_millis(250);
 
 struct Track {
     decoder: Decoder,
@@ -185,6 +187,8 @@ pub(super) struct Engine {
     held: VecDeque<f32>,
     fade: Option<Fade>,
     scratch: Vec<f32>,
+    /// When to stop the device after a pause.
+    pause_at: Option<Instant>,
 }
 
 impl Engine {
@@ -204,6 +208,7 @@ impl Engine {
             held: VecDeque::new(),
             fade: None,
             scratch: Vec::new(),
+            pause_at: None,
         }
     }
 
@@ -230,7 +235,9 @@ impl Engine {
                 Some(Command::ClearNext) => self.drop_next(),
                 Some(Command::Seek(secs)) => self.seek(secs),
                 Some(Command::Stop) => self.clear(),
+                Some(Command::Pause) => self.apply_paused(),
                 None => {
+                    self.pause_when_due();
                     self.poll_next();
                     self.check_advanced();
                     self.try_switch();
@@ -629,6 +636,9 @@ impl Engine {
             output.channels = channels;
         }
         if self.stream.is_some() {
+            // `Player::load` clears the pause without a command, so a stream
+            // stopped by an earlier pause must start again here.
+            self.apply_paused();
             return Ok(());
         }
 
@@ -654,7 +664,44 @@ impl Engine {
             .play()
             .map_err(|e| format!("could not start audio output: {e}"))?;
         self.stream = Some((stream, rate, channels));
+        // A format change reached while paused opens a stream that must not run.
+        self.apply_paused();
         Ok(())
+    }
+
+    /// Stops the device while paused rather than feeding it silence: a running
+    /// stream wakes its callback every few ms and holds a power request that
+    /// keeps Windows from sleeping. The stop waits `PAUSE_AFTER`, as WASAPI
+    /// keeps its buffer through a stop and would replay the audio left in it
+    /// on the next start, a blip of the old track after a skip or seek.
+    fn apply_paused(&mut self) {
+        let Some((stream, ..)) = &self.stream else {
+            return;
+        };
+        if self.shared.paused.load(Ordering::Relaxed) {
+            self.pause_at = Some(Instant::now() + PAUSE_AFTER);
+            return;
+        }
+        self.pause_at = None;
+        if let Err(e) = stream.play() {
+            log::warn!("could not resume audio output: {e}");
+        }
+    }
+
+    /// Stops the device once it has played out silence since the pause, and
+    /// only with nothing left to decode: a decode can block on a slow
+    /// download, and the resume that restarts the device would wait behind it.
+    fn pause_when_due(&mut self) {
+        if self.pause_at.is_none_or(|at| Instant::now() < at) || self.wants_samples() {
+            return;
+        }
+        self.pause_at = None;
+        if let Some((stream, ..)) = &self.stream
+            && self.shared.paused.load(Ordering::Relaxed)
+            && let Err(e) = stream.pause()
+        {
+            log::warn!("could not pause audio output: {e}");
+        }
     }
 }
 

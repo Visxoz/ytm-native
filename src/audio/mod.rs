@@ -82,6 +82,8 @@ enum Command {
     ClearNext,
     Seek(f64),
     Stop,
+    /// Pauses or resumes the device to match `Shared::paused`.
+    Pause,
 }
 
 /// Empties a download slot and cancels what it held, once the slot's lock
@@ -216,7 +218,10 @@ impl Player {
     }
 
     pub fn set_paused(&self, paused: bool) {
+        // The flag silences the callback at once; the engine then stops the
+        // device, which cpal does asynchronously.
         self.shared.paused.store(paused, Ordering::Relaxed);
+        let _ = self.tx.send(Command::Pause);
     }
 
     pub fn is_paused(&self) -> bool {
