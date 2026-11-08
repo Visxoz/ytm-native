@@ -9,15 +9,22 @@ description: >
 runs:
   using: composite
   steps:
-    # The folder is named after the patches, script and lockfile. Cargo's
-    # build IDs depend on it, so builds of other patches never pass for
-    # these, and the sources can be dated back safely below.
+    # The folder is named after the patches, the script and the versions
+    # they apply to. Cargo's build IDs depend on it, so builds of other
+    # patches never pass for these, and the sources can be dated back safely
+    # below. Not after the whole lockfile: it changes with every version
+    # bump, and a new folder rebuilt all of Slint and rustypipe each time.
     - name: Name the patched crates' folder
       id: dir
       shell: pwsh
       run: |
-        $hash = '${{ hashFiles('patches/*.patch', 'scripts/vendor-patched.ps1', 'Cargo.lock') }}'
-        $dir = (Join-Path '${{ runner.temp }}' "patched-$($hash.Substring(0, 12))") -replace '\\', '/'
+        $slint = [regex]::Match((Get-Content Cargo.lock -Raw), 'name = "i-slint-core"\r?\nversion = "([^"]+)"').Groups[1].Value
+        $rustypipe = [regex]::Match((Get-Content Cargo.toml -Raw), '(?m)^rustypipe = \{ version = "=([^"]+)"').Groups[1].Value
+        if (-not $slint -or -not $rustypipe) { throw "could not read the patched crates' versions" }
+        $hash = '${{ hashFiles('patches/*.patch', 'scripts/vendor-patched.ps1') }}'.Substring(0, 12)
+        $id = "$hash-slint-$slint-rustypipe-$rustypipe"
+        $dir = (Join-Path '${{ runner.temp }}' "patched-$id") -replace '\\', '/'
+        "id=$id" >> $env:GITHUB_OUTPUT
         "path=$dir" >> $env:GITHUB_OUTPUT
 
     - name: Restore patched crates
@@ -25,7 +32,7 @@ runs:
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ${{ steps.dir.outputs.path }}
-        key: patched-crates-${{ hashFiles('patches/*.patch', 'scripts/vendor-patched.ps1', 'Cargo.lock') }}
+        key: patched-crates-${{ steps.dir.outputs.id }}
 
     - name: Vendor patched crates
       if: steps.cache.outputs.cache-hit != 'true'
