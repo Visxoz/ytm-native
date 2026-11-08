@@ -15,7 +15,8 @@ use symphonia::core::io::MediaSource;
 const CHUNK: u64 = 1024 * 1024;
 const READ_BUF: usize = 64 * 1024;
 /// Upper bound on the up-front allocation, should a reported size be wrong.
-const MAX_RESERVE: u64 = 64 * 1024 * 1024;
+/// High enough for a long mix, which past it would grow by doubling.
+const MAX_RESERVE: u64 = 1024 * 1024 * 1024;
 const MAX_RETRIES: u32 = 4;
 const RETRY_DELAY: Duration = Duration::from_millis(500);
 /// Fresh URLs asked for in a row without a whole range arriving from them.
@@ -59,7 +60,10 @@ impl Download {
             let mut state = download.state.lock().unwrap();
             state.total = source.size;
             // Sized once, as growing by doubling can hold twice the file.
-            state.data = Vec::with_capacity(source.size.min(MAX_RESERVE) as usize);
+            // Tried, so a wrong size too big to set aside grows as it downloads.
+            let _ = state
+                .data
+                .try_reserve_exact(source.size.min(MAX_RESERVE) as usize);
         }
         let worker = Arc::clone(&download);
         thread::Builder::new()
@@ -180,7 +184,9 @@ impl Download {
             let length = response.content_length().unwrap_or(0);
             let mut state = self.state.lock().unwrap();
             state.total = length;
-            state.data.reserve(length.min(MAX_RESERVE) as usize);
+            let _ = state
+                .data
+                .try_reserve_exact(length.min(MAX_RESERVE) as usize);
         }
 
         loop {
