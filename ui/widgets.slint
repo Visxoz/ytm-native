@@ -25,7 +25,6 @@ export component IconButton {
     in property <length> icon-size: 20px;
     in property <bool> active;
     in property <bool> enabled: true;
-    in property <bool> show-dot: root.active;
     in property <color> color: Theme.text-secondary;
     in property <color> background: transparent;
     in property <color> hover-background: Theme.hover;
@@ -48,7 +47,7 @@ export component IconButton {
         animate transform-scale { duration: 90ms; }
     }
 
-    if root.show-dot: Rectangle {
+    if root.active: Rectangle {
         y: root.height / 2 + root.icon-size / 2 + 2px;
         width: 4px;
         height: 4px;

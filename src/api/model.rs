@@ -128,7 +128,6 @@ pub struct Header {
     pub title: String,
     pub subtitle: String,
     pub meta: String,
-    pub description: String,
     pub thumb: Option<String>,
     pub round: bool,
     /// Artists show their wide header image behind the title.

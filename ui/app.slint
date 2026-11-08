@@ -652,7 +652,6 @@ export component AppWindow inherits Window {
     in property <bool> has-track;
     in property <string> np-title;
     in property <string> np-artists;
-    in property <string> np-album;
     in property <image> np-art;
     in property <color> np-accent: #3a3a3a;
     in property <float> np-duration;
@@ -936,7 +935,6 @@ export component AppWindow inherits Window {
                         color: root.nav-current == "home" ? Theme.text : Theme.text-secondary;
                         background: Theme.elevated;
                         hover-background: Theme.highlight;
-                        show-dot: false;
                         clicked => { root.go("home"); }
                     }
 
@@ -1632,7 +1630,6 @@ export component AppWindow inherits Window {
                         icon: root.muted || root.volume == 0 ? Icons.volume-off : root.volume < 0.5 ? Icons.volume-low : Icons.volume;
                         size: 32px;
                         icon-size: 18px;
-                        show-dot: false;
                         clicked => { root.toggle-mute(); }
                     }
 

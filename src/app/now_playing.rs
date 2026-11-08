@@ -108,7 +108,6 @@ impl App {
         ui.set_has_track(true);
         ui.set_np_title(s(&track.title));
         ui.set_np_artists(s(track.artist_names()));
-        ui.set_np_album(s(track.album_name()));
         ui.set_np_has_artist(track.first_artist_id().is_some());
         ui.set_np_has_album(track.album.is_some());
         ui.set_np_duration(self.state.borrow().playback.duration as f32);

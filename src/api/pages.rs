@@ -2,7 +2,7 @@
 
 use std::future::Future;
 
-use rustypipe::model::{AlbumType, MusicGenreItem, MusicItem, richtext::ToPlaintext};
+use rustypipe::model::{AlbumType, MusicGenreItem, MusicItem};
 
 use super::{
     Api, Card, CardKind, CardLayout, Header, More, MoreShelves, MoreTracks, PLAYLIST_LIMIT, Page,
@@ -351,10 +351,6 @@ impl Api {
             title: album.name,
             subtitle: join_artists(&artist_refs(&album.artists)),
             meta: meta.join(" • "),
-            description: album
-                .description
-                .map(|d| d.to_plaintext())
-                .unwrap_or_default(),
             thumb: pick_thumb(&album.cover, HEADER_THUMB),
             round: false,
             banner: false,
@@ -394,10 +390,6 @@ impl Api {
             title: playlist.name,
             subtitle: playlist.channel.map(|c| c.name).unwrap_or_default(),
             meta: playlist_meta(playlist.track_count, &tracks),
-            description: playlist
-                .description
-                .map(|d| d.to_plaintext())
-                .unwrap_or_default(),
             thumb: pick_thumb(&playlist.thumbnail, HEADER_THUMB),
             round: false,
             banner: false,
@@ -479,7 +471,6 @@ impl Api {
                 .map(|n| format!("{} subscribers", compact(n)))
                 .unwrap_or_default(),
             meta: String::new(),
-            description: artist.description.unwrap_or_default(),
             // Wide banners must keep their aspect, so take the largest as is.
             thumb: artist
                 .header_image

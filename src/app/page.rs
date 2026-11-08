@@ -131,7 +131,6 @@ impl App {
                 title: s(&header.title),
                 subtitle: s(&header.subtitle),
                 meta: s(&header.meta),
-                description: s(&header.description),
                 art: images::cached_or_empty(header.thumb.as_deref(), header_edge),
                 round: header.round,
                 banner: header.banner,
