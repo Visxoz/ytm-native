@@ -10,7 +10,8 @@ on:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  # Only pull requests: a cancelled build on main never saves its cache.
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 permissions:
   contents: read
@@ -19,8 +20,9 @@ jobs:
   check:
     uses: ./.github/workflows/check.yml
 
+  # Built alongside the checks on main, so each commit has an exe to try and
+  # the release build's cache stays warm for the next tag, which can only
+  # read main's caches.
   build:
-    needs: check
-    # The exe is built for release tags (release.yml); here only on demand.
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name != 'pull_request'
     uses: ./.github/workflows/build.yml
