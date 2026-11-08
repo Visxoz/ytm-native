@@ -25,8 +25,8 @@ jobs:
 
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          # Saved from main, as a tag's cache is never read by the next tag;
-          # each release then builds on main's dependencies.
+          # Saved from main only, as a tag's cache is never read by the next
+          # tag; a build run on demand on main warms the next release's.
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - name: Build

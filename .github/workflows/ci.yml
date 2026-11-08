@@ -20,9 +20,8 @@ jobs:
   check:
     uses: ./.github/workflows/check.yml
 
-  # Built alongside the checks on main, so each commit has an exe to try and
-  # the release build's cache stays warm for the next tag, which can only
-  # read main's caches.
   build:
-    if: github.event_name != 'pull_request'
+    needs: check
+    # The exe is built for release tags (release.yml); here only on demand.
+    if: github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/build.yml
