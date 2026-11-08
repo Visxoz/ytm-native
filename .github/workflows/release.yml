@@ -38,6 +38,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      # Build provenance: the exe is unsigned, so this is how a download can
+      # be shown to come from this repo's workflow at this commit, with
+      # `gh attestation verify <exe> --repo Visxoz/ytm-native`.
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -48,15 +53,24 @@ jobs:
           name: ytm-native-${{ github.sha }}
           path: dist
 
+      - name: Name the files
+        env:
+          TAG: ${{ github.ref_name }}
+        run: |
+          mv dist/ytm-native.exe "dist/ytm-native_${TAG#v}_x64-portable.exe"
+          # The app's updater checks its download against these.
+          (cd dist && sha256sum -- *.exe > SHA256SUMS)
+
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: dist/*.exe
+
       - name: Create release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
         run: |
           version=${TAG#v}
-          mv dist/ytm-native.exe "dist/ytm-native_${version}_x64-portable.exe"
-          # The app's updater checks its download against these.
-          (cd dist && sha256sum -- *.exe > SHA256SUMS)
           previous=$(git tag --list 'v*' --sort=-v:refname | grep -vx "$TAG" | head -n 1 || true)
           if [ -n "$previous" ]; then
             # From the commit subjects: GitHub's own notes come from pull
