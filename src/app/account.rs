@@ -32,6 +32,7 @@ impl App {
                         {
                             let mut state = app.state.borrow_mut();
                             state.signed_in = true;
+                            state.account += 1;
                             state.page_cache.clear();
                         }
                         // It may be another account's.
@@ -187,6 +188,7 @@ impl App {
         {
             let mut state = self.state.borrow_mut();
             state.signed_in = false;
+            state.account += 1;
             state.page_cache.clear();
         }
         settings::remove_home();

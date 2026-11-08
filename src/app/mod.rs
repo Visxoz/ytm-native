@@ -117,6 +117,9 @@ impl Playback {
 struct State {
     settings: Settings,
     signed_in: bool,
+    /// Bumped on every sign-in and sign-out, so a personal feed fetched for
+    /// one account is never cached or saved under the next.
+    account: u64,
     route: Route,
     back: Vec<HistoryEntry>,
     forward: Vec<HistoryEntry>,
@@ -221,6 +224,7 @@ impl App {
                 back: Vec::new(),
                 forward: Vec::new(),
                 page: Page::default(),
+                account: 0,
                 page_generation: 0,
                 restore_scroll: None,
                 queue,

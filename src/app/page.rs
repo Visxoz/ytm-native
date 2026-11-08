@@ -233,9 +233,16 @@ impl App {
     /// Fetches the next step of what the page has still to show, after it
     /// shows, and the step after that once it is on screen.
     fn complete_page(self: &Rc<Self>, route: Route, generation: u64) {
-        let page = self.state.borrow().page.clone();
+        let (page, account) = {
+            let state = self.state.borrow();
+            (state.page.clone(), state.account)
+        };
         let api = self.api.clone();
         self.spawn(async move { api.complete(page).await }, move |app, page| {
+            // Signed in or out meanwhile: the page belongs to the last account.
+            if app.state.borrow().account != account {
+                return;
+            }
             if let Some((cached, _)) = app.state.borrow_mut().page_cache.get_mut(&route) {
                 *cached = page.clone();
             }

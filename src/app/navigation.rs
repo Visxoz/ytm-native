@@ -186,10 +186,11 @@ impl App {
     /// whole by the next `show_page`, which also completes and saves it.
     fn refresh_personal_home(self: &Rc<Self>) {
         let api = self.api.clone();
+        let account = self.state.borrow().account;
         self.spawn(
             async move { api.page(&Route::Home, true).await },
-            |app, result| match result {
-                Ok(page) if app.state.borrow().signed_in => {
+            move |app, result| match result {
+                Ok(page) if app.state.borrow().account == account => {
                     if page.more.is_none() {
                         app.save_home(&page);
                     }
