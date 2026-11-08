@@ -169,11 +169,12 @@ impl App {
                 return;
             };
             let current = state.queue.current_index() == Some(index);
-            let (item, needs_art) = queue_item(track, current, false, false);
-            (item, needs_art.then(|| track.thumb.clone()).flatten())
+            queue_item(track, current, false, false)
         };
         self.queue_model.insert(index, item);
-        self.load_queue_art(index, art);
+        if let Some(url) = art {
+            self.load_queue_art(index, url);
+        }
         self.queue_edited();
     }
 

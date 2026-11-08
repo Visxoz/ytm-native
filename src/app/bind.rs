@@ -65,7 +65,9 @@ impl App {
         on!(on_queue_clear, |app| app.queue_clear());
         on!(on_queue_save, |app| app.save_queue_as_playlist());
         on!(on_panel_tab_changed, |app, tab| {
-            if tab == 1 {
+            if tab == 0 {
+                app.load_missing_queue_art();
+            } else if tab == 1 {
                 app.load_lyrics();
             }
         });

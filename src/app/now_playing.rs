@@ -24,18 +24,22 @@ fn quality_label(stream: &ResolvedStream) -> String {
     }
 }
 
-/// The queue row for `track`, and whether its artwork still has to load.
+/// The queue row for `track`, and the artwork it still has to load.
 pub(super) fn queue_item(
     track: &Track,
     current: bool,
     recommended: bool,
     selected: bool,
-) -> (QueueItem, bool) {
+) -> (QueueItem, Option<String>) {
     let art = track
         .thumb
         .as_deref()
         .and_then(|u| images::cached(u, images::ROW));
-    let needs_art = art.is_none() && track.thumb.is_some();
+    let missing = if art.is_none() {
+        track.thumb.clone()
+    } else {
+        None
+    };
     let item = QueueItem {
         title: s(&track.title),
         artists: s(track.artist_names()),
@@ -45,7 +49,7 @@ pub(super) fn queue_item(
         recommended,
         selected,
     };
-    (item, needs_art)
+    (item, missing)
 }
 
 impl App {
@@ -211,10 +215,8 @@ impl App {
             .entries()
             .enumerate()
             .map(|(i, (t, recommended))| {
-                let (item, needs_art) = queue_item(t, i as i32 == current, recommended, false);
-                if needs_art {
-                    missing.push((i, t.thumb.clone()));
-                }
+                let (item, art) = queue_item(t, i as i32 == current, recommended, false);
+                missing.extend(art.map(|url| (i, url)));
                 item
             })
             .collect();
@@ -245,15 +247,13 @@ impl App {
                     .queue_model
                     .row_data(i)
                     .is_some_and(|item| item.selected);
-                let (item, needs_art) = queue_item(
+                let (item, art) = queue_item(
                     track,
                     i as i32 == current,
                     state.queue.is_recommended(i),
                     selected,
                 );
-                if needs_art {
-                    missing.push((i, track.thumb.clone()));
-                }
+                missing.extend(art.map(|url| (i, url)));
                 self.queue_model.set_row_data(i, item);
             }
         }
@@ -265,8 +265,13 @@ impl App {
     /// Loads the artwork of the entry at `index` into its row. The entry may
     /// have moved meanwhile, or been replaced in place; the row that still
     /// wants this artwork gets it.
-    pub(super) fn load_queue_art(self: &Rc<Self>, index: usize, url: Option<String>) {
-        let Some(url) = url else { return };
+    pub(super) fn load_queue_art(self: &Rc<Self>, index: usize, url: String) {
+        // Rows nobody can see aren't worth a download; `load_missing_queue_art`
+        // catches up when Up next is shown.
+        let ui = self.ui();
+        if !(ui.get_panel_open() && ui.get_panel_tab() == 0) {
+            return;
+        }
         let expected = url.clone();
         self.load_image(Some(url), images::ROW, move |app, image| {
             let row = {
@@ -291,6 +296,28 @@ impl App {
                 app.queue_model.set_row_data(row, item);
             }
         });
+    }
+
+    /// Loads the artwork of every row still without it, from the current
+    /// entry onwards, so the rows near what is playing are fetched first.
+    pub(super) fn load_missing_queue_art(self: &Rc<Self>) {
+        let len = self.queue_model.row_count();
+        let current = usize::try_from(self.ui().get_queue_current()).map_or(0, |i| i.min(len));
+        let missing: Vec<(usize, String)> = {
+            let state = self.state.borrow();
+            (current..len)
+                .chain(0..current)
+                .filter(|&i| {
+                    self.queue_model
+                        .row_data(i)
+                        .is_some_and(|item| item.art.size().width == 0)
+                })
+                .filter_map(|i| Some((i, state.queue.get(i)?.thumb.clone()?)))
+                .collect()
+        };
+        for (i, url) in missing {
+            self.load_queue_art(i, url);
+        }
     }
 
     pub(super) fn load_lyrics(self: &Rc<Self>) {

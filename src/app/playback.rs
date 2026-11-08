@@ -13,6 +13,7 @@ use super::{
     resolve::{PREMIUM_NO, PREMIUM_YES, premium_dry_run},
 };
 use crate::{
+    images,
     queue::Repeat,
     streams::{ResolvedStream, premium},
 };
@@ -177,6 +178,15 @@ impl App {
         if let Some(video) = video {
             self.swap_in_song_version(&video);
         }
+        // The player bar shows this artwork the moment the track starts, and
+        // the queue panel only loads it while open.
+        let art = self
+            .state
+            .borrow()
+            .queue
+            .peek_next()
+            .and_then(|t| t.thumb.clone());
+        self.load_image(art, images::ROW, |_, _| {});
         let next = {
             let state = self.state.borrow();
             let Some(next) = state.queue.peek_next().cloned() else {
