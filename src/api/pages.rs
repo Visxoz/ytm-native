@@ -55,6 +55,15 @@ impl Api {
         }
     }
 
+    /// The moods & genres list, kept for the session once fetched. A failure
+    /// isn't kept, so the next page to want it asks again.
+    async fn genres(&self) -> Result<Vec<MusicGenreItem>> {
+        self.genres
+            .get_or_try_init(|| async { self.q().music_genres().await.map_err(err) })
+            .await
+            .cloned()
+    }
+
     /// The signed-in feed in one request, so the app can show the saved
     /// feed at once when YouTube refuses it rather than wait out retries.
     pub async fn home_first_try(&self) -> Result<Page> {
@@ -65,8 +74,7 @@ impl Api {
     /// feed's first page shows at once, and `complete` adds the next ones.
     /// Should the feed fail, the app decides what stands in for it.
     async fn home(&self, signed_in: bool, attempts: u32) -> Result<Page> {
-        let q = self.q();
-        let genres = async { genre_section(q.music_genres().await.unwrap_or_default()) };
+        let genres = async { genre_section(self.genres().await.unwrap_or_default()) };
         if !signed_in {
             return self.public_home(genres).await;
         }
@@ -147,8 +155,8 @@ impl Api {
     async fn explore(&self) -> Result<Page> {
         let q = self.q();
         let (genres, new_albums, new_videos) =
-            tokio::join!(q.music_genres(), q.music_new_albums(), q.music_new_videos());
-        let genres = genres.map_err(err)?;
+            tokio::join!(self.genres(), q.music_new_albums(), q.music_new_videos());
+        let genres = genres?;
         let (moods, genres): (Vec<_>, Vec<_>) = genres.into_iter().partition(|g| g.is_mood);
         let mut sections = Vec::new();
         sections.extend(card_section(

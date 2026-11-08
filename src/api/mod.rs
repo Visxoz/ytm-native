@@ -7,10 +7,13 @@ mod home_feed;
 mod model;
 mod pages;
 
+use std::sync::Arc;
+
 use rustypipe::{
     client::{ClientType, RustyPipe, RustyPipeQuery},
-    model::{MusicPlaylist, TrackItem, TrackType, paginator::Paginator},
+    model::{MusicGenreItem, MusicPlaylist, TrackItem, TrackType, paginator::Paginator},
 };
+use tokio::sync::OnceCell;
 
 pub use convert::resize_thumb;
 use convert::tracks;
@@ -45,6 +48,9 @@ fn is_song_version(video: &Track, song: &Track) -> bool {
 #[derive(Clone)]
 pub struct Api {
     rp: RustyPipe,
+    /// Moods & genres, asked for once a session: the list is the same for
+    /// every account and barely changes, and Home and Explore both show it.
+    genres: Arc<OnceCell<Vec<MusicGenreItem>>>,
 }
 
 impl Api {
@@ -56,7 +62,10 @@ impl Api {
             .no_botguard()
             .build_with_client(crate::http::keep_alive(reqwest::ClientBuilder::new()))
             .map_err(err)?;
-        Ok(Self { rp })
+        Ok(Self {
+            rp,
+            genres: Default::default(),
+        })
     }
 
     fn q(&self) -> RustyPipeQuery {
