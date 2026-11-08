@@ -4,6 +4,7 @@ use std::{
     collections::VecDeque,
     io,
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU64, Ordering},
 };
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -17,11 +18,18 @@ pub fn data_dir() -> PathBuf {
 }
 
 /// Writes `bytes` to a temporary file and renames it over `path`, so a
-/// crash or a full disk midway leaves the old file whole.
+/// crash or a full disk midway leaves the old file whole. Not flushed, as
+/// most saves run on the UI thread. Each
+/// write has its own temporary file, as rustypipe saves its cache from
+/// whichever worker refreshed it, and two writes could otherwise interleave.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
-    let partial = path.with_extension("tmp");
-    std::fs::write(&partial, bytes)?;
-    std::fs::rename(partial, path)
+    static NEXT: AtomicU64 = AtomicU64::new(0);
+    let partial = path.with_extension(format!("{}.tmp", NEXT.fetch_add(1, Ordering::Relaxed)));
+    let result = std::fs::write(&partial, bytes).and_then(|()| std::fs::rename(&partial, path));
+    if result.is_err() {
+        let _ = std::fs::remove_file(&partial);
+    }
+    result
 }
 
 fn read_json<T: DeserializeOwned>(path: &Path) -> Option<T> {
@@ -431,9 +439,10 @@ mod tests {
         write_atomic(&path, b"[1]").unwrap();
         write_atomic(&path, b"[1,2]").unwrap();
         assert_eq!(read_json::<Vec<u8>>(&path), Some(vec![1, 2]));
-        assert!(
-            !path.with_extension("tmp").exists(),
-            "the partial file is renamed into place"
+        assert_eq!(
+            std::fs::read_dir(&dir).unwrap().count(),
+            1,
+            "the partial files are renamed into place"
         );
         assert_eq!(read_json::<Vec<u8>>(&dir.join("missing.json")), None);
         std::fs::remove_dir_all(&dir).unwrap();
