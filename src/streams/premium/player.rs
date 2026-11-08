@@ -9,7 +9,10 @@ use serde::{Deserialize, Serialize};
 use super::{WEB_USER_AGENT, diag, trim};
 
 const IFRAME_API: &str = "https://www.youtube.com/iframe_api";
-const QUICKJS_STACK: usize = 2 * 1024 * 1024;
+/// Well under the 2 MB stack of the Tokio thread a solve runs on, so deep
+/// recursion in the player throws in QuickJS instead of overflowing the
+/// thread and aborting the app.
+const QUICKJS_STACK: usize = 1024 * 1024;
 /// A solve takes about 25 ms and 1.6 MB.
 const QUICKJS_MEMORY: usize = 32 * 1024 * 1024;
 const QUICKJS_TIME: Duration = Duration::from_secs(2);
