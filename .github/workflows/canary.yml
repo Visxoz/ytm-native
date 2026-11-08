@@ -20,6 +20,7 @@ jobs:
   canary:
     name: Resolve a stream through every path
     runs-on: windows-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -29,9 +30,12 @@ jobs:
 
       - uses: ./.github/actions/patched-crates
 
-      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+      # The Test job's cache, as it builds the same tests; never saved, as a
+      # copy of its own would only crowd main's caches out.
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
-          key: ${{ hashFiles('patches/*.patch', 'scripts/vendor-patched.ps1') }}
+          shared-key: test
+          save-if: false
 
       - name: Ask YouTube
         run: cargo test --profile ci --locked canary -- --ignored --nocapture
