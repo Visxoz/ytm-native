@@ -198,18 +198,42 @@ impl App {
         ui.set_account_photo(Image::default());
     }
 
-    /// Puts the account's profile picture on the account button.
+    /// Puts the account's profile picture on the account button, and checks
+    /// the stored cookie if the menu didn't come back signed in.
     pub(super) fn load_account_photo(self: &Rc<Self>) {
         let api = self.api.clone();
+        // Signing in or out meanwhile makes both the photo and the check
+        // another account's.
+        let account = self.state.borrow().account;
         self.spawn(
             async move { api.account_photo().await },
-            |app, result| match result {
-                Ok(url) => app.load_image(url, images::AVATAR, |app, image| {
-                    if app.state.borrow().signed_in {
-                        app.ui().set_account_photo(image);
+            move |app, result| {
+                if app.state.borrow().account != account {
+                    return;
+                }
+                match result {
+                    Ok(Some(url)) => {
+                        app.load_image(Some(url), images::AVATAR, move |app, image| {
+                            if app.state.borrow().account == account {
+                                app.ui().set_account_photo(image);
+                            }
+                        });
+                        // A photo means YouTube took the cookie, so the slower
+                        // check isn't needed.
+                        return;
                     }
-                }),
-                Err(e) => log::warn!("could not load the account's picture: {e}"),
+                    Ok(None) => {}
+                    Err(e) => log::warn!("could not load the account's picture: {e}"),
+                }
+                let api = app.api.clone();
+                app.spawn(
+                    async move { api.cookie_valid().await },
+                    move |app, valid| {
+                        if valid == Some(false) && app.state.borrow().account == account {
+                            app.sign_in_expired();
+                        }
+                    },
+                );
             },
         );
     }

@@ -400,14 +400,6 @@ impl App {
                     app.check_for_update();
                 }
             });
-        if signed_in {
-            let api = self.api.clone();
-            self.spawn(async move { api.cookie_valid().await }, |app, valid| {
-                if valid == Some(false) {
-                    app.sign_in_expired();
-                }
-            });
-        }
     }
 
     pub fn attach_media_controls(&self, hwnd: *mut std::ffi::c_void) {
