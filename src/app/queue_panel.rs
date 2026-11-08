@@ -178,6 +178,49 @@ impl App {
         self.queue_edited();
     }
 
+    /// Shows the recommendations Smart Shuffle put in at `rows`, in the
+    /// order it put them in, without rebuilding the rest, so a selection or
+    /// a drag survives. Each index already counts the rows put in before it,
+    /// and all are after the current track, so the highlight stays put.
+    pub(super) fn queue_recommended(self: &Rc<Self>, before: u64, rows: &[usize]) {
+        let (current, len) = {
+            let state = self.state.borrow();
+            (state.queue.current_index(), state.queue.len())
+        };
+        // A model behind the queue, or a highlight left elsewhere, is rebuilt,
+        // as is any row out of range, which would leave the model short.
+        if self.queue_shown.get() != Some(before)
+            || self.ui().get_queue_current() != current.map_or(-1, |i| i as i32)
+            || rows.iter().any(|&i| i >= len)
+        {
+            self.refresh_queue();
+            return;
+        }
+        let mut selection = self.selection.get();
+        let mut missing = Vec::new();
+        {
+            let state = self.state.borrow();
+            for &i in rows {
+                let Some(track) = state.queue.get(i) else {
+                    continue;
+                };
+                let (item, art) = queue_item(track, false, true, false);
+                missing.extend(art.map(|url| (i, url)));
+                self.queue_model.insert(i, item);
+                if let Some(anchor) = selection.anchor.as_mut()
+                    && *anchor >= i
+                {
+                    *anchor += 1;
+                }
+            }
+            self.queue_shown.set(Some(state.queue.revision()));
+        }
+        self.selection.set(selection);
+        for (i, url) in missing {
+            self.load_queue_art(i, url);
+        }
+    }
+
     /// After rows changed in place: the model is at the queue's revision,
     /// a track queued in the player that is no longer next is dropped, and
     /// the new next one is prefetched.

@@ -79,7 +79,7 @@ impl App {
     /// Puts recommendations among the upcoming tracks where they are due,
     /// and asks for a batch when the pool runs dry.
     pub(super) fn smart_top_up(self: &Rc<Self>) {
-        let (changed, fetch) = {
+        let (before, inserted, fetch) = {
             let mut state = self.state.borrow_mut();
             if !state.settings.smart_shuffle {
                 return;
@@ -100,7 +100,10 @@ impl App {
             let mut run = usize::from(!queue.is_recommended(current));
             let mut ahead = 0;
             let mut index = current + 1;
-            let mut changed = false;
+            let before = queue.revision();
+            // Ascending, each counting the ones before it, so the panel can
+            // put them into its rows in this order.
+            let mut inserted = Vec::new();
             let mut dry = false;
             // Only before one of the user's own tracks, never after the last:
             // a cleared queue stays clear, and autoplay takes over at the end.
@@ -120,9 +123,9 @@ impl App {
                     };
                     smart.known.insert(track.id.clone());
                     queue.insert_recommended(index, track);
+                    inserted.push(index);
                     smart.gap = 0;
                     run = 0;
-                    changed = true;
                     index += 1;
                     continue;
                 }
@@ -135,10 +138,10 @@ impl App {
                 smart.fetching = true;
                 (seed, smart.generation)
             });
-            (changed, fetch)
+            (before, inserted, fetch)
         };
-        if changed {
-            self.refresh_queue();
+        if !inserted.is_empty() {
+            self.queue_recommended(before, &inserted);
         }
         if let Some((seed, generation)) = fetch {
             self.smart_fetch(seed, generation);
