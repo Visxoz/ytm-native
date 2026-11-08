@@ -335,8 +335,14 @@ impl Resolver {
             // YouTube sometimes bot-checks a visitor ID; retry with a fresh one.
             Err(e) => {
                 log::debug!("retrying with a new visitor ID: {e}");
-                let visitor = api.visitor_data(true).await?;
-                streams::resolve(video_id, &visitor, max_kbps).await
+                let fresh = api.visitor_data(true).await?;
+                let result = streams::resolve(video_id, &fresh, max_kbps).await;
+                // Only a fresh ID working shows the old one was at fault;
+                // both failing points at the song instead.
+                if result.is_ok() {
+                    api.forget_visitor(visitor);
+                }
+                result
             }
         };
         log::info!(

@@ -218,6 +218,12 @@ impl Api {
     pub async fn visitor_data(&self, fresh: bool) -> Result<String> {
         self.q().get_visitor_data(fresh).await.map_err(err)
     }
+
+    /// Drops a visitor ID YouTube refused from rustypipe's pool, so later
+    /// songs don't draw it again.
+    pub fn forget_visitor(&self, visitor: &str) {
+        self.q().remove_visitor_data(visitor)
+    }
 }
 
 #[cfg(test)]
