@@ -1042,36 +1042,17 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        NavRow {
-                            icon: Icons.home;
-                            label: "Home";
+                        for nav in [
+                            { id: "home", label: "Home", icon: Icons.home },
+                            { id: "explore", label: "Explore", icon: Icons.explore },
+                            { id: "library", label: "Library", icon: Icons.library },
+                            { id: "history", label: "History", icon: Icons.history },
+                        ]: NavRow {
+                            icon: nav.icon;
+                            label: nav.label;
                             wide: sidebar.wide;
-                            active: root.nav-current == "home";
-                            clicked => { root.go("home"); }
-                        }
-
-                        NavRow {
-                            icon: Icons.explore;
-                            label: "Explore";
-                            wide: sidebar.wide;
-                            active: root.nav-current == "explore";
-                            clicked => { root.go("explore"); }
-                        }
-
-                        NavRow {
-                            icon: Icons.library;
-                            label: "Library";
-                            wide: sidebar.wide;
-                            active: root.nav-current == "library";
-                            clicked => { root.go("library"); }
-                        }
-
-                        NavRow {
-                            icon: Icons.history;
-                            label: "History";
-                            wide: sidebar.wide;
-                            active: root.nav-current == "history";
-                            clicked => { root.go("history"); }
+                            active: root.nav-current == nav.id;
+                            clicked => { root.go(nav.id); }
                         }
 
                         Rectangle {

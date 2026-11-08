@@ -10,7 +10,7 @@ use serde_json::value::RawValue;
 
 use super::{
     ArtistRef, Card, CardKind, CardLayout, QueueMode, Section, Track,
-    convert::{CARD_THUMB, ROW_THUMB, fit_thumb},
+    convert::{CARD_THUMB, ROW_THUMB, card_section, fit_thumb, track_section},
 };
 
 /// Longest list shelf shown, such as Quick picks.
@@ -444,19 +444,8 @@ impl Shelf {
                 cards.extend(two_row.card());
             }
         }
-        if !tracks.is_empty() {
-            return Some(Section::Tracks {
-                title,
-                tracks,
-                mode: QueueMode::Section,
-                numbered: false,
-            });
-        }
-        (!cards.is_empty()).then_some(Section::Cards {
-            title,
-            cards,
-            layout: CardLayout::Carousel,
-        })
+        track_section(&title, tracks, QueueMode::Section)
+            .or_else(|| card_section(&title, cards, CardLayout::Carousel))
     }
 }
 
