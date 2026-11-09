@@ -37,15 +37,16 @@ export component ListView {
     }
     // Moved from outside: Slint shifts the offset to keep rows in place as it
     // re-estimates their height, and the app restores scroll positions. Carry
-    // a glide along by the same amount, and put the list back on the grid.
+    // a glide along by the same amount; its next frame puts the list back on
+    // the grid. Rounding the offset here instead makes Slint re-estimate
+    // again, and the two chase each other until Slint gives up on the event.
     changed content-y => {
         if root.content-y != root.written {
             if root.gliding {
                 root.glide-from += root.content-y - root.written;
                 root.glide-to += root.content-y - root.written;
             }
-            root.written = round(root.content-y / 1phx) * 1phx;
-            root.content-y = root.written;
+            root.written = root.content-y;
         }
     }
 
