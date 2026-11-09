@@ -81,6 +81,9 @@ opt-level = 3
 [profile.release.package.rquickjs-sys]
 opt-level = 3
 
+[profile.dev]
+opt-level = 1
+
 [profile.dev.package."*"]
 opt-level = 2
 
@@ -92,6 +95,7 @@ overflow-checks = false
 [profile.ci]
 inherits = "dev"
 debug = false
+opt-level = 0
 
 [profile.ci.package."*"]
 opt-level = 0
