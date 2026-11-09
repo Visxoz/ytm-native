@@ -301,13 +301,18 @@ impl App {
         if !self.ui().get_has_track() {
             return;
         }
-        let ended = !self.state.borrow().playback.started && !self.ui().get_np_loading();
-        if ended {
+        if self.stopped() {
             // Replay the current track after it stopped at the queue's end.
             self.start_current();
             return;
         }
         self.set_paused(!self.player.is_paused());
+    }
+
+    /// Whether nothing is loaded for the track shown, as after a restart or
+    /// once the queue has played out.
+    fn stopped(&self) -> bool {
+        !self.state.borrow().playback.started && !self.ui().get_np_loading()
     }
 
     pub(super) fn set_paused(self: &Rc<Self>, paused: bool) {
@@ -323,7 +328,15 @@ impl App {
         } else {
             secs.max(0.0)
         };
-        self.player.seek(secs);
+        if self.stopped() {
+            // The engine has nothing to seek in; the track starts here.
+            let mut state = self.state.borrow_mut();
+            if let Some(id) = state.queue.current().map(|t| t.id.clone()) {
+                state.playback.resume = Some((id, secs));
+            }
+        } else {
+            self.player.seek(secs);
+        }
         self.ui().set_np_position(secs as f32);
         self.report_playback_at(secs);
     }
