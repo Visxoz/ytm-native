@@ -1,0 +1,219 @@
+import { Icons, Theme } from "../theme.slint";
+import { Api, QueueItem } from "../types.slint";
+import { Icon, IconButton, Pill } from "../widgets/buttons.slint";
+import { ListView } from "../widgets/list.slint";
+import { Spinner } from "../widgets/spinner.slint";
+import { Lyrics } from "lyrics.slint";
+import { Drag, PanelAction, QueueRow } from "queue.slint";
+
+/// The right-hand panel, with the queue under "Up next" and the lyrics,
+/// sliding open and shut.
+export component SidePanel inherits Rectangle {
+    in-out property <bool> panel-open;
+    in-out property <int> panel-tab;
+    in property <color> np-accent;
+    in property <[QueueItem]> queue;
+    in property <int> queue-selected;
+    in property <[string]> lyrics;
+    in property <bool> lyrics-synced;
+    in property <int> lyrics-current;
+    in property <string> lyrics-source;
+    in property <bool> lyrics-loading;
+
+    callback queue-clicked(index: int, control: bool, shift: bool);
+    callback queue-move(from: int, to: int);
+    callback queue-remove(index: int);
+    callback queue-remove-selected();
+    callback queue-play-next(index: int);
+    callback queue-play-next-selected();
+    callback queue-clear-selection();
+    callback queue-clear();
+    callback queue-save();
+    callback panel-tab-changed(tab: int);
+    callback lyric-clicked(index: int);
+
+    width: root.panel-open ? Theme.right-panel : 0px;
+    animate width {
+        duration: 260ms;
+        easing: ease-in-out;
+    }
+    visible: self.width > 1px;
+    border-radius: Theme.panel-radius;
+    background: Theme.panel;
+    clip: true;
+
+    Rectangle {
+        x: 0;
+        width: Theme.right-panel;
+        if root.panel-tab == 1: Rectangle {
+            background: @linear-gradient(180deg, root.np-accent 0%, root.np-accent.darker(0.5) 100%);
+            animate background { duration: 500ms; }
+        }
+        VerticalLayout {
+            padding-top: 12px;
+            HorizontalLayout {
+                height: 48px;
+                padding-left: 16px;
+                padding-right: 12px;
+                spacing: 8px;
+                Pill {
+                    y: (parent.height - self.height) / 2;
+                    label: "Up next";
+                    active: root.panel-tab == 0;
+                    clicked => {
+                        root.panel-tab = 0;
+                        root.panel-tab-changed(0);
+                    }
+                }
+
+                Pill {
+                    y: (parent.height - self.height) / 2;
+                    label: "Lyrics";
+                    active: root.panel-tab == 1;
+                    clicked => {
+                        root.panel-tab = 1;
+                        root.panel-tab-changed(1);
+                    }
+                }
+
+                Rectangle {
+                    horizontal-stretch: 1;
+                }
+
+                IconButton {
+                    y: (parent.height - self.height) / 2;
+                    icon: Icons.close;
+                    size: 32px;
+                    icon-size: 18px;
+                    clicked => { root.panel-open = false; }
+                }
+            }
+
+            if root.panel-tab == 0: VerticalLayout {
+                vertical-stretch: 1;
+                HorizontalLayout {
+                    height: 44px;
+                    padding-left: 16px;
+                    padding-right: 16px;
+                    spacing: 14px;
+                    Text {
+                        text: root.queue.length == 0 ? ""
+                            : root.queue-selected > 0 ? root.queue-selected + " selected"
+                            : "Queue  •  " + root.queue.length + (root.queue.length == 1 ? " song" : " songs");
+                        vertical-alignment: center;
+                        font-size: 15px;
+                        font-weight: 700;
+                        color: Theme.text;
+                    }
+
+                    Rectangle {
+                        horizontal-stretch: 1;
+                    }
+
+                    if root.queue-selected > 0: PanelAction {
+                        text: "Play next";
+                        clicked => { root.queue-play-next-selected(); }
+                    }
+                    if root.queue-selected > 0: PanelAction {
+                        text: "Remove";
+                        clicked => { root.queue-remove-selected(); }
+                    }
+                    if root.queue-selected > 0: IconButton {
+                        y: (parent.height - self.height) / 2;
+                        icon: Icons.close;
+                        size: 28px;
+                        icon-size: 16px;
+                        clicked => { root.queue-clear-selection(); }
+                    }
+                    if root.queue-selected == 0 && Api.signed-in && root.queue.length > 0: PanelAction {
+                        text: "Save";
+                        clicked => { root.queue-save(); }
+                    }
+                    if root.queue-selected == 0 && root.queue.length > 1: PanelAction {
+                        text: "Clear";
+                        clicked => { root.queue-clear(); }
+                    }
+                }
+
+                if root.queue.length > 0: Rectangle {
+                    vertical-stretch: 1;
+                    queue-list := ListView {
+                        for item[i] in root.queue: QueueRow {
+                            x: 8px;
+                            width: queue-list.visible-width - 16px;
+                            item: item;
+                            index: i;
+                            count: root.queue.length;
+                            selected-count: root.queue-selected;
+                            scroll: queue-list.content-y;
+                            viewport: queue-list.visible-height;
+                            clicked(control, shift) => { root.queue-clicked(i, control, shift); }
+                            remove => { root.queue-remove(i); }
+                            remove-selected => { root.queue-remove-selected(); }
+                            play-next => { root.queue-play-next(i); }
+                            play-next-selected => { root.queue-play-next-selected(); }
+                            drag-to(target) => { root.queue-move(i, target); }
+                        }
+                    }
+
+                    // Where the dragged row will land.
+                    if Drag.from >= 0: Rectangle {
+                        x: 8px;
+                        y: queue-list.content-y + (Drag.target + (Drag.target > Drag.from ? 1 : 0)) * Theme.queue-row - 1px;
+                        width: queue-list.visible-width - 16px;
+                        height: 2px;
+                        background: Theme.accent;
+                    }
+
+                    // Scrolls the list while a row is dragged past its edge.
+                    Timer {
+                        interval: 16ms;
+                        running: Drag.from >= 0 && Drag.edge != 0;
+                        triggered => {
+                            queue-list.content-y = clamp(queue-list.content-y - Drag.edge * 8px,
+                                min(0px, queue-list.visible-height - queue-list.content-height), 0px);
+                        }
+                    }
+                }
+                if root.queue.length == 0: VerticalLayout {
+                    vertical-stretch: 1;
+                    alignment: center;
+                    spacing: 8px;
+                    Icon {
+                        x: (parent.width - self.width) / 2;
+                        path: Icons.queue;
+                        size: 48px;
+                        color: Theme.text-dim;
+                    }
+
+                    Text {
+                        text: "Your queue is empty";
+                        horizontal-alignment: center;
+                        font-size: 16px;
+                        font-weight: 700;
+                        color: Theme.text;
+                    }
+
+                    Text {
+                        text: "Play something and it shows up here.";
+                        horizontal-alignment: center;
+                        color: Theme.text-secondary;
+                    }
+                }
+            }
+            if root.panel-tab == 1: Rectangle {
+                vertical-stretch: 1;
+                if root.lyrics-loading: Spinner {
+                    size: 32px;
+                }
+                if !root.lyrics-loading: Lyrics {
+                    lines: root.lyrics;
+                    synced: root.lyrics-synced;
+                    current: root.lyrics-current;
+                    source: root.lyrics-source;
+                    line-clicked(i) => { root.lyric-clicked(i); }
+                }
+            }
+        }
+    }
+}

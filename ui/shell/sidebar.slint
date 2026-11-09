@@ -1,0 +1,200 @@
+import { Icons, Theme } from "../theme.slint";
+import { Api, CardItem } from "../types.slint";
+import { Art } from "../widgets/art.slint";
+import { Icon, PillButton } from "../widgets/buttons.slint";
+import { ListView } from "../widgets/list.slint";
+
+export component NavRow inherits Rectangle {
+    in property <string> icon;
+    in property <string> label;
+    in property <bool> active;
+    in property <bool> wide;
+    callback clicked();
+    height: 44px;
+    border-radius: 6px;
+    background: root.active ? Theme.hover : touch.has-hover ? #ffffff0a : transparent;
+    animate background { duration: Theme.fast; }
+    Icon {
+        x: root.wide ? 14px : (parent.width - self.width) / 2;
+        path: root.icon;
+        size: 24px;
+        color: root.active || touch.has-hover ? Theme.text : Theme.text-secondary;
+        animate x {
+            duration: Theme.normal;
+            easing: ease-in-out;
+        }
+    }
+
+    if root.wide: Text {
+        x: 54px;
+        height: 100%;
+        vertical-alignment: center;
+        text: root.label;
+        font-size: 15px;
+        font-weight: 700;
+        color: root.active || touch.has-hover ? Theme.text : Theme.text-secondary;
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component LibraryRow inherits Rectangle {
+    in property <CardItem> item;
+    in property <bool> wide;
+    height: 64px;
+    border-radius: 6px;
+    background: touch.has-hover ? Theme.hover : transparent;
+    animate background { duration: Theme.fast; }
+    Art {
+        x: root.wide ? 8px : (parent.width - self.width) / 2;
+        width: 48px;
+        height: 48px;
+        source: root.item.art;
+        round: root.item.round;
+    }
+
+    if root.wide: VerticalLayout {
+        x: 68px;
+        width: parent.width - 76px;
+        alignment: center;
+        spacing: 2px;
+        Text {
+            text: root.item.title;
+            font-size: 15px;
+            font-weight: 500;
+            color: Theme.text;
+            overflow: elide;
+        }
+
+        Text {
+            text: root.item.subtitle;
+            font-size: 13px;
+            color: Theme.text-secondary;
+            overflow: elide;
+        }
+    }
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { Api.navigate(root.item.kind, root.item.id, root.item.title); }
+    }
+}
+
+/// Your Library: the page links and the signed-in account's saved items,
+/// narrowing to icons when collapsed.
+export component Sidebar inherits Rectangle {
+    in property <bool> sidebar-collapsed;
+    in property <string> nav-current;
+    in property <[CardItem]> library;
+    in-out property <bool> sign-in-open;
+    callback toggle-sidebar();
+    callback go(nav: string);
+
+    property <bool> wide: self.width > 200px;
+    width: root.sidebar-collapsed ? Theme.sidebar-narrow : Theme.sidebar-wide;
+    animate width {
+        duration: 260ms;
+        easing: ease-in-out;
+    }
+    border-radius: Theme.panel-radius;
+    background: Theme.panel;
+    clip: true;
+
+    VerticalLayout {
+        padding: 8px;
+        spacing: 2px;
+        Rectangle {
+            height: 52px;
+            library-touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.toggle-sidebar(); }
+            }
+
+            Icon {
+                x: root.wide ? 14px : (parent.width - self.width) / 2;
+                path: root.wide ? Icons.collapse : Icons.library;
+                size: 24px;
+                color: library-touch.has-hover ? Theme.text : Theme.text-secondary;
+            }
+
+            if root.wide: Text {
+                x: 54px;
+                height: 100%;
+                vertical-alignment: center;
+                text: "Your Library";
+                font-size: 16px;
+                font-weight: 700;
+                color: library-touch.has-hover ? Theme.text : Theme.text-secondary;
+            }
+        }
+
+        for nav in [
+            { id: "home", label: "Home", icon: Icons.home },
+            { id: "explore", label: "Explore", icon: Icons.explore },
+            { id: "library", label: "Library", icon: Icons.library },
+            { id: "history", label: "History", icon: Icons.history },
+        ]: NavRow {
+            icon: nav.icon;
+            label: nav.label;
+            wide: root.wide;
+            active: root.nav-current == nav.id;
+            clicked => { root.go(nav.id); }
+        }
+
+        Rectangle {
+            height: 17px;
+            Rectangle {
+                x: 8px;
+                width: parent.width - 16px;
+                height: 1px;
+                background: Theme.divider;
+            }
+        }
+
+        if Api.signed-in: library-list := ListView {
+            vertical-stretch: 1;
+            for item in root.library: LibraryRow {
+                width: library-list.visible-width;
+                item: item;
+                wide: root.wide;
+            }
+        }
+        if !Api.signed-in && root.wide: Rectangle {
+            height: card.preferred-height;
+            border-radius: 8px;
+            background: Theme.elevated;
+            card := VerticalLayout {
+                padding: 20px;
+                spacing: 10px;
+                Text {
+                    text: "Bring your library";
+                    font-size: 16px;
+                    font-weight: 700;
+                    color: Theme.text;
+                }
+
+                Text {
+                    text: "Sign in to see your playlists, albums and listening history here.";
+                    font-size: 13px;
+                    color: Theme.text-secondary;
+                    wrap: word-wrap;
+                }
+
+                HorizontalLayout {
+                    alignment: start;
+                    padding-top: 6px;
+                    PillButton {
+                        text: "Sign in";
+                        primary: true;
+                        small: true;
+                        clicked => { root.sign-in-open = true; }
+                    }
+                }
+            }
+        }
+        if !Api.signed-in: Rectangle {
+            vertical-stretch: 1;
+        }
+    }
+}

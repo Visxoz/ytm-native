@@ -1,0 +1,25 @@
+import { Icons, Theme } from "../theme.slint";
+import { Icon } from "buttons.slint";
+
+/// Artwork with rounded corners that fades in once it has loaded.
+export component Art inherits Rectangle {
+    in property <image> source;
+    in property <bool> round;
+    in property <length> radius: 4px;
+    border-radius: root.round ? min(self.width, self.height) / 2 : root.radius;
+    clip: true;
+    background: Theme.highlight;
+    if root.source.width == 0: Icon {
+        path: Icons.note;
+        size: min(root.width, root.height) * 0.38;
+        color: Theme.text-dim;
+    }
+    Image {
+        width: 100%;
+        height: 100%;
+        source: root.source;
+        image-fit: cover;
+        opacity: root.source.width > 0 ? 1 : 0;
+        animate opacity { duration: 300ms; }
+    }
+}

@@ -1,0 +1,85 @@
+import { Theme } from "../theme.slint";
+import { RowItem, RowKind } from "../types.slint";
+import { CardGrid, GenreGrid } from "cards.slint";
+import { Carousel } from "carousel.slint";
+import { PageHeader, TopResult } from "header.slint";
+import { Rows } from "layout.slint";
+import { Columns, TrackRow } from "track-row.slint";
+
+/// One entry of the page list; its kind picks what it shows.
+export component PageRow {
+    in property <RowItem> data;
+    in property <length> content-width;
+    property <length> inner: root.content-width - 2 * Theme.page-padding;
+    width: root.content-width;
+    height: Rows.height(root.data, root.inner);
+
+    if root.data.kind == RowKind.greeting: Text {
+        x: Theme.page-padding;
+        y: 28px;
+        text: root.data.title;
+        font-size: 32px;
+        font-weight: 800;
+        font-family: Theme.display-font;
+        color: Theme.text;
+    }
+    if root.data.kind == RowKind.header: PageHeader {
+        x: Theme.page-padding;
+        y: 0;
+        width: root.inner;
+        height: root.height;
+        full-width: root.content-width;
+        data: root.data;
+    }
+    if root.data.kind == RowKind.title: Text {
+        x: Theme.page-padding;
+        y: 28px;
+        width: root.inner;
+        text: root.data.title;
+        font-size: 24px;
+        font-weight: 800;
+        font-family: Theme.display-font;
+        color: Theme.text;
+        overflow: elide;
+    }
+    if root.data.kind == RowKind.columns: Columns {
+        x: Theme.page-padding;
+        width: root.inner;
+        show-album: root.data.show-album;
+    }
+    if root.data.kind == RowKind.track: TrackRow {
+        x: Theme.page-padding;
+        width: root.inner;
+        track: root.data.track;
+        numbered: root.data.numbered;
+        show-album: root.data.show-album && root.inner > 640px;
+        section: root.data.section;
+        index: root.data.index;
+    }
+    if root.data.kind == RowKind.carousel: Carousel {
+        x: Theme.page-padding;
+        y: 0;
+        width: root.inner;
+        cards: root.data.cards;
+    }
+    if root.data.kind == RowKind.grid: CardGrid {
+        x: Theme.page-padding;
+        y: 0;
+        width: root.inner;
+        height: root.height;
+        cards: root.data.cards;
+    }
+    if root.data.kind == RowKind.chips: GenreGrid {
+        x: Theme.page-padding;
+        y: 0;
+        width: root.inner;
+        height: root.height;
+        cards: root.data.cards;
+    }
+    if root.data.kind == RowKind.top: TopResult {
+        x: Theme.page-padding;
+        y: 12px;
+        width: min(root.inner, 520px);
+        card: root.data.cards[0];
+    }
+}

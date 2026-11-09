@@ -1,0 +1,181 @@
+import { Theme } from "../theme.slint";
+import { Api, CardItem } from "../types.slint";
+import { Art } from "../widgets/art.slint";
+import { PlayButton } from "../widgets/buttons.slint";
+import { Layout } from "layout.slint";
+
+export component Card {
+    in property <CardItem> card;
+    /// The pointer dragged sideways by `dx` since it pressed, for a carousel
+    /// to scroll by; a release after a drag is not a click.
+    callback dragged(dx: length);
+    callback drag-ended();
+    width: Layout.card-width;
+    height: Layout.card-height(self.width);
+    property <length> art-size: root.width - 2 * Layout.card-padding;
+    property <bool> hot: touch.has-hover || play-button.has-hover;
+
+    ContextMenuArea {
+        Menu {
+            MenuItem {
+                title: "Play";
+                activated => { Api.play-card(root.card.kind, root.card.id); }
+            }
+
+            MenuItem {
+                title: "Start radio";
+                activated => { Api.card-radio(root.card.kind, root.card.id); }
+            }
+        }
+
+        Rectangle {
+            border-radius: 8px;
+            background: root.hot ? Theme.elevated : transparent;
+            animate background { duration: Theme.normal; }
+        }
+
+        touch := TouchArea {
+            // Measured in window coordinates: the card itself moves with
+            // the carousel as it is dragged, so its own would cancel out.
+            property <length> pointer-x: self.absolute-position.x + self.mouse-x;
+            property <length> pressed-at;
+            property <bool> dragging;
+            mouse-cursor: self.dragging ? MouseCursor.grabbing : MouseCursor.pointer;
+            pointer-event(ev) => {
+                if ev.button != PointerEventButton.left {
+                    return;
+                }
+                if ev.kind == PointerEventKind.down {
+                    self.pressed-at = self.pointer-x;
+                } else if self.dragging {
+                    self.dragging = false;
+                    root.drag-ended();
+                } else if ev.kind == PointerEventKind.up {
+                    Api.navigate(root.card.kind, root.card.id, root.card.title);
+                }
+            }
+            moved => {
+                if self.pressed && (self.dragging || abs(self.pointer-x - self.pressed-at) > 6px) {
+                    self.dragging = true;
+                    root.dragged(self.pointer-x - self.pressed-at);
+                }
+            }
+        }
+
+        Art {
+            x: Layout.card-padding;
+            y: Layout.card-padding;
+            width: root.art-size;
+            height: root.art-size;
+            source: root.card.art;
+            round: root.card.round;
+            radius: 6px;
+            drop-shadow-blur: 16px;
+            drop-shadow-offset-y: 6px;
+            drop-shadow-color: #00000060;
+        }
+
+        Rectangle {
+            x: Layout.card-padding + root.art-size - self.width - 8px;
+            y: Layout.card-padding + root.art-size - self.height - (root.hot ? 8px : 0px);
+            width: 48px;
+            height: 48px;
+            opacity: root.hot ? 1 : 0;
+            animate y, opacity {
+                duration: Theme.normal;
+                easing: ease-out;
+            }
+            play-button := PlayButton {
+                size: 48px;
+                clicked => { Api.play-card(root.card.kind, root.card.id); }
+            }
+        }
+
+        VerticalLayout {
+            x: Layout.card-padding;
+            y: Layout.card-padding + root.art-size + 8px;
+            width: root.art-size;
+            height: Layout.card-text - 4px;
+            spacing: 4px;
+            alignment: start;
+            Text {
+                text: root.card.title;
+                overflow: elide;
+                font-size: 15px;
+                font-weight: 600;
+                color: Theme.text;
+            }
+
+            Text {
+                text: root.card.subtitle;
+                overflow: elide;
+                font-size: 13px;
+                color: Theme.text-secondary;
+            }
+        }
+    }
+}
+
+/// A large colour tile, as in Spotify's "Browse all".
+export component GenreTile inherits Rectangle {
+    in property <CardItem> card;
+    height: Layout.chip-height;
+    border-radius: 8px;
+    clip: true;
+    background: @linear-gradient(135deg, root.card.tint 0%, root.card.tint.darker(0.45) 100%);
+    Text {
+        x: 16px;
+        y: 14px;
+        width: parent.width - 32px;
+        text: root.card.title;
+        wrap: word-wrap;
+        font-size: 20px;
+        font-weight: 700;
+        font-family: Theme.display-font;
+        color: Theme.text;
+    }
+
+    Rectangle {
+        x: parent.width - 52px;
+        y: parent.height - 44px;
+        width: 64px;
+        height: 64px;
+        border-radius: 8px;
+        background: #ffffff22;
+        transform-rotation: 25deg;
+    }
+
+    Rectangle {
+        background: touch.has-hover ? #ffffff14 : transparent;
+        animate background { duration: Theme.fast; }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { Api.navigate(root.card.kind, root.card.id, root.card.title); }
+    }
+}
+
+export component CardGrid {
+    in property <[CardItem]> cards;
+    out property <int> columns: Layout.card-columns(root.width);
+    property <length> cell: Layout.card-cell(root.width);
+    for card[i] in root.cards: Card {
+        x: -Layout.card-padding + mod(i, root.columns) * (root.cell + Layout.card-gap);
+        y: floor(i / root.columns) * (Layout.card-height(root.cell) + Layout.card-gap);
+        width: root.cell;
+        card: card;
+    }
+}
+
+export component GenreGrid {
+    in property <[CardItem]> cards;
+    property <int> columns: Layout.chip-columns(root.width);
+    property <length> cell: (root.width - (root.columns - 1) * Layout.chip-gap) / root.columns;
+    for card[i] in root.cards: GenreTile {
+        x: mod(i, root.columns) * (root.cell + Layout.chip-gap);
+        y: floor(i / root.columns) * (Layout.chip-height + Layout.chip-gap);
+        width: root.cell;
+        card: card;
+    }
+}

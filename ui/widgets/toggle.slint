@@ -1,0 +1,35 @@
+import { Theme } from "../theme.slint";
+
+/// An on/off switch in the accent colour.
+export component Toggle {
+    in-out property <bool> checked;
+    callback toggled(bool);
+    width: 40px;
+    height: 22px;
+    Rectangle {
+        border-radius: self.height / 2;
+        background: root.checked ? Theme.accent : #ffffff38;
+        animate background { duration: Theme.normal; }
+    }
+
+    Rectangle {
+        x: root.checked ? root.width - self.width - 3px : 3px;
+        y: 3px;
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: Theme.text;
+        animate x {
+            duration: Theme.normal;
+            easing: ease-in-out;
+        }
+    }
+
+    TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            root.checked = !root.checked;
+            root.toggled(root.checked);
+        }
+    }
+}

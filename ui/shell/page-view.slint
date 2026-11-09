@@ -1,0 +1,115 @@
+import { Theme } from "../theme.slint";
+import { Api, RowItem } from "../types.slint";
+import { PageRow } from "../page/page-row.slint";
+import { PillButton, PlayButton } from "../widgets/buttons.slint";
+import { ListView } from "../widgets/list.slint";
+import { Spinner } from "../widgets/spinner.slint";
+
+/// The main panel: the current page's rows under its accent tint, with a sticky title, and the loading and error states.
+export component PageView inherits Rectangle {
+    in property <[RowItem]> rows;
+    in property <bool> page-loading;
+    in property <string> page-error;
+    in property <string> page-title;
+    in property <bool> page-can-play;
+    in property <color> accent;
+    in property <string> nav-current;
+    in-out property <length> page-scroll;
+    in-out property <bool> sign-in-open;
+
+    callback go(nav: string);
+
+    horizontal-stretch: 1;
+    border-radius: Theme.panel-radius;
+    background: Theme.panel;
+    clip: true;
+
+    // Tint behind the top of the page, scrolling with it.
+    Rectangle {
+        y: root.page-scroll;
+        height: 420px;
+        background: @linear-gradient(180deg, root.accent 0%, Theme.panel 100%);
+        animate background { duration: 500ms; }
+    }
+
+    content := Rectangle {
+        opacity: root.page-loading || root.page-error != "" ? 0 : 1;
+        y: root.page-loading ? 16px : 0px;
+        animate opacity { duration: 260ms; }
+        animate y {
+            duration: 320ms;
+            easing: ease-out;
+        }
+        list := ListView {
+            width: 100%;
+            height: 100%;
+            content-y <=> root.page-scroll;
+            for row in root.rows: PageRow {
+                data: row;
+                content-width: list.visible-width;
+            }
+        }
+    }
+
+    // Sticky title once the header scrolls away.
+    Rectangle {
+        y: 0;
+        height: 64px;
+        background: root.accent.darker(0.35);
+        opacity: root.page-title != "" && -root.page-scroll > 280px ? 1 : 0;
+        visible: self.opacity > 0;
+        animate opacity { duration: Theme.normal; }
+        TouchArea { }
+
+        HorizontalLayout {
+            padding-left: Theme.page-padding;
+            spacing: 12px;
+            if root.page-can-play: PlayButton {
+                y: (parent.height - self.height) / 2;
+                size: 44px;
+                clicked => { Api.header-action("play"); }
+            }
+            Text {
+                text: root.page-title;
+                vertical-alignment: center;
+                font-size: 22px;
+                font-weight: 800;
+                font-family: Theme.display-font;
+                color: Theme.text;
+                overflow: elide;
+            }
+        }
+    }
+
+    if root.page-loading: Spinner {
+        size: 40px;
+    }
+    if !root.page-loading && root.page-error != "": VerticalLayout {
+        alignment: center;
+        spacing: 20px;
+        padding: 48px;
+        Text {
+            text: root.page-error;
+            horizontal-alignment: center;
+            font-size: 18px;
+            font-weight: 600;
+            color: Theme.text;
+            wrap: word-wrap;
+        }
+
+        HorizontalLayout {
+            alignment: center;
+            PillButton {
+                text: root.nav-current == "library" && !Api.signed-in ? "Sign in" : "Try again";
+                primary: true;
+                clicked => {
+                    if root.nav-current == "library" && !Api.signed-in {
+                        root.sign-in-open = true;
+                    } else {
+                        root.go("reload");
+                    }
+                }
+            }
+        }
+    }
+}

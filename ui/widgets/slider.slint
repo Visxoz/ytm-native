@@ -1,0 +1,74 @@
+import { Theme } from "../theme.slint";
+
+/// A rounded slider. `changed` fires while dragging, `seek` on release.
+export component Slider {
+    in property <float> value;
+    in property <float> buffered;
+    in property <bool> enabled: true;
+    callback changed(float);
+    callback seek(float);
+    property <bool> dragging;
+    property <float> drag-value;
+    property <float> shown: root.dragging ? root.drag-value : clamp(root.value, 0, 1);
+    property <bool> hot: (touch.has-hover || root.dragging) && root.enabled;
+    height: 16px;
+
+    Rectangle {
+        y: (parent.height - self.height) / 2;
+        height: 4px;
+        border-radius: 2px;
+        background: #ffffff30;
+        clip: true;
+        Rectangle {
+            x: 0;
+            width: parent.width * clamp(root.buffered, 0, 1);
+            background: #ffffff28;
+        }
+
+        Rectangle {
+            x: 0;
+            width: parent.width * root.shown;
+            border-radius: 2px;
+            background: root.hot ? Theme.accent : Theme.text;
+            animate background { duration: Theme.fast; }
+        }
+    }
+
+    Rectangle {
+        x: root.width * root.shown - self.width / 2;
+        y: (parent.height - self.height) / 2;
+        width: 12px;
+        height: 12px;
+        border-radius: 6px;
+        background: Theme.text;
+        drop-shadow-blur: 4px;
+        drop-shadow-color: #00000080;
+        opacity: root.hot ? 1 : 0;
+        animate opacity { duration: Theme.fast; }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        mouse-cursor: pointer;
+        pointer-event(ev) => {
+            if ev.button == PointerEventButton.left && ev.kind == PointerEventKind.down {
+                root.dragging = true;
+                root.drag-value = clamp(self.mouse-x / self.width, 0, 1);
+                root.changed(root.drag-value);
+            } else if ev.button == PointerEventButton.left && ev.kind == PointerEventKind.up && root.dragging {
+                root.dragging = false;
+                root.seek(root.drag-value);
+            }
+        }
+        moved => {
+            if root.dragging {
+                root.drag-value = clamp(self.mouse-x / self.width, 0, 1);
+                root.changed(root.drag-value);
+            }
+        }
+        scroll-event(ev) => {
+            root.seek(clamp(root.value + (ev.delta-y > 0 ? 0.05 : -0.05), 0, 1));
+            accept
+        }
+    }
+}

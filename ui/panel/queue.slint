@@ -1,0 +1,228 @@
+import { Icons, Theme } from "../theme.slint";
+import { Api, QueueItem } from "../types.slint";
+import { Art } from "../widgets/art.slint";
+import { Icon, IconButton } from "../widgets/buttons.slint";
+import { Equalizer } from "../widgets/spinner.slint";
+
+/// The queue row being dragged, where it would land, and whether it is
+/// near or past the list's top (-1) or bottom (1) edge, so the list scrolls.
+export global Drag {
+    in-out property <int> from: -1;
+    in-out property <int> target;
+    in-out property <int> edge;
+}
+
+/// A text button in a panel's header.
+export component PanelAction inherits Text {
+    callback clicked();
+    vertical-alignment: center;
+    font-size: 13px;
+    font-weight: 600;
+    color: touch.has-hover ? Theme.text : Theme.text-secondary;
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+export component QueueRow inherits Rectangle {
+    in property <QueueItem> item;
+    in property <int> index;
+    in property <int> count;
+    /// How many rows are selected; actions on a selected row apply to all.
+    in property <int> selected-count;
+    /// The list's scroll offset and visible height, to follow the pointer
+    /// as the list scrolls under it.
+    in property <length> scroll;
+    in property <length> viewport;
+    callback clicked(control: bool, shift: bool);
+    callback remove();
+    callback remove-selected();
+    callback play-next();
+    callback play-next-selected();
+    callback drag-to(target: int);
+    property <bool> many: root.item.selected && root.selected-count > 1;
+    property <bool> dragging;
+    property <length> pressed-y;
+    /// Where the pointer is in the list's viewport.
+    property <length> pointer-y;
+    property <int> target: clamp(floor((root.pointer-y - root.scroll) / Theme.queue-row), 0, root.count - 1);
+    // The remove button counts as hovering the row, or they would flicker;
+    // nothing is hot while a row is dragged over the others.
+    property <bool> hot: (touch.has-hover || remove-button.has-hover) && Drag.from < 0;
+    height: Theme.queue-row;
+    z: root.dragging ? 1 : 0;
+
+    function track-pointer() {
+        root.pointer-y = root.y + root.scroll + touch.mouse-y;
+        Drag.edge = root.pointer-y < 24px ? -1 : root.pointer-y > root.viewport - 24px ? 1 : 0;
+        Drag.target = root.target;
+    }
+
+    function stop-dragging() {
+        root.dragging = false;
+        Drag.from = -1;
+        Drag.edge = 0;
+    }
+
+    menu := ContextMenuArea {
+        Menu {
+            MenuItem {
+                title: root.many ? "Play " + root.selected-count + " next" : "Play next";
+                enabled: root.many || !root.item.current;
+                activated => {
+                    if root.many {
+                        root.play-next-selected();
+                    } else {
+                        root.play-next();
+                    }
+                }
+            }
+
+            MenuItem {
+                title: root.many ? "Remove " + root.selected-count + " from queue" : "Remove from queue";
+                enabled: root.many || !root.item.current;
+                activated => {
+                    if root.many {
+                        root.remove-selected();
+                    } else {
+                        root.remove();
+                    }
+                }
+            }
+
+            if Api.signed-in && !root.many: MenuSeparator { }
+
+            if Api.signed-in && !root.many: MenuItem {
+                title: Api.rating-of(root.item.id) == 1 ? "Remove from liked songs" : "Like";
+                activated => { Api.rate(root.item.id, 1); }
+            }
+
+            if Api.signed-in && !root.many: MenuItem {
+                title: Api.rating-of(root.item.id) == 2 ? "Remove dislike" : "Dislike";
+                activated => { Api.rate(root.item.id, 2); }
+            }
+
+            if Api.signed-in && !root.many && !root.item.current: MenuItem {
+                title: "Remove rating";
+                activated => { Api.rate(root.item.id, 0); }
+            }
+
+            if Api.signed-in && !root.many: MenuItem {
+                title: "Save to playlist";
+                activated => { Api.save-to-playlist(root.item.id); }
+            }
+        }
+
+        touch := TouchArea {
+            mouse-cursor: root.dragging ? MouseCursor.grabbing : MouseCursor.pointer;
+            pointer-event(ev) => {
+                if ev.button != PointerEventButton.left {
+                    return;
+                }
+                if ev.kind == PointerEventKind.down {
+                    root.pressed-y = self.mouse-y;
+                } else if ev.kind == PointerEventKind.up {
+                    if root.dragging {
+                        root.stop-dragging();
+                        root.drag-to(root.target);
+                    } else {
+                        root.clicked(ev.modifiers.control, ev.modifiers.shift);
+                    }
+                } else if ev.kind == PointerEventKind.cancel {
+                    root.stop-dragging();
+                }
+            }
+            moved => {
+                if !root.dragging && self.pressed && abs(self.mouse-y - root.pressed-y) > 6px {
+                    root.dragging = true;
+                    Drag.from = root.index;
+                }
+                if root.dragging {
+                    root.track-pointer();
+                }
+            }
+        }
+
+        // Follows the pointer while dragged; otherwise sits in the row.
+        Rectangle {
+            y: root.dragging ? root.pointer-y - root.scroll - root.y - root.pressed-y : 0;
+            border-radius: 6px;
+            background: root.dragging ? Theme.menu : root.item.selected ? Theme.highlight : root.hot ? Theme.hover : transparent;
+            drop-shadow-blur: root.dragging ? 16px : 0;
+            drop-shadow-color: #00000080;
+            animate background { duration: Theme.fast; }
+
+            Art {
+                x: 8px;
+                width: 44px;
+                height: 44px;
+                source: root.item.art;
+            }
+
+            if root.item.current: Rectangle {
+                x: 8px;
+                width: 44px;
+                height: 44px;
+                border-radius: 4px;
+                background: #00000090;
+                Equalizer {
+                    active: Api.is-playing;
+                    color: Theme.text;
+                }
+            }
+            VerticalLayout {
+                x: 64px;
+                width: parent.width - 64px - 56px;
+                alignment: center;
+                spacing: 2px;
+                Text {
+                    text: root.item.title;
+                    overflow: elide;
+                    font-size: 14px;
+                    font-weight: 500;
+                    color: root.item.current ? Theme.accent : Theme.text;
+                }
+
+                HorizontalLayout {
+                    spacing: 4px;
+                    // Marks a track Smart Shuffle mixed in.
+                    if root.item.recommended: Icon {
+                        y: (parent.height - self.height) / 2;
+                        path: Icons.sparkle;
+                        size: 12px;
+                        color: Theme.text-secondary;
+                    }
+
+                    Text {
+                        text: root.item.artists;
+                        overflow: elide;
+                        font-size: 13px;
+                        color: Theme.text-secondary;
+                    }
+                }
+            }
+
+            remove-button := IconButton {
+                x: parent.width - self.width - 8px;
+                icon: Icons.close;
+                size: 32px;
+                icon-size: 18px;
+                enabled: root.hot && !root.item.current;
+                opacity: self.enabled ? 1 : 0;
+                clicked => { root.remove(); }
+            }
+
+            if !root.hot || root.item.current: Text {
+                x: parent.width - 52px;
+                width: 40px;
+                height: 100%;
+                text: root.item.duration;
+                color: Theme.text-secondary;
+                font-size: 13px;
+                horizontal-alignment: right;
+                vertical-alignment: center;
+            }
+        }
+    }
+}

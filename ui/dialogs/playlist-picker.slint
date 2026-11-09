@@ -1,0 +1,61 @@
+import { Icons, Theme } from "../theme.slint";
+import { PlaylistChoice } from "../types.slint";
+import { Icon } from "../widgets/buttons.slint";
+import { ListView } from "../widgets/list.slint";
+import { Spinner } from "../widgets/spinner.slint";
+import { Dialog } from "dialog.slint";
+
+/// Picks one of the user's own playlists to save a song to, ticking those
+/// that already have it.
+export component PlaylistPicker inherits Dialog {
+    in-out property <bool> picker-open;
+    in property <bool> picker-loading;
+    in property <[PlaylistChoice]> playlist-choices;
+    callback pick-playlist(index: int);
+
+    title: "Save to playlist";
+    dialog-width: 420px;
+    open: root.picker-open;
+    close => { root.picker-open = false; }
+    if root.picker-loading: Rectangle {
+        height: 64px;
+        Spinner { }
+    }
+    if !root.picker-loading && root.playlist-choices.length == 0: Text {
+        text: "You have no playlists of your own yet.";
+        color: Theme.text-secondary;
+    }
+    if !root.picker-loading && root.playlist-choices.length > 0: picks := ListView {
+        height: min(360px, root.playlist-choices.length * 44px);
+        for choice[i] in root.playlist-choices: Rectangle {
+            width: picks.visible-width;
+            height: 44px;
+            border-radius: 6px;
+            background: pick.has-hover ? Theme.hover : transparent;
+            pick := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.pick-playlist(i); }
+            }
+
+            HorizontalLayout {
+                padding-left: 12px;
+                padding-right: 12px;
+                spacing: 12px;
+                Text {
+                    text: choice.title;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    font-size: 14px;
+                    color: Theme.text;
+                }
+
+                if choice.contains: Icon {
+                    y: (parent.height - self.height) / 2;
+                    path: Icons.check;
+                    size: 18px;
+                    color: Theme.text-secondary;
+                }
+            }
+        }
+    }
+}

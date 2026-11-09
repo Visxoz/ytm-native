@@ -1,0 +1,334 @@
+import { Icons, Theme } from "../theme.slint";
+import { Api } from "../types.slint";
+import { Art } from "../widgets/art.slint";
+import { Icon, IconButton } from "../widgets/buttons.slint";
+
+/// YouTube Music's mark: a red disc with a ring and a centred play triangle.
+export component Logo {
+    width: 32px;
+    height: 32px;
+    Rectangle {
+        border-radius: self.width / 2;
+        background: #ff0000;
+    }
+
+    Rectangle {
+        width: 60%;
+        height: 60%;
+        border-radius: self.width / 2;
+        border-width: 1.6px;
+        border-color: white;
+    }
+
+    Icon {
+        path: Icons.play;
+        size: 12px;
+        color: white;
+    }
+}
+
+export component SearchBox inherits Rectangle {
+    in-out property <string> text <=> input.text;
+    in property <[string]> suggestions;
+    /// Recent searches, offered until the user types.
+    in property <[string]> recent;
+    out property <bool> focused: input.has-focus;
+    callback accepted(string);
+    callback edited(string);
+    /// A recent search's remove button was clicked.
+    callback forget(string);
+    /// The box is done with the keyboard; the window takes it back.
+    callback release-focus();
+    public function focus-input() {
+        root.typed = false;
+        input.focus();
+        input.select-all();
+    }
+    /// Hands the keyboard back to the window, so the next focus starts
+    /// with the recent searches again. Reset here rather than on focus,
+    /// which switching windows also takes and gives back.
+    public function close() {
+        root.typed = false;
+        root.release-focus();
+    }
+    /// Whether a point, in logical pixels from the window's corner, is on
+    /// the box or its open dropdown.
+    public pure function contains(x: length, y: length) -> bool {
+        x >= root.absolute-position.x && x < root.absolute-position.x + root.width
+            && y >= root.absolute-position.y
+            && y < root.absolute-position.y + root.height
+                + (root.open ? root.dropdown-gap + root.dropdown-height : 0px)
+    }
+
+    height: 48px;
+    border-radius: self.height / 2;
+    background: input.has-focus || touch.has-hover ? Theme.highlight : Theme.elevated;
+    border-width: 2px;
+    border-color: input.has-focus ? Theme.text : transparent;
+    animate background, border-color { duration: Theme.fast; }
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => { input.focus(); }
+    }
+
+    Icon {
+        x: 14px;
+        path: Icons.search;
+        size: 22px;
+        color: input.has-focus ? Theme.text : Theme.text-secondary;
+    }
+
+    input := TextInput {
+        x: 48px;
+        width: parent.width - 48px - 44px;
+        height: 100%;
+        vertical-alignment: center;
+        single-line: true;
+        font-size: 15px;
+        color: Theme.text;
+        selection-background-color: #ff003380;
+        accepted => {
+            root.accepted(self.text);
+            root.close();
+        }
+        edited => {
+            root.typed = true;
+            root.edited(self.text);
+        }
+        key-pressed(ev) => {
+            if ev.text == Key.Escape {
+                root.close();
+                return accept;
+            }
+            reject
+        }
+    }
+
+    if input.text == "": Text {
+        x: 48px;
+        height: 100%;
+        vertical-alignment: center;
+        text: "What do you want to play?";
+        color: Theme.text-dim;
+        font-size: 15px;
+    }
+    if input.text != "": IconButton {
+        x: parent.width - self.width - 8px;
+        icon: Icons.close;
+        size: 32px;
+        icon-size: 18px;
+        clicked => {
+            input.text = "";
+            root.edited("");
+            input.focus();
+        }
+    }
+
+    // Recent searches show from focusing the box until the user types, even
+    // over the last query, as clicking the box on a results page is the
+    // likeliest time to want them; typing swaps them for YouTube's
+    // suggestions, and clearing the box brings them back.
+    property <bool> typed;
+    property <bool> show-recent: input.text == "" || !root.typed;
+    property <[string]> choices: root.show-recent ? root.recent : root.suggestions;
+    property <bool> open: input.has-focus && root.choices.length > 0;
+    // Named once, as `contains` must match what is drawn.
+    property <length> dropdown-gap: 8px;
+    property <length> dropdown-padding: 8px;
+    property <length> choice-height: 44px;
+    property <length> dropdown-height: root.choices.length * root.choice-height + 2 * root.dropdown-padding;
+
+    if root.open: Rectangle {
+        y: root.height + root.dropdown-gap;
+        height: root.dropdown-height;
+        border-radius: 12px;
+        background: Theme.menu;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: #000000a0;
+        for choice[i] in root.choices: Rectangle {
+            x: root.dropdown-padding;
+            y: root.dropdown-padding + i * root.choice-height;
+            width: parent.width - 2 * root.dropdown-padding;
+            height: root.choice-height;
+            border-radius: 6px;
+            background: s-touch.has-hover || forget-button.has-hover ? Theme.hover : transparent;
+            Icon {
+                x: 12px;
+                path: root.show-recent ? Icons.history : Icons.search;
+                size: 18px;
+                color: Theme.text-secondary;
+            }
+
+            Text {
+                x: 44px;
+                width: parent.width - 56px - (root.show-recent ? 32px : 0px);
+                height: 100%;
+                vertical-alignment: center;
+                text: choice;
+                font-size: 14px;
+                color: Theme.text;
+                overflow: elide;
+            }
+
+            s-touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    input.text = choice;
+                    root.accepted(choice);
+                    root.close();
+                }
+            }
+
+            forget-button := IconButton {
+                x: parent.width - self.width - 6px;
+                visible: root.show-recent;
+                enabled: root.show-recent;
+                icon: Icons.close;
+                size: 32px;
+                icon-size: 16px;
+                clicked => { root.forget(choice); }
+            }
+        }
+    }
+}
+
+/// The window's top row: history buttons, Home, the search box and the
+/// account button.
+export component TopBar inherits Rectangle {
+    in property <bool> can-back;
+    in property <bool> can-forward;
+    in property <string> nav-current;
+    in-out property <string> search-text;
+    in property <[string]> suggestions;
+    in property <[string]> recent-searches;
+    in property <image> account-photo;
+    in property <string> update-version;
+    in-out property <bool> settings-open;
+    out property <bool> search-focused: search-box.focused;
+
+    callback back();
+    callback forward();
+    callback go(nav: string);
+    callback search(query: string);
+    callback search-edited(query: string);
+    callback forget-search(query: string);
+    /// The search box is done with the keyboard; the window takes it back.
+    callback release-focus();
+
+    public function focus-input() {
+        search-box.focus-input();
+    }
+
+    public function close() {
+        search-box.close();
+    }
+
+    /// Whether a point, in logical pixels from the window's corner, is on
+    /// the search box or its open dropdown.
+    public pure function contains(x: length, y: length) -> bool {
+        search-box.contains(x, y)
+    }
+
+    height: Theme.top-bar;
+    Logo {
+        x: 16px;
+    }
+
+    IconButton {
+        x: 64px;
+        icon: Icons.back;
+        size: 32px;
+        icon-size: 22px;
+        color: Theme.text;
+        background: Theme.elevated;
+        enabled: root.can-back;
+        clicked => { root.back(); }
+    }
+
+    IconButton {
+        x: 104px;
+        icon: Icons.forward;
+        size: 32px;
+        icon-size: 22px;
+        color: Theme.text;
+        background: Theme.elevated;
+        enabled: root.can-forward;
+        clicked => { root.forward(); }
+    }
+
+    HorizontalLayout {
+        x: (parent.width - self.width) / 2;
+        width: min(560px, parent.width - 400px);
+        spacing: 8px;
+        IconButton {
+            y: (parent.height - self.height) / 2;
+            icon: root.nav-current == "home" ? Icons.home : Icons.home-outline;
+            size: 48px;
+            icon-size: 24px;
+            color: root.nav-current == "home" ? Theme.text : Theme.text-secondary;
+            background: Theme.elevated;
+            hover-background: Theme.highlight;
+            clicked => { root.go("home"); }
+        }
+
+        search-box := SearchBox {
+            y: (parent.height - self.height) / 2;
+            horizontal-stretch: 1;
+            text <=> root.search-text;
+            suggestions: root.suggestions;
+            recent: root.recent-searches;
+            accepted(q) => { root.search(q); }
+            forget(q) => { root.forget-search(q); }
+            edited(q) => { root.search-edited(q); }
+            release-focus => { root.release-focus(); }
+        }
+    }
+
+    // The account button opens Settings, which holds sign-in
+    // and sign-out too. A dot on it marks a waiting update.
+    Rectangle {
+        x: parent.width - self.width - 8px;
+        y: (parent.height - self.height) / 2;
+        width: 36px;
+        height: 36px;
+        border-radius: 18px;
+        background: account-touch.has-hover ? Theme.highlight : Theme.elevated;
+        animate background { duration: Theme.fast; }
+        Rectangle {
+            width: 26px;
+            height: 26px;
+            border-radius: 13px;
+            background: Api.signed-in ? Theme.accent : #535353;
+            Icon {
+                path: Icons.account;
+                size: 18px;
+                color: Theme.text;
+            }
+
+            if Api.signed-in && root.account-photo.width > 0: Art {
+                width: 100%;
+                height: 100%;
+                round: true;
+                source: root.account-photo;
+            }
+        }
+
+        if root.update-version != "": Rectangle {
+            x: parent.width - self.width + 1px;
+            y: -1px;
+            width: 12px;
+            height: 12px;
+            border-radius: 6px;
+            background: Theme.accent;
+            border-width: 2px;
+            border-color: Theme.background;
+        }
+
+        account-touch := TouchArea {
+            mouse-cursor: pointer;
+            clicked => { root.settings-open = true; }
+        }
+    }
+}

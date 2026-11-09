@@ -1,28 +1,14 @@
-import { TextEdit } from "std-widgets.slint";
-import { ListView } from "list.slint";
-import { Theme, Icons } from "theme.slint";
-import {
-    Icon,
-    IconButton,
-    PlayButton,
-    PillButton,
-    Art,
-    Slider,
-    Spinner,
-    Toggle,
-    Equalizer,
-} from "widgets.slint";
-import { PageRow, Layout } from "rows.slint";
-import { Lyrics } from "lyrics.slint";
-import {
-    Api,
-    TrackItem,
-    CardItem,
-    RowItem,
-    RowKind,
-    QueueItem,
-    PlaylistChoice,
-} from "types.slint";
+import { EqualiserDialog } from "dialogs/equaliser.slint";
+import { PlaylistPicker } from "dialogs/playlist-picker.slint";
+import { SettingsDialog } from "dialogs/settings.slint";
+import { SignInDialog } from "dialogs/sign-in.slint";
+import { SidePanel } from "panel/side-panel.slint";
+import { PageView } from "shell/page-view.slint";
+import { PlayerBar } from "shell/player-bar.slint";
+import { Sidebar } from "shell/sidebar.slint";
+import { TopBar } from "shell/top-bar.slint";
+import { Theme } from "theme.slint";
+import { Api, CardItem, PlaylistChoice, QueueItem, RowItem, RowKind, TrackItem } from "types.slint";
 
 export {
     Api,
@@ -32,620 +18,6 @@ export {
     RowKind,
     QueueItem,
     PlaylistChoice,
-}
-
-/// YouTube Music's mark: a red disc with a ring and a centred play triangle.
-component Logo {
-    width: 32px;
-    height: 32px;
-    Rectangle {
-        border-radius: self.width / 2;
-        background: #ff0000;
-    }
-
-    Rectangle {
-        width: 60%;
-        height: 60%;
-        border-radius: self.width / 2;
-        border-width: 1.6px;
-        border-color: white;
-    }
-
-    Icon {
-        path: Icons.play;
-        size: 12px;
-        color: white;
-    }
-}
-
-component SearchBox inherits Rectangle {
-    in-out property <string> text <=> input.text;
-    in property <[string]> suggestions;
-    /// Recent searches, offered until the user types.
-    in property <[string]> recent;
-    out property <bool> focused: input.has-focus;
-    callback accepted(string);
-    callback edited(string);
-    /// A recent search's remove button was clicked.
-    callback forget(string);
-    /// The box is done with the keyboard; the window takes it back.
-    callback release-focus();
-    public function focus-input() {
-        root.typed = false;
-        input.focus();
-        input.select-all();
-    }
-    /// Hands the keyboard back to the window, so the next focus starts
-    /// with the recent searches again. Reset here rather than on focus,
-    /// which switching windows also takes and gives back.
-    public function close() {
-        root.typed = false;
-        root.release-focus();
-    }
-    /// Whether a point, in logical pixels from the window's corner, is on
-    /// the box or its open dropdown.
-    public pure function contains(x: length, y: length) -> bool {
-        x >= root.absolute-position.x && x < root.absolute-position.x + root.width
-            && y >= root.absolute-position.y
-            && y < root.absolute-position.y + root.height
-                + (root.open ? root.dropdown-gap + root.dropdown-height : 0px)
-    }
-
-    height: 48px;
-    border-radius: self.height / 2;
-    background: input.has-focus || touch.has-hover ? Theme.highlight : Theme.elevated;
-    border-width: 2px;
-    border-color: input.has-focus ? Theme.text : transparent;
-    animate background, border-color { duration: Theme.fast; }
-
-    touch := TouchArea {
-        mouse-cursor: MouseCursor.text;
-        clicked => { input.focus(); }
-    }
-
-    Icon {
-        x: 14px;
-        path: Icons.search;
-        size: 22px;
-        color: input.has-focus ? Theme.text : Theme.text-secondary;
-    }
-
-    input := TextInput {
-        x: 48px;
-        width: parent.width - 48px - 44px;
-        height: 100%;
-        vertical-alignment: center;
-        single-line: true;
-        font-size: 15px;
-        color: Theme.text;
-        selection-background-color: #ff003380;
-        accepted => {
-            root.accepted(self.text);
-            root.close();
-        }
-        edited => {
-            root.typed = true;
-            root.edited(self.text);
-        }
-        key-pressed(ev) => {
-            if ev.text == Key.Escape {
-                root.close();
-                return accept;
-            }
-            reject
-        }
-    }
-
-    if input.text == "": Text {
-        x: 48px;
-        height: 100%;
-        vertical-alignment: center;
-        text: "What do you want to play?";
-        color: Theme.text-dim;
-        font-size: 15px;
-    }
-    if input.text != "": IconButton {
-        x: parent.width - self.width - 8px;
-        icon: Icons.close;
-        size: 32px;
-        icon-size: 18px;
-        clicked => {
-            input.text = "";
-            root.edited("");
-            input.focus();
-        }
-    }
-
-    // Recent searches show from focusing the box until the user types, even
-    // over the last query, as clicking the box on a results page is the
-    // likeliest time to want them; typing swaps them for YouTube's
-    // suggestions, and clearing the box brings them back.
-    property <bool> typed;
-    property <bool> show-recent: input.text == "" || !root.typed;
-    property <[string]> choices: root.show-recent ? root.recent : root.suggestions;
-    property <bool> open: input.has-focus && root.choices.length > 0;
-    // Named once, as `contains` must match what is drawn.
-    property <length> dropdown-gap: 8px;
-    property <length> dropdown-padding: 8px;
-    property <length> choice-height: 44px;
-    property <length> dropdown-height: root.choices.length * root.choice-height + 2 * root.dropdown-padding;
-
-    if root.open: Rectangle {
-        y: root.height + root.dropdown-gap;
-        height: root.dropdown-height;
-        border-radius: 12px;
-        background: Theme.menu;
-        drop-shadow-blur: 24px;
-        drop-shadow-offset-y: 8px;
-        drop-shadow-color: #000000a0;
-        for choice[i] in root.choices: Rectangle {
-            x: root.dropdown-padding;
-            y: root.dropdown-padding + i * root.choice-height;
-            width: parent.width - 2 * root.dropdown-padding;
-            height: root.choice-height;
-            border-radius: 6px;
-            background: s-touch.has-hover || forget-button.has-hover ? Theme.hover : transparent;
-            Icon {
-                x: 12px;
-                path: root.show-recent ? Icons.history : Icons.search;
-                size: 18px;
-                color: Theme.text-secondary;
-            }
-
-            Text {
-                x: 44px;
-                width: parent.width - 56px - (root.show-recent ? 32px : 0px);
-                height: 100%;
-                vertical-alignment: center;
-                text: choice;
-                font-size: 14px;
-                color: Theme.text;
-                overflow: elide;
-            }
-
-            s-touch := TouchArea {
-                mouse-cursor: pointer;
-                clicked => {
-                    input.text = choice;
-                    root.accepted(choice);
-                    root.close();
-                }
-            }
-
-            forget-button := IconButton {
-                x: parent.width - self.width - 6px;
-                visible: root.show-recent;
-                enabled: root.show-recent;
-                icon: Icons.close;
-                size: 32px;
-                icon-size: 16px;
-                clicked => { root.forget(choice); }
-            }
-        }
-    }
-}
-
-component NavRow inherits Rectangle {
-    in property <string> icon;
-    in property <string> label;
-    in property <bool> active;
-    in property <bool> wide;
-    callback clicked();
-    height: 44px;
-    border-radius: 6px;
-    background: root.active ? Theme.hover : touch.has-hover ? #ffffff0a : transparent;
-    animate background { duration: Theme.fast; }
-    Icon {
-        x: root.wide ? 14px : (parent.width - self.width) / 2;
-        path: root.icon;
-        size: 24px;
-        color: root.active || touch.has-hover ? Theme.text : Theme.text-secondary;
-        animate x {
-            duration: Theme.normal;
-            easing: ease-in-out;
-        }
-    }
-
-    if root.wide: Text {
-        x: 54px;
-        height: 100%;
-        vertical-alignment: center;
-        text: root.label;
-        font-size: 15px;
-        font-weight: 700;
-        color: root.active || touch.has-hover ? Theme.text : Theme.text-secondary;
-    }
-    touch := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-}
-
-component LibraryRow inherits Rectangle {
-    in property <CardItem> item;
-    in property <bool> wide;
-    height: 64px;
-    border-radius: 6px;
-    background: touch.has-hover ? Theme.hover : transparent;
-    animate background { duration: Theme.fast; }
-    Art {
-        x: root.wide ? 8px : (parent.width - self.width) / 2;
-        width: 48px;
-        height: 48px;
-        source: root.item.art;
-        round: root.item.round;
-    }
-
-    if root.wide: VerticalLayout {
-        x: 68px;
-        width: parent.width - 76px;
-        alignment: center;
-        spacing: 2px;
-        Text {
-            text: root.item.title;
-            font-size: 15px;
-            font-weight: 500;
-            color: Theme.text;
-            overflow: elide;
-        }
-
-        Text {
-            text: root.item.subtitle;
-            font-size: 13px;
-            color: Theme.text-secondary;
-            overflow: elide;
-        }
-    }
-    touch := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { Api.navigate(root.item.kind, root.item.id, root.item.title); }
-    }
-}
-
-component Pill inherits Rectangle {
-    in property <string> label;
-    in property <bool> active;
-    callback clicked();
-    height: 32px;
-    width: text.preferred-width + 28px;
-    border-radius: 16px;
-    background: root.active ? Theme.text : touch.has-hover ? #ffffff26 : #ffffff14;
-    animate background { duration: Theme.fast; }
-    text := Text {
-        text: root.label;
-        font-size: 14px;
-        font-weight: 600;
-        color: root.active ? #000000 : Theme.text;
-    }
-
-    touch := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-}
-
-/// The queue row being dragged, where it would land, and whether it is
-/// near or past the list's top (-1) or bottom (1) edge, so the list scrolls.
-global Drag {
-    in-out property <int> from: -1;
-    in-out property <int> target;
-    in-out property <int> edge;
-}
-
-/// A text button in a panel's header.
-component PanelAction inherits Text {
-    callback clicked();
-    vertical-alignment: center;
-    font-size: 13px;
-    font-weight: 600;
-    color: touch.has-hover ? Theme.text : Theme.text-secondary;
-    touch := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { root.clicked(); }
-    }
-}
-
-component QueueRow inherits Rectangle {
-    in property <QueueItem> item;
-    in property <int> index;
-    in property <int> count;
-    /// How many rows are selected; actions on a selected row apply to all.
-    in property <int> selected-count;
-    /// The list's scroll offset and visible height, to follow the pointer
-    /// as the list scrolls under it.
-    in property <length> scroll;
-    in property <length> viewport;
-    callback clicked(control: bool, shift: bool);
-    callback remove();
-    callback remove-selected();
-    callback play-next();
-    callback play-next-selected();
-    callback drag-to(target: int);
-    property <bool> many: root.item.selected && root.selected-count > 1;
-    property <bool> dragging;
-    property <length> pressed-y;
-    /// Where the pointer is in the list's viewport.
-    property <length> pointer-y;
-    property <int> target: clamp(floor((root.pointer-y - root.scroll) / Theme.queue-row), 0, root.count - 1);
-    // The remove button counts as hovering the row, or they would flicker;
-    // nothing is hot while a row is dragged over the others.
-    property <bool> hot: (touch.has-hover || remove-button.has-hover) && Drag.from < 0;
-    height: Theme.queue-row;
-    z: root.dragging ? 1 : 0;
-
-    function track-pointer() {
-        root.pointer-y = root.y + root.scroll + touch.mouse-y;
-        Drag.edge = root.pointer-y < 24px ? -1 : root.pointer-y > root.viewport - 24px ? 1 : 0;
-        Drag.target = root.target;
-    }
-
-    function stop-dragging() {
-        root.dragging = false;
-        Drag.from = -1;
-        Drag.edge = 0;
-    }
-
-    menu := ContextMenuArea {
-        Menu {
-            MenuItem {
-                title: root.many ? "Play " + root.selected-count + " next" : "Play next";
-                enabled: root.many || !root.item.current;
-                activated => {
-                    if root.many {
-                        root.play-next-selected();
-                    } else {
-                        root.play-next();
-                    }
-                }
-            }
-
-            MenuItem {
-                title: root.many ? "Remove " + root.selected-count + " from queue" : "Remove from queue";
-                enabled: root.many || !root.item.current;
-                activated => {
-                    if root.many {
-                        root.remove-selected();
-                    } else {
-                        root.remove();
-                    }
-                }
-            }
-
-            if Api.signed-in && !root.many: MenuSeparator { }
-
-            if Api.signed-in && !root.many: MenuItem {
-                title: Api.rating-of(root.item.id) == 1 ? "Remove from liked songs" : "Like";
-                activated => { Api.rate(root.item.id, 1); }
-            }
-
-            if Api.signed-in && !root.many: MenuItem {
-                title: Api.rating-of(root.item.id) == 2 ? "Remove dislike" : "Dislike";
-                activated => { Api.rate(root.item.id, 2); }
-            }
-
-            if Api.signed-in && !root.many && !root.item.current: MenuItem {
-                title: "Remove rating";
-                activated => { Api.rate(root.item.id, 0); }
-            }
-
-            if Api.signed-in && !root.many: MenuItem {
-                title: "Save to playlist";
-                activated => { Api.save-to-playlist(root.item.id); }
-            }
-        }
-
-        touch := TouchArea {
-            mouse-cursor: root.dragging ? MouseCursor.grabbing : MouseCursor.pointer;
-            pointer-event(ev) => {
-                if ev.button != PointerEventButton.left {
-                    return;
-                }
-                if ev.kind == PointerEventKind.down {
-                    root.pressed-y = self.mouse-y;
-                } else if ev.kind == PointerEventKind.up {
-                    if root.dragging {
-                        root.stop-dragging();
-                        root.drag-to(root.target);
-                    } else {
-                        root.clicked(ev.modifiers.control, ev.modifiers.shift);
-                    }
-                } else if ev.kind == PointerEventKind.cancel {
-                    root.stop-dragging();
-                }
-            }
-            moved => {
-                if !root.dragging && self.pressed && abs(self.mouse-y - root.pressed-y) > 6px {
-                    root.dragging = true;
-                    Drag.from = root.index;
-                }
-                if root.dragging {
-                    root.track-pointer();
-                }
-            }
-        }
-
-        // Follows the pointer while dragged; otherwise sits in the row.
-        Rectangle {
-            y: root.dragging ? root.pointer-y - root.scroll - root.y - root.pressed-y : 0;
-            border-radius: 6px;
-            background: root.dragging ? Theme.menu : root.item.selected ? Theme.highlight : root.hot ? Theme.hover : transparent;
-            drop-shadow-blur: root.dragging ? 16px : 0;
-            drop-shadow-color: #00000080;
-            animate background { duration: Theme.fast; }
-
-            Art {
-                x: 8px;
-                width: 44px;
-                height: 44px;
-                source: root.item.art;
-            }
-
-            if root.item.current: Rectangle {
-                x: 8px;
-                width: 44px;
-                height: 44px;
-                border-radius: 4px;
-                background: #00000090;
-                Equalizer {
-                    active: Api.is-playing;
-                    color: Theme.text;
-                }
-            }
-            VerticalLayout {
-                x: 64px;
-                width: parent.width - 64px - 56px;
-                alignment: center;
-                spacing: 2px;
-                Text {
-                    text: root.item.title;
-                    overflow: elide;
-                    font-size: 14px;
-                    font-weight: 500;
-                    color: root.item.current ? Theme.accent : Theme.text;
-                }
-
-                HorizontalLayout {
-                    spacing: 4px;
-                    // Marks a track Smart Shuffle mixed in.
-                    if root.item.recommended: Icon {
-                        y: (parent.height - self.height) / 2;
-                        path: Icons.sparkle;
-                        size: 12px;
-                        color: Theme.text-secondary;
-                    }
-
-                    Text {
-                        text: root.item.artists;
-                        overflow: elide;
-                        font-size: 13px;
-                        color: Theme.text-secondary;
-                    }
-                }
-            }
-
-            remove-button := IconButton {
-                x: parent.width - self.width - 8px;
-                icon: Icons.close;
-                size: 32px;
-                icon-size: 18px;
-                enabled: root.hot && !root.item.current;
-                opacity: self.enabled ? 1 : 0;
-                clicked => { root.remove(); }
-            }
-
-            if !root.hot || root.item.current: Text {
-                x: parent.width - 52px;
-                width: 40px;
-                height: 100%;
-                text: root.item.duration;
-                color: Theme.text-secondary;
-                font-size: 13px;
-                horizontal-alignment: right;
-                vertical-alignment: center;
-            }
-        }
-    }
-}
-
-/// A modal card that fades and scales in, and out again once `open` is
-/// cleared; the owner removes it after `Theme.normal`, or keeps it, hidden.
-component Dialog inherits Rectangle {
-    in property <string> title;
-    in property <length> dialog-width: 520px;
-    in property <bool> open: true;
-    callback close();
-    // The first frame draws the closed look, so the opening animates
-    // from it; a value set before any frame has nothing to animate from.
-    property <bool> started;
-    property <bool> shown: root.open && root.started;
-    visible: root.shown || card.opacity > 0;
-    Timer {
-        interval: 16ms;
-        running: !root.started;
-        triggered => { root.started = true; }
-    }
-    background: root.shown ? #000000b0 : #00000000;
-    animate background { duration: Theme.normal; }
-    TouchArea {
-        clicked => { root.close(); }
-    }
-
-    card := Rectangle {
-        width: root.dialog-width;
-        height: body.preferred-height;
-        border-radius: 12px;
-        background: Theme.menu;
-        drop-shadow-blur: 32px;
-        drop-shadow-offset-y: 12px;
-        drop-shadow-color: #000000b0;
-        opacity: root.shown ? 1 : 0;
-        transform-scale: root.shown ? 1.0 : 0.95;
-        animate opacity, transform-scale {
-            duration: Theme.normal;
-            easing: ease-out;
-        }
-        TouchArea { }
-
-        body := VerticalLayout {
-            padding: 28px;
-            spacing: 18px;
-            HorizontalLayout {
-                Text {
-                    text: root.title;
-                    font-size: 24px;
-                    font-weight: 800;
-                    font-family: Theme.display-font;
-                    color: Theme.text;
-                    vertical-alignment: center;
-                }
-
-                IconButton {
-                    icon: Icons.close;
-                    size: 32px;
-                    icon-size: 20px;
-                    clicked => { root.close(); }
-                }
-            }
-
-            @children
-        }
-    }
-}
-
-component SettingRow inherits HorizontalLayout {
-    in property <string> label;
-    in property <string> detail;
-    spacing: 24px;
-    VerticalLayout {
-        alignment: center;
-        horizontal-stretch: 1;
-        spacing: 2px;
-        Text {
-            text: root.label;
-            font-size: 15px;
-            font-weight: 600;
-            color: Theme.text;
-        }
-
-        if root.detail != "": Text {
-            text: root.detail;
-            font-size: 13px;
-            color: Theme.text-secondary;
-            wrap: word-wrap;
-        }
-    }
-
-    @children
-}
-
-component ToggleRow inherits SettingRow {
-    in property <bool> checked;
-    callback toggled(bool);
-    Toggle {
-        y: (parent.height - self.height) / 2;
-        checked: root.checked;
-        toggled(v) => { root.toggled(v); }
-    }
 }
 
 export component AppWindow inherits Window {
@@ -797,21 +169,6 @@ export component AppWindow inherits Window {
     callback player-event(kind: string, message: string);
     callback media-action(action: string, value: float);
 
-    pure function fmt(secs: float) -> string {
-        if secs < 0 {
-            return "0:00";
-        }
-        let total = floor(secs);
-        let h = floor(total / 3600);
-        let m = mod(floor(total / 60), 60);
-        let s = mod(total, 60);
-        let ss = s < 10 ? "0" + s : "" + s;
-        if h > 0 {
-            return h + ":" + (m < 10 ? "0" + m : "" + m) + ":" + ss;
-        }
-        return m + ":" + ss;
-    }
-
     function open-panel(tab: int) {
         if root.panel-open && root.panel-tab == tab {
             root.panel-open = false;
@@ -864,14 +221,14 @@ export component AppWindow inherits Window {
     }
 
     public function focus-search() {
-        search-box.focus-input();
+        top-bar.focus-input();
     }
 
     /// Hands the keyboard back from the search box, as when the page
     /// changes.
     public function close-search() {
-        if search-box.focused {
-            search-box.close();
+        if top-bar.search-focused {
+            top-bar.close();
         }
     }
 
@@ -882,8 +239,8 @@ export component AppWindow inherits Window {
     /// first, so the far commoner press with the box unfocused skips the
     /// hit test.
     public function close-search-outside(x: length, y: length) {
-        if search-box.focused && !search-box.contains(x, y) {
-            search-box.close();
+        if top-bar.search-focused && !top-bar.contains(x, y) {
+            top-bar.close();
         }
     }
 
@@ -905,16 +262,16 @@ export component AppWindow inherits Window {
                 root.queue-clear-selection();
                 return accept;
             }
-            if ev.text == Key.Delete && root.queue-selected > 0 && !search-box.focused && !root.dialog-open {
+            if ev.text == Key.Delete && root.queue-selected > 0 && !top-bar.search-focused && !root.dialog-open {
                 root.queue-remove-selected();
                 return accept;
             }
-            if ev.text == " " && !search-box.focused {
+            if ev.text == " " && !top-bar.search-focused {
                 root.toggle-play();
                 return accept;
             }
             if ev.modifiers.control && (ev.text == "f" || ev.text == "k" || ev.text == "l") {
-                search-box.focus-input();
+                top-bar.focus-input();
                 return accept;
             }
             if ev.modifiers.control && ev.text == "b" {
@@ -945,108 +302,26 @@ export component AppWindow inherits Window {
             padding-right: Theme.gap;
 
             // Top bar
-            Rectangle {
-                height: Theme.top-bar;
+            // On the instance, as Slint ignores `z` on a component's own root;
+            // it keeps the search dropdown over the panels below.
+            top-bar := TopBar {
                 z: 10;
-                Logo {
-                    x: 16px;
-                }
-
-                IconButton {
-                    x: 64px;
-                    icon: Icons.back;
-                    size: 32px;
-                    icon-size: 22px;
-                    color: Theme.text;
-                    background: Theme.elevated;
-                    enabled: root.can-back;
-                    clicked => { root.back(); }
-                }
-
-                IconButton {
-                    x: 104px;
-                    icon: Icons.forward;
-                    size: 32px;
-                    icon-size: 22px;
-                    color: Theme.text;
-                    background: Theme.elevated;
-                    enabled: root.can-forward;
-                    clicked => { root.forward(); }
-                }
-
-                HorizontalLayout {
-                    x: (parent.width - self.width) / 2;
-                    width: min(560px, parent.width - 400px);
-                    spacing: 8px;
-                    IconButton {
-                        y: (parent.height - self.height) / 2;
-                        icon: root.nav-current == "home" ? Icons.home : Icons.home-outline;
-                        size: 48px;
-                        icon-size: 24px;
-                        color: root.nav-current == "home" ? Theme.text : Theme.text-secondary;
-                        background: Theme.elevated;
-                        hover-background: Theme.highlight;
-                        clicked => { root.go("home"); }
-                    }
-
-                    search-box := SearchBox {
-                        y: (parent.height - self.height) / 2;
-                        horizontal-stretch: 1;
-                        text <=> root.search-text;
-                        suggestions: root.suggestions;
-                        recent: root.recent-searches;
-                        accepted(q) => { root.search(q); }
-                        forget(q) => { root.forget-search(q); }
-                        edited(q) => { root.search-edited(q); }
-                        release-focus => { keys.focus(); }
-                    }
-                }
-
-                // The account button opens Settings, which holds sign-in
-                // and sign-out too. A dot on it marks a waiting update.
-                Rectangle {
-                    x: parent.width - self.width - 8px;
-                    y: (parent.height - self.height) / 2;
-                    width: 36px;
-                    height: 36px;
-                    border-radius: 18px;
-                    background: account-touch.has-hover ? Theme.highlight : Theme.elevated;
-                    animate background { duration: Theme.fast; }
-                    Rectangle {
-                        width: 26px;
-                        height: 26px;
-                        border-radius: 13px;
-                        background: Api.signed-in ? Theme.accent : #535353;
-                        Icon {
-                            path: Icons.account;
-                            size: 18px;
-                            color: Theme.text;
-                        }
-
-                        if Api.signed-in && root.account-photo.width > 0: Art {
-                            width: 100%;
-                            height: 100%;
-                            round: true;
-                            source: root.account-photo;
-                        }
-                    }
-
-                    if root.update-version != "": Rectangle {
-                        x: parent.width - self.width + 1px;
-                        y: -1px;
-                        width: 12px;
-                        height: 12px;
-                        border-radius: 6px;
-                        background: Theme.accent;
-                        border-width: 2px;
-                        border-color: Theme.background;
-                    }
-
-                    account-touch := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { root.settings-open = true; }
-                    }
-                }
+                can-back: root.can-back;
+                can-forward: root.can-forward;
+                nav-current: root.nav-current;
+                search-text <=> root.search-text;
+                suggestions: root.suggestions;
+                recent-searches: root.recent-searches;
+                account-photo: root.account-photo;
+                update-version: root.update-version;
+                settings-open <=> root.settings-open;
+                back => { root.back(); }
+                forward => { root.forward(); }
+                go(nav) => { root.go(nav); }
+                search(q) => { root.search(q); }
+                search-edited(q) => { root.search-edited(q); }
+                forget-search(q) => { root.forget-search(q); }
+                release-focus => { keys.focus(); }
             }
 
             HorizontalLayout {
@@ -1054,660 +329,88 @@ export component AppWindow inherits Window {
                 spacing: Theme.gap;
 
                 // Your Library
-                sidebar := Rectangle {
-                    property <bool> wide: self.width > 200px;
-                    width: root.sidebar-collapsed ? Theme.sidebar-narrow : Theme.sidebar-wide;
-                    animate width {
-                        duration: 260ms;
-                        easing: ease-in-out;
-                    }
-                    border-radius: Theme.panel-radius;
-                    background: Theme.panel;
-                    clip: true;
-
-                    VerticalLayout {
-                        padding: 8px;
-                        spacing: 2px;
-                        Rectangle {
-                            height: 52px;
-                            library-touch := TouchArea {
-                                mouse-cursor: pointer;
-                                clicked => { root.toggle-sidebar(); }
-                            }
-
-                            Icon {
-                                x: sidebar.wide ? 14px : (parent.width - self.width) / 2;
-                                path: sidebar.wide ? Icons.collapse : Icons.library;
-                                size: 24px;
-                                color: library-touch.has-hover ? Theme.text : Theme.text-secondary;
-                            }
-
-                            if sidebar.wide: Text {
-                                x: 54px;
-                                height: 100%;
-                                vertical-alignment: center;
-                                text: "Your Library";
-                                font-size: 16px;
-                                font-weight: 700;
-                                color: library-touch.has-hover ? Theme.text : Theme.text-secondary;
-                            }
-                        }
-
-                        for nav in [
-                            { id: "home", label: "Home", icon: Icons.home },
-                            { id: "explore", label: "Explore", icon: Icons.explore },
-                            { id: "library", label: "Library", icon: Icons.library },
-                            { id: "history", label: "History", icon: Icons.history },
-                        ]: NavRow {
-                            icon: nav.icon;
-                            label: nav.label;
-                            wide: sidebar.wide;
-                            active: root.nav-current == nav.id;
-                            clicked => { root.go(nav.id); }
-                        }
-
-                        Rectangle {
-                            height: 17px;
-                            Rectangle {
-                                x: 8px;
-                                width: parent.width - 16px;
-                                height: 1px;
-                                background: Theme.divider;
-                            }
-                        }
-
-                        if Api.signed-in: library-list := ListView {
-                            vertical-stretch: 1;
-                            for item in root.library: LibraryRow {
-                                width: library-list.visible-width;
-                                item: item;
-                                wide: sidebar.wide;
-                            }
-                        }
-                        if !Api.signed-in && sidebar.wide: Rectangle {
-                            height: card.preferred-height;
-                            border-radius: 8px;
-                            background: Theme.elevated;
-                            card := VerticalLayout {
-                                padding: 20px;
-                                spacing: 10px;
-                                Text {
-                                    text: "Bring your library";
-                                    font-size: 16px;
-                                    font-weight: 700;
-                                    color: Theme.text;
-                                }
-
-                                Text {
-                                    text: "Sign in to see your playlists, albums and listening history here.";
-                                    font-size: 13px;
-                                    color: Theme.text-secondary;
-                                    wrap: word-wrap;
-                                }
-
-                                HorizontalLayout {
-                                    alignment: start;
-                                    padding-top: 6px;
-                                    PillButton {
-                                        text: "Sign in";
-                                        primary: true;
-                                        small: true;
-                                        clicked => { root.sign-in-open = true; }
-                                    }
-                                }
-                            }
-                        }
-                        if !Api.signed-in: Rectangle {
-                            vertical-stretch: 1;
-                        }
-                    }
+                sidebar := Sidebar {
+                    sidebar-collapsed: root.sidebar-collapsed;
+                    nav-current: root.nav-current;
+                    library: root.library;
+                    sign-in-open <=> root.sign-in-open;
+                    toggle-sidebar => { root.toggle-sidebar(); }
+                    go(nav) => { root.go(nav); }
                 }
 
                 // Main panel
-                main := Rectangle {
-                    horizontal-stretch: 1;
-                    border-radius: Theme.panel-radius;
-                    background: Theme.panel;
-                    clip: true;
-
-                    // Tint behind the top of the page, scrolling with it.
-                    Rectangle {
-                        y: root.page-scroll;
-                        height: 420px;
-                        background: @linear-gradient(180deg, root.accent 0%, Theme.panel 100%);
-                        animate background { duration: 500ms; }
-                    }
-
-                    content := Rectangle {
-                        opacity: root.page-loading || root.page-error != "" ? 0 : 1;
-                        y: root.page-loading ? 16px : 0px;
-                        animate opacity { duration: 260ms; }
-                        animate y {
-                            duration: 320ms;
-                            easing: ease-out;
-                        }
-                        list := ListView {
-                            width: 100%;
-                            height: 100%;
-                            content-y <=> root.page-scroll;
-                            for row in root.rows: PageRow {
-                                data: row;
-                                content-width: list.visible-width;
-                            }
-                        }
-                    }
-
-                    // Sticky title once the header scrolls away.
-                    Rectangle {
-                        y: 0;
-                        height: 64px;
-                        background: root.accent.darker(0.35);
-                        opacity: root.page-title != "" && -root.page-scroll > 280px ? 1 : 0;
-                        visible: self.opacity > 0;
-                        animate opacity { duration: Theme.normal; }
-                        TouchArea { }
-
-                        HorizontalLayout {
-                            padding-left: Theme.page-padding;
-                            spacing: 12px;
-                            if root.page-can-play: PlayButton {
-                                y: (parent.height - self.height) / 2;
-                                size: 44px;
-                                clicked => { Api.header-action("play"); }
-                            }
-                            Text {
-                                text: root.page-title;
-                                vertical-alignment: center;
-                                font-size: 22px;
-                                font-weight: 800;
-                                font-family: Theme.display-font;
-                                color: Theme.text;
-                                overflow: elide;
-                            }
-                        }
-                    }
-
-                    if root.page-loading: Spinner {
-                        size: 40px;
-                    }
-                    if !root.page-loading && root.page-error != "": VerticalLayout {
-                        alignment: center;
-                        spacing: 20px;
-                        padding: 48px;
-                        Text {
-                            text: root.page-error;
-                            horizontal-alignment: center;
-                            font-size: 18px;
-                            font-weight: 600;
-                            color: Theme.text;
-                            wrap: word-wrap;
-                        }
-
-                        HorizontalLayout {
-                            alignment: center;
-                            PillButton {
-                                text: root.nav-current == "library" && !Api.signed-in ? "Sign in" : "Try again";
-                                primary: true;
-                                clicked => {
-                                    if root.nav-current == "library" && !Api.signed-in {
-                                        root.sign-in-open = true;
-                                    } else {
-                                        root.go("reload");
-                                    }
-                                }
-                            }
-                        }
-                    }
+                main := PageView {
+                    rows: root.rows;
+                    page-loading: root.page-loading;
+                    page-error: root.page-error;
+                    page-title: root.page-title;
+                    page-can-play: root.page-can-play;
+                    accent: root.accent;
+                    nav-current: root.nav-current;
+                    page-scroll <=> root.page-scroll;
+                    sign-in-open <=> root.sign-in-open;
+                    go(nav) => { root.go(nav); }
                 }
 
                 // Up next and lyrics
-                Rectangle {
-                    width: root.panel-open ? Theme.right-panel : 0px;
-                    animate width {
-                        duration: 260ms;
-                        easing: ease-in-out;
-                    }
-                    visible: self.width > 1px;
-                    border-radius: Theme.panel-radius;
-                    background: Theme.panel;
-                    clip: true;
-
-                    Rectangle {
-                        x: 0;
-                        width: Theme.right-panel;
-                        if root.panel-tab == 1: Rectangle {
-                            background: @linear-gradient(180deg, root.np-accent 0%, root.np-accent.darker(0.5) 100%);
-                            animate background { duration: 500ms; }
-                        }
-                        VerticalLayout {
-                            padding-top: 12px;
-                            HorizontalLayout {
-                                height: 48px;
-                                padding-left: 16px;
-                                padding-right: 12px;
-                                spacing: 8px;
-                                Pill {
-                                    y: (parent.height - self.height) / 2;
-                                    label: "Up next";
-                                    active: root.panel-tab == 0;
-                                    clicked => {
-                                        root.panel-tab = 0;
-                                        root.panel-tab-changed(0);
-                                    }
-                                }
-
-                                Pill {
-                                    y: (parent.height - self.height) / 2;
-                                    label: "Lyrics";
-                                    active: root.panel-tab == 1;
-                                    clicked => {
-                                        root.panel-tab = 1;
-                                        root.panel-tab-changed(1);
-                                    }
-                                }
-
-                                Rectangle {
-                                    horizontal-stretch: 1;
-                                }
-
-                                IconButton {
-                                    y: (parent.height - self.height) / 2;
-                                    icon: Icons.close;
-                                    size: 32px;
-                                    icon-size: 18px;
-                                    clicked => { root.panel-open = false; }
-                                }
-                            }
-
-                            if root.panel-tab == 0: VerticalLayout {
-                                vertical-stretch: 1;
-                                HorizontalLayout {
-                                    height: 44px;
-                                    padding-left: 16px;
-                                    padding-right: 16px;
-                                    spacing: 14px;
-                                    Text {
-                                        text: root.queue.length == 0 ? ""
-                                            : root.queue-selected > 0 ? root.queue-selected + " selected"
-                                            : "Queue  •  " + root.queue.length + (root.queue.length == 1 ? " song" : " songs");
-                                        vertical-alignment: center;
-                                        font-size: 15px;
-                                        font-weight: 700;
-                                        color: Theme.text;
-                                    }
-
-                                    Rectangle {
-                                        horizontal-stretch: 1;
-                                    }
-
-                                    if root.queue-selected > 0: PanelAction {
-                                        text: "Play next";
-                                        clicked => { root.queue-play-next-selected(); }
-                                    }
-                                    if root.queue-selected > 0: PanelAction {
-                                        text: "Remove";
-                                        clicked => { root.queue-remove-selected(); }
-                                    }
-                                    if root.queue-selected > 0: IconButton {
-                                        y: (parent.height - self.height) / 2;
-                                        icon: Icons.close;
-                                        size: 28px;
-                                        icon-size: 16px;
-                                        clicked => { root.queue-clear-selection(); }
-                                    }
-                                    if root.queue-selected == 0 && Api.signed-in && root.queue.length > 0: PanelAction {
-                                        text: "Save";
-                                        clicked => { root.queue-save(); }
-                                    }
-                                    if root.queue-selected == 0 && root.queue.length > 1: PanelAction {
-                                        text: "Clear";
-                                        clicked => { root.queue-clear(); }
-                                    }
-                                }
-
-                                if root.queue.length > 0: Rectangle {
-                                    vertical-stretch: 1;
-                                    queue-list := ListView {
-                                        for item[i] in root.queue: QueueRow {
-                                            x: 8px;
-                                            width: queue-list.visible-width - 16px;
-                                            item: item;
-                                            index: i;
-                                            count: root.queue.length;
-                                            selected-count: root.queue-selected;
-                                            scroll: queue-list.content-y;
-                                            viewport: queue-list.visible-height;
-                                            clicked(control, shift) => { root.queue-clicked(i, control, shift); }
-                                            remove => { root.queue-remove(i); }
-                                            remove-selected => { root.queue-remove-selected(); }
-                                            play-next => { root.queue-play-next(i); }
-                                            play-next-selected => { root.queue-play-next-selected(); }
-                                            drag-to(target) => { root.queue-move(i, target); }
-                                        }
-                                    }
-
-                                    // Where the dragged row will land.
-                                    if Drag.from >= 0: Rectangle {
-                                        x: 8px;
-                                        y: queue-list.content-y + (Drag.target + (Drag.target > Drag.from ? 1 : 0)) * Theme.queue-row - 1px;
-                                        width: queue-list.visible-width - 16px;
-                                        height: 2px;
-                                        background: Theme.accent;
-                                    }
-
-                                    // Scrolls the list while a row is dragged past its edge.
-                                    Timer {
-                                        interval: 16ms;
-                                        running: Drag.from >= 0 && Drag.edge != 0;
-                                        triggered => {
-                                            queue-list.content-y = clamp(queue-list.content-y - Drag.edge * 8px,
-                                                min(0px, queue-list.visible-height - queue-list.content-height), 0px);
-                                        }
-                                    }
-                                }
-                                if root.queue.length == 0: VerticalLayout {
-                                    vertical-stretch: 1;
-                                    alignment: center;
-                                    spacing: 8px;
-                                    Icon {
-                                        x: (parent.width - self.width) / 2;
-                                        path: Icons.queue;
-                                        size: 48px;
-                                        color: Theme.text-dim;
-                                    }
-
-                                    Text {
-                                        text: "Your queue is empty";
-                                        horizontal-alignment: center;
-                                        font-size: 16px;
-                                        font-weight: 700;
-                                        color: Theme.text;
-                                    }
-
-                                    Text {
-                                        text: "Play something and it shows up here.";
-                                        horizontal-alignment: center;
-                                        color: Theme.text-secondary;
-                                    }
-                                }
-                            }
-                            if root.panel-tab == 1: Rectangle {
-                                vertical-stretch: 1;
-                                if root.lyrics-loading: Spinner {
-                                    size: 32px;
-                                }
-                                if !root.lyrics-loading: Lyrics {
-                                    lines: root.lyrics;
-                                    synced: root.lyrics-synced;
-                                    current: root.lyrics-current;
-                                    source: root.lyrics-source;
-                                    line-clicked(i) => { root.lyric-clicked(i); }
-                                }
-                            }
-                        }
-                    }
+                SidePanel {
+                    panel-open <=> root.panel-open;
+                    panel-tab <=> root.panel-tab;
+                    np-accent: root.np-accent;
+                    queue: root.queue;
+                    queue-selected: root.queue-selected;
+                    lyrics: root.lyrics;
+                    lyrics-synced: root.lyrics-synced;
+                    lyrics-current: root.lyrics-current;
+                    lyrics-source: root.lyrics-source;
+                    lyrics-loading: root.lyrics-loading;
+                    queue-clicked(index, control, shift) => { root.queue-clicked(index, control, shift); }
+                    queue-move(from, to) => { root.queue-move(from, to); }
+                    queue-remove(index) => { root.queue-remove(index); }
+                    queue-remove-selected => { root.queue-remove-selected(); }
+                    queue-play-next(index) => { root.queue-play-next(index); }
+                    queue-play-next-selected => { root.queue-play-next-selected(); }
+                    queue-clear-selection => { root.queue-clear-selection(); }
+                    queue-clear => { root.queue-clear(); }
+                    queue-save => { root.queue-save(); }
+                    panel-tab-changed(tab) => { root.panel-tab-changed(tab); }
+                    lyric-clicked(index) => { root.lyric-clicked(index); }
                 }
             }
 
             // Player bar
-            Rectangle {
-                height: Theme.player-bar;
-
-                // Now playing
-                ContextMenuArea {
-                    x: 8px;
-                    width: parent.width * 0.3;
-                    enabled: root.has-track;
-                    Menu {
-                        if Api.signed-in: MenuItem {
-                            title: "Save to playlist";
-                            activated => { Api.save-to-playlist(Api.playing-id); }
-                        }
-                        MenuItem {
-                            title: "Go to artist";
-                            enabled: root.np-has-artist;
-                            activated => { root.np-go-artist(); }
-                        }
-                        MenuItem {
-                            title: "Go to album";
-                            enabled: root.np-has-album;
-                            activated => { root.np-go-album(); }
-                        }
-                    }
-
-                HorizontalLayout {
-                    spacing: 14px;
-                    opacity: root.has-track ? 1 : 0;
-                    animate opacity { duration: Theme.normal; }
-                    Art {
-                        y: (parent.height - self.height) / 2;
-                        width: 56px;
-                        height: 56px;
-                        source: root.np-art;
-                        drop-shadow-blur: 8px;
-                        drop-shadow-color: #00000080;
-                    }
-
-                    VerticalLayout {
-                        alignment: center;
-                        spacing: 3px;
-                        Text {
-                            text: root.np-title;
-                            overflow: elide;
-                            font-size: 14px;
-                            font-weight: 600;
-                            color: Theme.text;
-                            TouchArea {
-                                mouse-cursor: root.np-has-album ? pointer : default;
-                                clicked => { root.np-go-album(); }
-                            }
-                        }
-
-                        Text {
-                            text: root.np-artists;
-                            overflow: elide;
-                            font-size: 12px;
-                            color: a-touch.has-hover && root.np-has-artist ? Theme.text : Theme.text-secondary;
-                            a-touch := TouchArea {
-                                mouse-cursor: root.np-has-artist ? pointer : default;
-                                clicked => { root.np-go-artist(); }
-                            }
-                        }
-                    }
-
-                    if Api.signed-in && root.has-track: HorizontalLayout {
-                        IconButton {
-                            y: (parent.height - self.height) / 2;
-                            icon: Api.playing-rating == 2 ? Icons.thumb-down-filled : Icons.thumb-down;
-                            color: Api.playing-rating == 2 ? Theme.text : Theme.text-secondary;
-                            size: 32px;
-                            icon-size: 18px;
-                            clicked => { Api.rate(Api.playing-id, 2); }
-                        }
-
-                        IconButton {
-                            y: (parent.height - self.height) / 2;
-                            icon: Api.playing-rating == 1 ? Icons.thumb-up-filled : Icons.thumb-up;
-                            color: Api.playing-rating == 1 ? Theme.text : Theme.text-secondary;
-                            size: 32px;
-                            icon-size: 18px;
-                            clicked => { Api.rate(Api.playing-id, 1); }
-                        }
-                    }
-                }
-                }
-
-                // Transport
-                VerticalLayout {
-                    x: (parent.width - self.width) / 2;
-                    width: min(640px, parent.width * 0.4);
-                    alignment: center;
-                    spacing: 4px;
-                    HorizontalLayout {
-                        alignment: center;
-                        spacing: 16px;
-                        // Off, shuffle, then Smart Shuffle, shown as sparkles.
-                        IconButton {
-                            y: (parent.height - self.height) / 2;
-                            icon: root.smart-shuffle ? Icons.sparkle : Icons.shuffle;
-                            size: 32px;
-                            icon-size: 18px;
-                            active: root.shuffle;
-                            clicked => { root.toggle-shuffle(); }
-                        }
-
-                        IconButton {
-                            y: (parent.height - self.height) / 2;
-                            icon: Icons.previous;
-                            size: 32px;
-                            icon-size: 22px;
-                            enabled: root.has-track;
-                            clicked => { root.previous(); }
-                        }
-
-                        Rectangle {
-                            width: 36px;
-                            height: 36px;
-                            if root.np-loading: Spinner {
-                                size: 28px;
-                            }
-                            if !root.np-loading: PlayButton {
-                                size: 36px;
-                                playing: root.np-playing;
-                                color: Theme.text;
-                                icon-color: #000000;
-                                clicked => { root.toggle-play(); }
-                            }
-                        }
-
-                        IconButton {
-                            y: (parent.height - self.height) / 2;
-                            icon: Icons.next;
-                            size: 32px;
-                            icon-size: 22px;
-                            enabled: root.has-track;
-                            clicked => { root.next(); }
-                        }
-
-                        IconButton {
-                            y: (parent.height - self.height) / 2;
-                            icon: root.repeat-mode == 2 ? Icons.repeat-one : Icons.repeat;
-                            size: 32px;
-                            icon-size: 18px;
-                            active: root.repeat-mode != 0;
-                            clicked => { root.cycle-repeat(); }
-                        }
-                    }
-
-                    HorizontalLayout {
-                        spacing: 8px;
-                        Text {
-                            width: 40px;
-                            text: root.fmt(root.np-position);
-                            horizontal-alignment: right;
-                            vertical-alignment: center;
-                            font-size: 12px;
-                            color: Theme.text-secondary;
-                        }
-
-                        Slider {
-                            horizontal-stretch: 1;
-                            enabled: root.has-track;
-                            value: root.np-duration > 0 ? root.np-position / root.np-duration : 0;
-                            buffered: root.np-buffered;
-                            seek(f) => { root.seek(f); }
-                        }
-
-                        Text {
-                            width: 40px;
-                            text: root.fmt(root.np-duration);
-                            vertical-alignment: center;
-                            font-size: 12px;
-                            color: Theme.text-secondary;
-                        }
-                    }
-                }
-
-                // Options
-                HorizontalLayout {
-                    x: parent.width - self.width - 8px;
-                    width: self.preferred-width;
-                    spacing: 4px;
-                    // Quality badge; Premium streams get a red PREMIUM tag.
-                    if root.np-quality != "": Rectangle {
-                        y: (parent.height - self.height) / 2;
-                        width: badge.preferred-width;
-                        height: 20px;
-                        border-radius: 4px;
-                        border-width: 1px;
-                        border-color: root.np-premium ? Theme.accent : #ffffff30;
-                        clip: true;
-                        badge := HorizontalLayout {
-                            if root.np-premium: Rectangle {
-                                width: tag.preferred-width + 12px;
-                                background: Theme.accent;
-                                tag := Text {
-                                    text: "PREMIUM";
-                                    font-size: 10px;
-                                    font-weight: 800;
-                                    letter-spacing: 0.5px;
-                                    color: Theme.text;
-                                }
-                            }
-                            Rectangle {
-                                width: quality.preferred-width + 14px;
-                                quality := Text {
-                                    text: root.np-quality;
-                                    font-size: 10px;
-                                    font-weight: 700;
-                                    letter-spacing: 0.5px;
-                                    color: root.np-premium ? Theme.text : Theme.text-secondary;
-                                }
-                            }
-                        }
-                    }
-                    Rectangle {
-                        width: 4px;
-                    }
-
-                    IconButton {
-                        y: (parent.height - self.height) / 2;
-                        icon: Icons.lyrics;
-                        size: 32px;
-                        icon-size: 18px;
-                        active: root.panel-open && root.panel-tab == 1;
-                        clicked => { root.open-panel(1); }
-                    }
-
-                    IconButton {
-                        y: (parent.height - self.height) / 2;
-                        icon: Icons.queue;
-                        size: 32px;
-                        icon-size: 18px;
-                        active: root.panel-open && root.panel-tab == 0;
-                        clicked => { root.open-panel(0); }
-                    }
-
-                    IconButton {
-                        y: (parent.height - self.height) / 2;
-                        icon: root.muted || root.volume == 0 ? Icons.volume-off : root.volume < 0.5 ? Icons.volume-low : Icons.volume;
-                        size: 32px;
-                        icon-size: 18px;
-                        clicked => { root.toggle-mute(); }
-                    }
-
-                    Slider {
-                        y: (parent.height - self.height) / 2;
-                        width: 100px;
-                        value: root.muted ? 0 : root.volume;
-                        changed(v) => { root.set-volume(v); }
-                        seek(v) => { root.set-volume(v); }
-                    }
-
-                    Rectangle {
-                        width: 8px;
-                    }
-                }
+            PlayerBar {
+                has-track: root.has-track;
+                np-title: root.np-title;
+                np-artists: root.np-artists;
+                np-art: root.np-art;
+                np-duration: root.np-duration;
+                np-position: root.np-position;
+                np-buffered: root.np-buffered;
+                np-playing: root.np-playing;
+                np-loading: root.np-loading;
+                np-premium: root.np-premium;
+                np-quality: root.np-quality;
+                np-has-artist: root.np-has-artist;
+                np-has-album: root.np-has-album;
+                volume: root.volume;
+                muted: root.muted;
+                shuffle: root.shuffle;
+                smart-shuffle: root.smart-shuffle;
+                repeat-mode: root.repeat-mode;
+                panel-open: root.panel-open;
+                panel-tab: root.panel-tab;
+                toggle-play => { root.toggle-play(); }
+                next => { root.next(); }
+                previous => { root.previous(); }
+                seek(f) => { root.seek(f); }
+                set-volume(v) => { root.set-volume(v); }
+                toggle-mute => { root.toggle-mute(); }
+                toggle-shuffle => { root.toggle-shuffle(); }
+                cycle-repeat => { root.cycle-repeat(); }
+                np-go-artist => { root.np-go-artist(); }
+                np-go-album => { root.np-go-album(); }
+                open-panel(tab) => { root.open-panel(tab); }
             }
         }
 
@@ -1738,285 +441,61 @@ export component AppWindow inherits Window {
             }
         }
 
-        if root.settings-shown: Dialog {
-            title: "Settings";
-            open: root.settings-open;
-            close => { root.settings-open = false; }
-            SettingRow {
-                label: "Audio quality";
-                detail: root.quality == 0 ? "About 50 kbps, a third of the data of Normal. For a metered connection."
-                    : root.quality == 1 ? "About 130 kbps, as YouTube Music plays without Premium."
-                    : root.premium-status;
-                VerticalLayout {
-                    alignment: center;
-                    HorizontalLayout {
-                        spacing: 6px;
-                        for name[i] in ["Low", "Normal", "High"]: Pill {
-                            label: name;
-                            active: root.quality == i;
-                            clicked => { root.set-quality(i); }
-                        }
-                    }
-                }
-            }
-
-            ToggleRow {
-                label: "Normalise volume";
-                detail: "Plays every track at a similar loudness, as YouTube Music does.";
-                checked: root.normalise;
-                toggled(v) => { root.set-normalise(v); }
-            }
-
-            ToggleRow {
-                label: "Crossfade";
-                detail: "Fades each track into the next. Tracks of an album played in order still run straight on.";
-                checked: root.crossfade;
-                toggled(v) => { root.set-crossfade(v); }
-            }
-
-            SettingRow {
-                label: "Equaliser";
-                detail: !root.equaliser ? "Off" : root.eq-preset >= 0 ? root.eq-presets[root.eq-preset] : "Custom";
-                PillButton {
-                    y: (parent.height - self.height) / 2;
-                    text: "Adjust";
-                    small: true;
-                    clicked => {
-                        root.settings-open = false;
-                        root.eq-open = true;
-                    }
-                }
-            }
-
-            ToggleRow {
-                label: "Autoplay";
-                detail: "Keeps playing similar music when the queue ends.";
-                checked: root.autoplay;
-                toggled(v) => { root.set-autoplay(v); }
-            }
-
-            ToggleRow {
-                label: "Discord Rich Presence";
-                detail: "Shows what you are listening to on Discord.";
-                checked: root.discord;
-                toggled(v) => { root.set-discord(v); }
-            }
-
-            SettingRow {
-                label: "Updates";
-                detail: root.update-status;
-                if root.update-version != "" && !root.update-busy: PillButton {
-                    y: (parent.height - self.height) / 2;
-                    text: "Update to " + root.update-version;
-                    primary: true;
-                    small: true;
-                    clicked => { root.install-update(); }
-                }
-                if root.update-version == "": Toggle {
-                    y: (parent.height - self.height) / 2;
-                    checked: root.check-updates;
-                    toggled(v) => { root.set-check-updates(v); }
-                }
-            }
-
-            Rectangle {
-                height: 1px;
-                background: Theme.divider;
-            }
-
-            SettingRow {
-                label: Api.signed-in ? "Signed in" : "Not signed in";
-                detail: Api.signed-in ? "Your library and history come from your YouTube account." : "Sign in to see your library and history.";
-                PillButton {
-                    y: (parent.height - self.height) / 2;
-                    text: Api.signed-in ? "Sign out" : "Sign in";
-                    small: true;
-                    clicked => {
-                        if Api.signed-in {
-                            root.sign-out();
-                        } else {
-                            root.settings-open = false;
-                            root.sign-in-open = true;
-                        }
-                    }
-                }
-            }
-
-            Text {
-                text: "Shortcuts: Space play/pause • Ctrl+K search • Ctrl+B sidebar • Ctrl+←/→ previous/next";
-                font-size: 12px;
-                color: Theme.text-dim;
-                wrap: word-wrap;
-            }
+        if root.settings-shown: SettingsDialog {
+            settings-open <=> root.settings-open;
+            eq-open <=> root.eq-open;
+            sign-in-open <=> root.sign-in-open;
+            quality: root.quality;
+            premium-status: root.premium-status;
+            normalise: root.normalise;
+            crossfade: root.crossfade;
+            equaliser: root.equaliser;
+            eq-presets: root.eq-presets;
+            eq-preset: root.eq-preset;
+            autoplay: root.autoplay;
+            discord: root.discord;
+            update-status: root.update-status;
+            update-version: root.update-version;
+            update-busy: root.update-busy;
+            check-updates: root.check-updates;
+            set-quality(i) => { root.set-quality(i); }
+            set-normalise(v) => { root.set-normalise(v); }
+            set-crossfade(v) => { root.set-crossfade(v); }
+            set-autoplay(v) => { root.set-autoplay(v); }
+            set-discord(v) => { root.set-discord(v); }
+            set-check-updates(v) => { root.set-check-updates(v); }
+            install-update => { root.install-update(); }
+            sign-out => { root.sign-out(); }
         }
 
-        Dialog {
-            title: "Equaliser";
-            open: root.eq-open;
-            close => { root.eq-open = false; }
-            SettingRow {
-                label: "Preset";
-                detail: "A starting point; the bands below fine-tune it.";
-                preset-menu := ContextMenuArea {
-                    width: preset-button.preferred-width;
-                    Menu {
-                        for name[i] in root.eq-presets: MenuItem {
-                            title: name;
-                            activated => { root.set-eq-preset(i); }
-                        }
-                    }
-
-                    preset-button := PillButton {
-                        y: (parent.height - self.height) / 2;
-                        text: root.eq-preset >= 0 ? root.eq-presets[root.eq-preset] : "Custom";
-                        small: true;
-                        clicked => { preset-menu.show({ x: 0, y: self.y + self.height }); }
-                    }
-                }
-
-                // Two-way, as the toggle sets its own state when clicked.
-                Toggle {
-                    y: (parent.height - self.height) / 2;
-                    checked <=> root.equaliser;
-                    toggled(v) => { root.set-equaliser(v); }
-                }
-            }
-
-            for band[i] in root.eq-bands: HorizontalLayout {
-                spacing: 16px;
-                Text {
-                    width: 64px;
-                    text: band;
-                    vertical-alignment: center;
-                    font-size: 13px;
-                    color: Theme.text-secondary;
-                }
-
-                Slider {
-                    horizontal-stretch: 1;
-                    enabled: root.equaliser;
-                    value: (root.eq-gains[i] / root.eq-max-db + 1) / 2;
-                    changed(v) => { root.set-eq-band(i, v, false); }
-                    seek(v) => { root.set-eq-band(i, v, true); }
-                }
-
-                Text {
-                    width: 48px;
-                    text: (root.eq-gains[i] > 0 ? "+" : "") + round(root.eq-gains[i]) + " dB";
-                    horizontal-alignment: right;
-                    vertical-alignment: center;
-                    font-size: 13px;
-                    color: root.equaliser ? Theme.text : Theme.text-dim;
-                }
-            }
+        EqualiserDialog {
+            eq-open <=> root.eq-open;
+            equaliser <=> root.equaliser;
+            eq-gains: root.eq-gains;
+            eq-bands: root.eq-bands;
+            eq-presets: root.eq-presets;
+            eq-preset: root.eq-preset;
+            eq-max-db: root.eq-max-db;
+            set-equaliser(on) => { root.set-equaliser(on); }
+            set-eq-preset(index) => { root.set-eq-preset(index); }
+            set-eq-band(band, value, done) => { root.set-eq-band(band, value, done); }
         }
 
-        Dialog {
-            title: "Save to playlist";
-            dialog-width: 420px;
-            open: root.picker-open;
-            close => { root.picker-open = false; }
-            if root.picker-loading: Rectangle {
-                height: 64px;
-                Spinner { }
-            }
-            if !root.picker-loading && root.playlist-choices.length == 0: Text {
-                text: "You have no playlists of your own yet.";
-                color: Theme.text-secondary;
-            }
-            if !root.picker-loading && root.playlist-choices.length > 0: picks := ListView {
-                height: min(360px, root.playlist-choices.length * 44px);
-                for choice[i] in root.playlist-choices: Rectangle {
-                    width: picks.visible-width;
-                    height: 44px;
-                    border-radius: 6px;
-                    background: pick.has-hover ? Theme.hover : transparent;
-                    pick := TouchArea {
-                        mouse-cursor: pointer;
-                        clicked => { root.pick-playlist(i); }
-                    }
-
-                    HorizontalLayout {
-                        padding-left: 12px;
-                        padding-right: 12px;
-                        spacing: 12px;
-                        Text {
-                            text: choice.title;
-                            vertical-alignment: center;
-                            overflow: elide;
-                            font-size: 14px;
-                            color: Theme.text;
-                        }
-
-                        if choice.contains: Icon {
-                            y: (parent.height - self.height) / 2;
-                            path: Icons.check;
-                            size: 18px;
-                            color: Theme.text-secondary;
-                        }
-                    }
-                }
-            }
+        PlaylistPicker {
+            picker-open <=> root.picker-open;
+            picker-loading: root.picker-loading;
+            playlist-choices: root.playlist-choices;
+            pick-playlist(index) => { root.pick-playlist(index); }
         }
 
-        if root.sign-in-shown: sign-in-dialog := Dialog {
-            property <bool> pasting;
-            title: "Sign in";
-            dialog-width: 600px;
-            open: root.sign-in-open;
-            close => { root.sign-in-open = false; }
-            Text {
-                text: root.signing-in-browser
-                    ? "Finish signing in in the Google window. It closes by itself once you're signed in."
-                    : "Sign in with your Google account on Google's own page. Your password goes to Google only.";
-                wrap: word-wrap;
-                font-size: 13px;
-                color: Theme.text-secondary;
-            }
-
-            if sign-in-dialog.pasting: Text {
-                text: "Or paste the cookies of a signed-in music.youtube.com session: either a cookies.txt export or the Cookie request header from the browser's developer tools (Network tab). Use a private window and close it afterwards, as YouTube rotates cookies of open sessions.";
-                wrap: word-wrap;
-                font-size: 13px;
-                color: Theme.text-secondary;
-            }
-            if sign-in-dialog.pasting: TextEdit {
-                height: 160px;
-                font-size: 12px;
-                wrap: char-wrap;
-                edited(text) => { root.pasted-cookie = text; }
-            }
-            if root.sign-in-error != "": Text {
-                text: root.sign-in-error;
-                wrap: word-wrap;
-                font-size: 13px;
-                color: #ff6b81;
-            }
-            HorizontalLayout {
-                alignment: end;
-                spacing: 12px;
-                if root.signing-in || root.signing-in-browser: Spinner {
-                    size: 24px;
-                }
-                if !sign-in-dialog.pasting: PillButton {
-                    text: "Paste cookies instead";
-                    clicked => { sign-in-dialog.pasting = true; }
-                }
-                PillButton {
-                    text: "Cancel";
-                    clicked => { root.sign-in-open = false; }
-                }
-
-                if sign-in-dialog.pasting: PillButton {
-                    text: "Sign in with cookies";
-                    clicked => { root.sign-in(root.pasted-cookie); }
-                }
-                PillButton {
-                    text: "Sign in with Google";
-                    primary: true;
-                    clicked => { root.sign-in-browser(); }
-                }
-            }
+        if root.sign-in-shown: SignInDialog {
+            signing-in: root.signing-in;
+            signing-in-browser: root.signing-in-browser;
+            sign-in-error: root.sign-in-error;
+            pasted-cookie <=> root.pasted-cookie;
+            sign-in-open <=> root.sign-in-open;
+            sign-in(cookie) => { root.sign-in(cookie); }
+            sign-in-browser() => { root.sign-in-browser(); }
         }
     }
 }

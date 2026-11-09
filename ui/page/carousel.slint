@@ -1,0 +1,80 @@
+import { Icons, Theme } from "../theme.slint";
+import { CardItem } from "../types.slint";
+import { IconButton } from "../widgets/buttons.slint";
+import { Card } from "cards.slint";
+import { Layout } from "layout.slint";
+
+/// A carousel's scroll button, dark so it shows over any artwork.
+export component CarouselArrow inherits IconButton {
+    y: (Layout.card-width - Layout.card-padding) / 2 - self.height / 2;
+    size: 36px;
+    icon-size: 22px;
+    color: Theme.text;
+    background: #000000b0;
+    hover-background: #000000e0;
+}
+
+/// A row of cards scrolled with arrow buttons that appear on hover, or by
+/// dragging the cards themselves.
+export component Carousel {
+    in property <[CardItem]> cards;
+    property <length> step: Layout.card-width + Layout.card-gap;
+    property <length> content-width: root.cards.length * root.step - Layout.card-gap;
+    property <length> max-offset: max(0px, root.content-width - root.width);
+    /// What an arrow scrolls by: the whole cards in view, at least one.
+    property <length> page: max(1, floor(root.width / root.step)) * root.step;
+    property <length> offset;
+    property <bool> dragging;
+    /// The offset as the drag began, which the pointer's movement is added to.
+    property <length> drag-from;
+    height: Layout.card-height(Layout.card-width);
+
+    Rectangle {
+        // At rest the row is on whole cards, and an end card's hover
+        // background may show in the padding; while dragging, cards sit
+        // part-way, so the clip tightens to the row.
+        x: root.dragging ? 0 : -Layout.card-padding;
+        width: root.dragging ? root.width : root.width + 2 * Layout.card-padding;
+        clip: true;
+        Rectangle {
+            // Keeps the cards where they are as the clip moves.
+            x: -Layout.card-padding - parent.x;
+            Rectangle {
+                x: -root.offset;
+                // The arrows glide; a drag follows the pointer at once.
+                animate x {
+                    duration: root.dragging ? 0ms : 400ms;
+                    easing: ease-in-out;
+                }
+                for card[i] in root.cards: Card {
+                    x: i * root.step;
+                    y: 0;
+                    card: card;
+                    dragged(dx) => {
+                        if !root.dragging {
+                            root.dragging = true;
+                            root.drag-from = root.offset;
+                        }
+                        root.offset = clamp(root.drag-from - dx, 0px, root.max-offset);
+                    }
+                    // Settles on whole cards, as the arrows leave it.
+                    drag-ended => {
+                        root.dragging = false;
+                        root.offset = clamp(round(root.offset / root.step) * root.step, 0px, root.max-offset);
+                    }
+                }
+            }
+        }
+    }
+
+    if root.offset > 0: CarouselArrow {
+        x: -14px;
+        icon: Icons.back;
+        clicked => { root.offset = max(0px, root.offset - root.page); }
+    }
+    if root.offset < root.max-offset: CarouselArrow {
+        x: root.width - self.width + 14px;
+        icon: Icons.forward;
+        clicked => { root.offset = min(root.max-offset, root.offset + root.page); }
+    }
+}

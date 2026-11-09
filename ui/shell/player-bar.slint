@@ -1,0 +1,315 @@
+import { Icons, Theme } from "../theme.slint";
+import { Api } from "../types.slint";
+import { Art } from "../widgets/art.slint";
+import { IconButton, PlayButton } from "../widgets/buttons.slint";
+import { Slider } from "../widgets/slider.slint";
+import { Spinner } from "../widgets/spinner.slint";
+
+/// The bar along the bottom: the track playing, the transport and seek bar, and the quality badge, panel buttons and volume.
+export component PlayerBar inherits Rectangle {
+    in property <bool> has-track;
+    in property <string> np-title;
+    in property <string> np-artists;
+    in property <image> np-art;
+    in property <float> np-duration;
+    in property <float> np-position;
+    in property <float> np-buffered;
+    in property <bool> np-playing;
+    in property <bool> np-loading;
+    in property <bool> np-premium;
+    in property <string> np-quality;
+    in property <bool> np-has-artist;
+    in property <bool> np-has-album;
+    in property <float> volume;
+    in property <bool> muted;
+    in property <bool> shuffle;
+    in property <bool> smart-shuffle;
+    in property <int> repeat-mode;
+    in property <bool> panel-open;
+    in property <int> panel-tab;
+
+    callback toggle-play();
+    callback next();
+    callback previous();
+    callback seek(fraction: float);
+    callback set-volume(value: float);
+    callback toggle-mute();
+    callback toggle-shuffle();
+    callback cycle-repeat();
+    callback np-go-artist();
+    callback np-go-album();
+    callback open-panel(tab: int);
+
+    pure function fmt(secs: float) -> string {
+        if secs < 0 {
+            return "0:00";
+        }
+        let total = floor(secs);
+        let h = floor(total / 3600);
+        let m = mod(floor(total / 60), 60);
+        let s = mod(total, 60);
+        let ss = s < 10 ? "0" + s : "" + s;
+        if h > 0 {
+            return h + ":" + (m < 10 ? "0" + m : "" + m) + ":" + ss;
+        }
+        return m + ":" + ss;
+    }
+
+    height: Theme.player-bar;
+
+    // Now playing
+    ContextMenuArea {
+        x: 8px;
+        width: parent.width * 0.3;
+        enabled: root.has-track;
+        Menu {
+            if Api.signed-in: MenuItem {
+                title: "Save to playlist";
+                activated => { Api.save-to-playlist(Api.playing-id); }
+            }
+            MenuItem {
+                title: "Go to artist";
+                enabled: root.np-has-artist;
+                activated => { root.np-go-artist(); }
+            }
+            MenuItem {
+                title: "Go to album";
+                enabled: root.np-has-album;
+                activated => { root.np-go-album(); }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 14px;
+            opacity: root.has-track ? 1 : 0;
+            animate opacity { duration: Theme.normal; }
+            Art {
+                y: (parent.height - self.height) / 2;
+                width: 56px;
+                height: 56px;
+                source: root.np-art;
+                drop-shadow-blur: 8px;
+                drop-shadow-color: #00000080;
+            }
+
+            VerticalLayout {
+                alignment: center;
+                spacing: 3px;
+                Text {
+                    text: root.np-title;
+                    overflow: elide;
+                    font-size: 14px;
+                    font-weight: 600;
+                    color: Theme.text;
+                    TouchArea {
+                        mouse-cursor: root.np-has-album ? pointer : default;
+                        clicked => { root.np-go-album(); }
+                    }
+                }
+
+                Text {
+                    text: root.np-artists;
+                    overflow: elide;
+                    font-size: 12px;
+                    color: a-touch.has-hover && root.np-has-artist ? Theme.text : Theme.text-secondary;
+                    a-touch := TouchArea {
+                        mouse-cursor: root.np-has-artist ? pointer : default;
+                        clicked => { root.np-go-artist(); }
+                    }
+                }
+            }
+
+            if Api.signed-in && root.has-track: HorizontalLayout {
+                IconButton {
+                    y: (parent.height - self.height) / 2;
+                    icon: Api.playing-rating == 2 ? Icons.thumb-down-filled : Icons.thumb-down;
+                    color: Api.playing-rating == 2 ? Theme.text : Theme.text-secondary;
+                    size: 32px;
+                    icon-size: 18px;
+                    clicked => { Api.rate(Api.playing-id, 2); }
+                }
+
+                IconButton {
+                    y: (parent.height - self.height) / 2;
+                    icon: Api.playing-rating == 1 ? Icons.thumb-up-filled : Icons.thumb-up;
+                    color: Api.playing-rating == 1 ? Theme.text : Theme.text-secondary;
+                    size: 32px;
+                    icon-size: 18px;
+                    clicked => { Api.rate(Api.playing-id, 1); }
+                }
+            }
+        }
+    }
+
+    // Transport
+    VerticalLayout {
+        x: (parent.width - self.width) / 2;
+        width: min(640px, parent.width * 0.4);
+        alignment: center;
+        spacing: 4px;
+        HorizontalLayout {
+            alignment: center;
+            spacing: 16px;
+            // Off, shuffle, then Smart Shuffle, shown as sparkles.
+            IconButton {
+                y: (parent.height - self.height) / 2;
+                icon: root.smart-shuffle ? Icons.sparkle : Icons.shuffle;
+                size: 32px;
+                icon-size: 18px;
+                active: root.shuffle;
+                clicked => { root.toggle-shuffle(); }
+            }
+
+            IconButton {
+                y: (parent.height - self.height) / 2;
+                icon: Icons.previous;
+                size: 32px;
+                icon-size: 22px;
+                enabled: root.has-track;
+                clicked => { root.previous(); }
+            }
+
+            Rectangle {
+                width: 36px;
+                height: 36px;
+                if root.np-loading: Spinner {
+                    size: 28px;
+                }
+                if !root.np-loading: PlayButton {
+                    size: 36px;
+                    playing: root.np-playing;
+                    color: Theme.text;
+                    icon-color: #000000;
+                    clicked => { root.toggle-play(); }
+                }
+            }
+
+            IconButton {
+                y: (parent.height - self.height) / 2;
+                icon: Icons.next;
+                size: 32px;
+                icon-size: 22px;
+                enabled: root.has-track;
+                clicked => { root.next(); }
+            }
+
+            IconButton {
+                y: (parent.height - self.height) / 2;
+                icon: root.repeat-mode == 2 ? Icons.repeat-one : Icons.repeat;
+                size: 32px;
+                icon-size: 18px;
+                active: root.repeat-mode != 0;
+                clicked => { root.cycle-repeat(); }
+            }
+        }
+
+        HorizontalLayout {
+            spacing: 8px;
+            Text {
+                width: 40px;
+                text: root.fmt(root.np-position);
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                font-size: 12px;
+                color: Theme.text-secondary;
+            }
+
+            Slider {
+                horizontal-stretch: 1;
+                enabled: root.has-track;
+                value: root.np-duration > 0 ? root.np-position / root.np-duration : 0;
+                buffered: root.np-buffered;
+                seek(f) => { root.seek(f); }
+            }
+
+            Text {
+                width: 40px;
+                text: root.fmt(root.np-duration);
+                vertical-alignment: center;
+                font-size: 12px;
+                color: Theme.text-secondary;
+            }
+        }
+    }
+
+    // Options
+    HorizontalLayout {
+        x: parent.width - self.width - 8px;
+        width: self.preferred-width;
+        spacing: 4px;
+        // Quality badge; Premium streams get a red PREMIUM tag.
+        if root.np-quality != "": Rectangle {
+            y: (parent.height - self.height) / 2;
+            width: badge.preferred-width;
+            height: 20px;
+            border-radius: 4px;
+            border-width: 1px;
+            border-color: root.np-premium ? Theme.accent : #ffffff30;
+            clip: true;
+            badge := HorizontalLayout {
+                if root.np-premium: Rectangle {
+                    width: tag.preferred-width + 12px;
+                    background: Theme.accent;
+                    tag := Text {
+                        text: "PREMIUM";
+                        font-size: 10px;
+                        font-weight: 800;
+                        letter-spacing: 0.5px;
+                        color: Theme.text;
+                    }
+                }
+                Rectangle {
+                    width: quality.preferred-width + 14px;
+                    quality := Text {
+                        text: root.np-quality;
+                        font-size: 10px;
+                        font-weight: 700;
+                        letter-spacing: 0.5px;
+                        color: root.np-premium ? Theme.text : Theme.text-secondary;
+                    }
+                }
+            }
+        }
+        Rectangle {
+            width: 4px;
+        }
+
+        IconButton {
+            y: (parent.height - self.height) / 2;
+            icon: Icons.lyrics;
+            size: 32px;
+            icon-size: 18px;
+            active: root.panel-open && root.panel-tab == 1;
+            clicked => { root.open-panel(1); }
+        }
+
+        IconButton {
+            y: (parent.height - self.height) / 2;
+            icon: Icons.queue;
+            size: 32px;
+            icon-size: 18px;
+            active: root.panel-open && root.panel-tab == 0;
+            clicked => { root.open-panel(0); }
+        }
+
+        IconButton {
+            y: (parent.height - self.height) / 2;
+            icon: root.muted || root.volume == 0 ? Icons.volume-off : root.volume < 0.5 ? Icons.volume-low : Icons.volume;
+            size: 32px;
+            icon-size: 18px;
+            clicked => { root.toggle-mute(); }
+        }
+
+        Slider {
+            y: (parent.height - self.height) / 2;
+            width: 100px;
+            value: root.muted ? 0 : root.volume;
+            changed(v) => { root.set-volume(v); }
+            seek(v) => { root.set-volume(v); }
+        }
+
+        Rectangle {
+            width: 8px;
+        }
+    }
+}

@@ -1,0 +1,71 @@
+import { RowItem, RowKind } from "../types.slint";
+
+export global Layout {
+    out property <length> card-width: 188px;
+    out property <length> card-padding: 12px;
+    out property <length> card-text: 52px;
+    out property <length> card-gap: 4px;
+    out property <length> chip-min-width: 190px;
+    out property <length> chip-height: 96px;
+    out property <length> chip-gap: 16px;
+    out property <length> header-height: 300px;
+    out property <length> banner-height: 340px;
+    out property <length> actions-height: 96px;
+    out property <length> top-height: 236px;
+
+    // Card height for a given card width.
+    public pure function card-height(width: length) -> length {
+        return width - 2 * self.card-padding + self.card-text + 2 * self.card-padding;
+    }
+
+    // How many cards a grid `width` wide fits in a row, and how wide each is
+    // then: the grid and its row height must agree.
+    public pure function card-columns(width: length) -> int {
+        return max(1, floor((width + self.card-gap) / (self.card-width + self.card-gap)));
+    }
+
+    public pure function card-cell(width: length) -> length {
+        return (width + 2 * self.card-padding - (self.card-columns(width) - 1) * self.card-gap) / self.card-columns(width);
+    }
+
+    public pure function chip-columns(width: length) -> int {
+        return max(1, floor((width + self.chip-gap) / (self.chip-min-width + self.chip-gap)));
+    }
+
+    // A page header's height above its buttons: a banner, large artwork, or
+    // just the title.
+    public pure function header-art-height(row: RowItem) -> length {
+        return row.banner ? self.banner-height : row.art.width > 0 || row.can-play ? self.header-height : 160px;
+    }
+}
+
+/// The height a row needs at a given content width.
+export global Rows {
+    public pure function height(row: RowItem, inner: length) -> length {
+        if row.kind == RowKind.greeting {
+            return 76px;
+        }
+        if row.kind == RowKind.header {
+            return Layout.header-art-height(row) + (row.can-play || row.can-radio ? Layout.actions-height : 8px);
+        }
+        if row.kind == RowKind.title {
+            return 68px;
+        }
+        if row.kind == RowKind.columns {
+            return 52px;
+        }
+        if row.kind == RowKind.track {
+            return 56px;
+        }
+        if row.kind == RowKind.carousel {
+            return Layout.card-height(Layout.card-width) + 8px;
+        }
+        if row.kind == RowKind.top {
+            return Layout.top-height;
+        }
+        if row.kind == RowKind.grid {
+            return ceil(row.cards.length / Layout.card-columns(inner)) * (Layout.card-height(Layout.card-cell(inner)) + Layout.card-gap);
+        }
+        return ceil(row.cards.length / Layout.chip-columns(inner)) * (Layout.chip-height + Layout.chip-gap);
+    }
+}

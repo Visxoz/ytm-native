@@ -1,0 +1,108 @@
+import { Icons, Theme } from "../theme.slint";
+import { IconButton } from "../widgets/buttons.slint";
+import { Toggle } from "../widgets/toggle.slint";
+
+/// A modal card that fades and scales in, and out again once `open` is
+/// cleared; the owner removes it after `Theme.normal`, or keeps it, hidden.
+export component Dialog inherits Rectangle {
+    in property <string> title;
+    in property <length> dialog-width: 520px;
+    in property <bool> open: true;
+    callback close();
+    // The first frame draws the closed look, so the opening animates
+    // from it; a value set before any frame has nothing to animate from.
+    property <bool> started;
+    property <bool> shown: root.open && root.started;
+    visible: root.shown || card.opacity > 0;
+    Timer {
+        interval: 16ms;
+        running: !root.started;
+        triggered => { root.started = true; }
+    }
+    background: root.shown ? #000000b0 : #00000000;
+    animate background { duration: Theme.normal; }
+    TouchArea {
+        clicked => { root.close(); }
+    }
+
+    // Placed explicitly so its fixed size isn't passed up as the window's
+    // limits, which a dialog kept in the tree while hidden would otherwise do.
+    card := Rectangle {
+        x: (root.width - self.width) / 2;
+        y: (root.height - self.height) / 2;
+        width: root.dialog-width;
+        height: body.preferred-height;
+        border-radius: 12px;
+        background: Theme.menu;
+        drop-shadow-blur: 32px;
+        drop-shadow-offset-y: 12px;
+        drop-shadow-color: #000000b0;
+        opacity: root.shown ? 1 : 0;
+        transform-scale: root.shown ? 1.0 : 0.95;
+        animate opacity, transform-scale {
+            duration: Theme.normal;
+            easing: ease-out;
+        }
+        TouchArea { }
+
+        body := VerticalLayout {
+            padding: 28px;
+            spacing: 18px;
+            HorizontalLayout {
+                Text {
+                    text: root.title;
+                    font-size: 24px;
+                    font-weight: 800;
+                    font-family: Theme.display-font;
+                    color: Theme.text;
+                    vertical-alignment: center;
+                }
+
+                IconButton {
+                    icon: Icons.close;
+                    size: 32px;
+                    icon-size: 20px;
+                    clicked => { root.close(); }
+                }
+            }
+
+            @children
+        }
+    }
+}
+
+export component SettingRow inherits HorizontalLayout {
+    in property <string> label;
+    in property <string> detail;
+    spacing: 24px;
+    VerticalLayout {
+        alignment: center;
+        horizontal-stretch: 1;
+        spacing: 2px;
+        Text {
+            text: root.label;
+            font-size: 15px;
+            font-weight: 600;
+            color: Theme.text;
+        }
+
+        if root.detail != "": Text {
+            text: root.detail;
+            font-size: 13px;
+            color: Theme.text-secondary;
+            wrap: word-wrap;
+        }
+    }
+
+    @children
+}
+
+export component ToggleRow inherits SettingRow {
+    in property <bool> checked;
+    callback toggled(bool);
+    Toggle {
+        y: (parent.height - self.height) / 2;
+        checked: root.checked;
+        toggled(v) => { root.toggled(v); }
+    }
+}
