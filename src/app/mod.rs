@@ -27,13 +27,13 @@ use std::{
     time::{Duration, Instant},
 };
 
-use slint::{ComponentHandle, Image, ModelRc, SharedString, Timer, TimerMode, VecModel};
+use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 use tokio::runtime::Handle;
 
 use crate::{
     Api as ApiGlobal, AppWindow, CardItem, QueueItem, RowItem,
     api::{Api, Page, Route, Track},
-    audio::{Player, PlayerEvent},
+    audio::{Player, PlayerEvent, eq},
     google_sign_in::GoogleSignIn,
     images,
     media_controls::{Action, Controls},
@@ -160,6 +160,8 @@ pub struct App {
     rows: Rc<VecModel<RowItem>>,
     library: Rc<VecModel<CardItem>>,
     queue_model: Rc<VecModel<QueueItem>>,
+    /// Each equaliser band's gain in dB, for its slider.
+    eq_gains: Rc<VecModel<f32>>,
     /// Queue revision the queue model shows.
     queue_shown: Cell<Option<u64>>,
     selection: Cell<queue_panel::Selection>,
@@ -204,6 +206,7 @@ impl App {
         });
         player.set_volume(if settings.muted { 0.0 } else { settings.volume });
         player.set_normalise(settings.normalise);
+        player.set_equaliser(settings.equaliser());
 
         let premium = PremiumShared::new(settings::load_cookie(), settings.premium_account);
         let presence = PresenceHandle::spawn().expect("presence thread spawns");
@@ -240,6 +243,7 @@ impl App {
             rows: Rc::new(VecModel::default()),
             library: Rc::new(VecModel::default()),
             queue_model: Rc::new(VecModel::default()),
+            eq_gains: Rc::new(VecModel::from(vec![0.0; eq::BANDS.len()])),
             queue_shown: Cell::new(None),
             selection: Cell::new(queue_panel::Selection::default()),
             tick: Timer::default(),
@@ -259,6 +263,19 @@ impl App {
         ui.set_rows(ModelRc::from(Rc::clone(&app.rows)));
         ui.set_library(ModelRc::from(Rc::clone(&app.library)));
         ui.set_queue(ModelRc::from(Rc::clone(&app.queue_model)));
+        ui.set_eq_gains(ModelRc::from(Rc::clone(&app.eq_gains)));
+        ui.set_eq_max_db(eq::MAX_DB);
+        let labels: Vec<SharedString> = eq::BANDS
+            .iter()
+            .map(|&hz| match hz {
+                1_000.0.. => format!("{} kHz", hz / 1_000.0),
+                _ => format!("{hz} Hz"),
+            })
+            .map(Into::into)
+            .collect();
+        ui.set_eq_bands(ModelRc::new(VecModel::from(labels)));
+        let presets: Vec<SharedString> = eq::PRESETS.iter().map(|(name, _)| s(name)).collect();
+        ui.set_eq_presets(ModelRc::new(VecModel::from(presets)));
         app.show_recent_searches();
         app
     }
@@ -339,6 +356,16 @@ impl App {
         ui.set_crossfade(settings.crossfade);
         ui.set_sidebar_collapsed(settings.sidebar_collapsed);
         ui.set_check_updates(settings.check_updates);
+        ui.set_equaliser(settings.equaliser);
+        ui.set_eq_preset(
+            eq::PRESETS
+                .iter()
+                .position(|(_, gains)| *gains == settings.equaliser_gains)
+                .map_or(-1, |i| i as i32),
+        );
+        for (band, &db) in settings.equaliser_gains.iter().enumerate() {
+            self.eq_gains.set_row_data(band, db);
+        }
         ui.set_update_status(updates::up_to_date_status(settings.check_updates).into());
     }
 
@@ -350,6 +377,19 @@ impl App {
         };
         settings.save();
         self.apply_settings_to_ui(&self.ui());
+    }
+
+    /// Changes the equaliser's settings and plays with them, saving them
+    /// to disk if `save`.
+    fn change_equaliser(&self, save: bool, change: impl FnOnce(&mut Settings)) {
+        if save {
+            self.update_settings(change);
+        } else {
+            change(&mut self.state.borrow_mut().settings);
+            self.apply_settings_to_ui(&self.ui());
+        }
+        self.player
+            .set_equaliser(self.state.borrow().settings.equaliser());
     }
 
     pub fn settings(&self) -> Settings {

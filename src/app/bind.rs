@@ -5,7 +5,7 @@ use std::rc::Rc;
 use slint::ComponentHandle;
 
 use super::{App, updates::up_to_date_status};
-use crate::{Api as ApiGlobal, AppWindow, api::Route, settings::Quality};
+use crate::{Api as ApiGlobal, AppWindow, api::Route, audio::eq, settings::Quality};
 
 impl App {
     pub(super) fn bind(self: &Rc<Self>, ui: &AppWindow) {
@@ -124,6 +124,26 @@ impl App {
             // A track queued with the old setting is queued again.
             app.state.borrow_mut().playback.forget_queued();
             app.player.clear_next();
+        });
+        on!(on_set_equaliser, |app, on| app
+            .change_equaliser(true, |s| s.equaliser = on));
+        on!(on_set_eq_preset, |app, index| {
+            if let Some(&(_, gains)) = eq::PRESETS.get(index as usize) {
+                app.change_equaliser(true, |s| {
+                    s.equaliser = true;
+                    s.equaliser_gains = gains;
+                });
+            }
+        });
+        on!(on_set_eq_band, |app, band, value, done| {
+            // Whole dB steps; saved once the slider is let go.
+            // Adding 0 turns the -0 just left of centre into 0.
+            let db = ((value * 2.0 - 1.0) * eq::MAX_DB).round() + 0.0;
+            app.change_equaliser(done, |s| {
+                if let Some(gain) = s.equaliser_gains.get_mut(band as usize) {
+                    *gain = db;
+                }
+            });
         });
         on!(on_set_autoplay, |app, value| app
             .update_settings(|s| s.autoplay = value));

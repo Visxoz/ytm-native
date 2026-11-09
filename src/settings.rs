@@ -140,6 +140,9 @@ pub struct Settings {
     pub crossfade: bool,
     /// Look for a newer version on GitHub now and then.
     pub check_updates: bool,
+    pub equaliser: bool,
+    /// Each band's gain in dB, kept while the equaliser is off.
+    pub equaliser_gains: crate::audio::eq::Gains,
     pub window: Option<WindowGeometry>,
 }
 
@@ -160,6 +163,8 @@ impl Default for Settings {
             premium_account: false,
             crossfade: false,
             check_updates: true,
+            equaliser: false,
+            equaliser_gains: Default::default(),
             window: None,
         }
     }
@@ -178,6 +183,11 @@ impl Settings {
     pub fn set_quality(&mut self, quality: Quality) {
         self.quality = quality;
         self.premium_audio = quality == Quality::High;
+    }
+
+    /// The gains to play with, or `None` with the equaliser off.
+    pub fn equaliser(&self) -> Option<crate::audio::eq::Gains> {
+        self.equaliser.then_some(self.equaliser_gains)
     }
 
     pub fn set_shuffle(&mut self, on: bool) {

@@ -523,7 +523,7 @@ component QueueRow inherits Rectangle {
 }
 
 /// A modal card that fades and scales in, and out again once `open` is
-/// cleared; the owner removes it after `Theme.normal`.
+/// cleared; the owner removes it after `Theme.normal`, or keeps it, hidden.
 component Dialog inherits Rectangle {
     in property <string> title;
     in property <length> dialog-width: 520px;
@@ -533,6 +533,7 @@ component Dialog inherits Rectangle {
     // from it; a value set before any frame has nothing to animate from.
     property <bool> started;
     property <bool> shown: root.open && root.started;
+    visible: root.shown || card.opacity > 0;
     Timer {
         interval: 16ms;
         running: !root.started;
@@ -544,7 +545,7 @@ component Dialog inherits Rectangle {
         clicked => { root.close(); }
     }
 
-    Rectangle {
+    card := Rectangle {
         width: root.dialog-width;
         height: body.preferred-height;
         border-radius: 12px;
@@ -697,6 +698,15 @@ export component AppWindow inherits Window {
     in property <int> quality: 2;
     in property <bool> crossfade;
     in property <string> premium-status;
+    // The equaliser.
+    in-out property <bool> eq-open;
+    in-out property <bool> equaliser;
+    in property <[float]> eq-gains;
+    in property <[string]> eq-bands;
+    in property <[string]> eq-presets;
+    /// The preset the gains match, or -1.
+    in property <int> eq-preset;
+    in property <float> eq-max-db;
     // A newer version to install, or empty, and the Updates row's text.
     in property <string> update-version;
     in property <string> update-status;
@@ -746,6 +756,10 @@ export component AppWindow inherits Window {
     callback set-autoplay(value: bool);
     callback set-quality(value: int);
     callback set-crossfade(value: bool);
+    callback set-equaliser(on: bool);
+    callback set-eq-preset(index: int);
+    /// A band's slider, from 0 to 1, moved; `done` once it is let go.
+    callback set-eq-band(band: int, value: float, done: bool);
     // Delivered from background threads through the event loop.
     callback player-event(kind: string, message: string);
     callback media-action(action: string, value: float);
@@ -774,6 +788,8 @@ export component AppWindow inherits Window {
             root.panel-tab-changed(tab);
         }
     }
+
+    property <bool> dialog-open: root.settings-open || root.sign-in-open || root.eq-open;
 
     function toggle-sidebar() {
         root.sidebar-collapsed = !root.sidebar-collapsed;
@@ -845,16 +861,17 @@ export component AppWindow inherits Window {
     forward-focus: keys;
     keys := FocusScope {
         key-pressed(ev) => {
-            if ev.text == Key.Escape && (root.settings-open || root.sign-in-open) {
+            if ev.text == Key.Escape && root.dialog-open {
                 root.settings-open = false;
                 root.sign-in-open = false;
+                root.eq-open = false;
                 return accept;
             }
             if ev.text == Key.Escape && root.queue-selected > 0 {
                 root.queue-clear-selection();
                 return accept;
             }
-            if ev.text == Key.Delete && root.queue-selected > 0 && !search-box.focused {
+            if ev.text == Key.Delete && root.queue-selected > 0 && !search-box.focused && !root.dialog-open {
                 root.queue-remove-selected();
                 return accept;
             }
@@ -1692,6 +1709,20 @@ export component AppWindow inherits Window {
                 toggled(v) => { root.set-crossfade(v); }
             }
 
+            SettingRow {
+                label: "Equaliser";
+                detail: !root.equaliser ? "Off" : root.eq-preset >= 0 ? root.eq-presets[root.eq-preset] : "Custom";
+                PillButton {
+                    y: (parent.height - self.height) / 2;
+                    text: "Adjust";
+                    small: true;
+                    clicked => {
+                        root.settings-open = false;
+                        root.eq-open = true;
+                    }
+                }
+            }
+
             ToggleRow {
                 label: "Autoplay";
                 detail: "Keeps playing similar music when the queue ends.";
@@ -1751,6 +1782,67 @@ export component AppWindow inherits Window {
                 font-size: 12px;
                 color: Theme.text-dim;
                 wrap: word-wrap;
+            }
+        }
+
+        Dialog {
+            title: "Equaliser";
+            open: root.eq-open;
+            close => { root.eq-open = false; }
+            SettingRow {
+                label: "Preset";
+                detail: "A starting point; the bands below fine-tune it.";
+                preset-menu := ContextMenuArea {
+                    width: preset-button.preferred-width;
+                    Menu {
+                        for name[i] in root.eq-presets: MenuItem {
+                            title: name;
+                            activated => { root.set-eq-preset(i); }
+                        }
+                    }
+
+                    preset-button := PillButton {
+                        y: (parent.height - self.height) / 2;
+                        text: root.eq-preset >= 0 ? root.eq-presets[root.eq-preset] : "Custom";
+                        small: true;
+                        clicked => { preset-menu.show({ x: 0, y: self.y + self.height }); }
+                    }
+                }
+
+                // Two-way, as the toggle sets its own state when clicked.
+                Toggle {
+                    y: (parent.height - self.height) / 2;
+                    checked <=> root.equaliser;
+                    toggled(v) => { root.set-equaliser(v); }
+                }
+            }
+
+            for band[i] in root.eq-bands: HorizontalLayout {
+                spacing: 16px;
+                Text {
+                    width: 64px;
+                    text: band;
+                    vertical-alignment: center;
+                    font-size: 13px;
+                    color: Theme.text-secondary;
+                }
+
+                Slider {
+                    horizontal-stretch: 1;
+                    enabled: root.equaliser;
+                    value: (root.eq-gains[i] / root.eq-max-db + 1) / 2;
+                    changed(v) => { root.set-eq-band(i, v, false); }
+                    seek(v) => { root.set-eq-band(i, v, true); }
+                }
+
+                Text {
+                    width: 48px;
+                    text: (root.eq-gains[i] > 0 ? "+" : "") + round(root.eq-gains[i]) + " dB";
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                    font-size: 13px;
+                    color: root.equaliser ? Theme.text : Theme.text-dim;
+                }
             }
         }
 

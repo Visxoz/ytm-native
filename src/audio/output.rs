@@ -2,7 +2,7 @@
 
 use std::{collections::VecDeque, sync::atomic::Ordering};
 
-use super::Shared;
+use super::{Shared, eq::Equaliser};
 
 /// State shared with the device callback.
 pub(super) struct Output {
@@ -24,6 +24,7 @@ pub(super) struct Output {
     pub(super) next_base_secs: f64,
     /// Set by the device callback once the queued track is audible.
     pub(super) advanced: bool,
+    pub(super) eq: Equaliser,
 }
 
 impl Output {
@@ -71,6 +72,8 @@ pub(super) fn fill(shared: &Shared, data: &mut [f32]) {
     for (out, sample) in data.iter_mut().zip(output.samples.drain(..n)) {
         *out = sample * gain;
     }
+    let rate = output.rate;
+    output.eq.process(&mut data[..n], rate, channels);
     data[n..].fill(0.0);
     if let Some(loudness) = output.played((n / channels) as u64) {
         shared.set_loudness(loudness);
@@ -94,6 +97,7 @@ mod tests {
             next_loudness: 0.5,
             next_base_secs: 0.0,
             advanced: false,
+            eq: Equaliser::default(),
         }
     }
 

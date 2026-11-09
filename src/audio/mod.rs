@@ -16,6 +16,7 @@
 
 pub mod decode;
 mod engine;
+pub mod eq;
 mod opus;
 mod output;
 mod source;
@@ -162,6 +163,7 @@ impl Player {
                 next_loudness: 1.0,
                 next_base_secs: 0.0,
                 advanced: false,
+                eq: Default::default(),
             }),
             paused: AtomicBool::new(false),
             gain: AtomicU32::new(1f32.to_bits()),
@@ -234,6 +236,11 @@ impl Player {
             .volume
             .store(volume.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
         self.shared.update_gain();
+    }
+
+    /// Shapes the sound with each band's gain, or plays it as it is.
+    pub fn set_equaliser(&self, gains: Option<eq::Gains>) {
+        self.shared.output.lock().unwrap().eq.set(gains);
     }
 
     pub fn set_normalise(&self, normalise: bool) {
