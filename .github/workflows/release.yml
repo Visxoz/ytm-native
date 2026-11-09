@@ -31,6 +31,8 @@ jobs:
   build:
     needs: version
     uses: ./.github/workflows/build.yml
+    # For the Last.fm keys built into the exe.
+    secrets: inherit
 
   publish:
     name: Publish release

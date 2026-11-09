@@ -25,3 +25,5 @@ jobs:
     # The exe is built for release tags (release.yml); here only on demand.
     if: github.event_name == 'workflow_dispatch'
     uses: ./.github/workflows/build.yml
+    # For the Last.fm keys built into the exe.
+    secrets: inherit

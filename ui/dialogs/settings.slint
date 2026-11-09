@@ -63,6 +63,9 @@ export component SettingsDialog inherits Dialog {
     in property <bool> check-updates;
     in property <[AccentChoice]> accents;
     in property <int> accent-choice;
+    in property <bool> lastfm-available;
+    in property <string> lastfm-user;
+    in property <bool> lastfm-connecting;
     callback set-quality(value: int);
     callback set-normalise(value: bool);
     callback set-crossfade(value: bool);
@@ -71,6 +74,8 @@ export component SettingsDialog inherits Dialog {
     callback set-check-updates(value: bool);
     callback set-look(index: int);
     callback set-accent(index: int);
+    callback lastfm-connect();
+    callback lastfm-disconnect();
     callback install-update();
     callback sign-out();
     property <int> tab;
@@ -190,6 +195,26 @@ export component SettingsDialog inherits Dialog {
                     } else {
                         root.settings-open = false;
                         root.sign-in-open = true;
+                    }
+                }
+            }
+        }
+
+        SettingRow {
+            label: "Last.fm";
+            detail: !root.lastfm-available ? "Not available in this build."
+                : root.lastfm-connecting ? "Allow access on the Last.fm page in your browser."
+                : root.lastfm-user != "" ? "Scrobbling what you play as " + root.lastfm-user + "."
+                : "Logs what you play to your Last.fm profile.";
+            if root.lastfm-available: PillButton {
+                y: (parent.height - self.height) / 2;
+                text: root.lastfm-connecting ? "Cancel" : root.lastfm-user != "" ? "Disconnect" : "Connect";
+                small: true;
+                clicked => {
+                    if root.lastfm-connecting || root.lastfm-user != "" {
+                        root.lastfm-disconnect();
+                    } else {
+                        root.lastfm-connect();
                     }
                 }
             }

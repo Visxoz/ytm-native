@@ -8,6 +8,7 @@ mod audio;
 mod google_sign_in;
 mod http;
 mod images;
+mod lastfm;
 mod logger;
 mod media_controls;
 mod presence;

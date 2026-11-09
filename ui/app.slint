@@ -102,6 +102,11 @@ export component AppWindow inherits Window {
     in property <string> premium-status;
     in property <[AccentChoice]> accents;
     in property <int> accent-choice;
+    // Last.fm: whether this build has its keys, the connected account's
+    // name or empty, and whether it waits for the user in the browser.
+    in property <bool> lastfm-available;
+    in property <string> lastfm-user;
+    in property <bool> lastfm-connecting;
     // The equaliser.
     in-out property <bool> eq-open;
     in-out property <bool> equaliser;
@@ -168,6 +173,9 @@ export component AppWindow inherits Window {
     callback set-crossfade(value: bool);
     callback set-look(index: int);
     callback set-accent(index: int);
+    callback lastfm-connect();
+    /// Also stops waiting for a connection.
+    callback lastfm-disconnect();
     callback set-equaliser(on: bool);
     callback set-eq-preset(index: int);
     /// A band's slider, from 0 to 1, moved; `done` once it is let go.
@@ -472,7 +480,12 @@ export component AppWindow inherits Window {
             check-updates: root.check-updates;
             accents: root.accents;
             accent-choice: root.accent-choice;
+            lastfm-available: root.lastfm-available;
+            lastfm-user: root.lastfm-user;
+            lastfm-connecting: root.lastfm-connecting;
             set-quality(i) => { root.set-quality(i); }
+            lastfm-connect => { root.lastfm-connect(); }
+            lastfm-disconnect => { root.lastfm-disconnect(); }
             set-look(i) => { root.set-look(i); }
             set-accent(i) => { root.set-accent(i); }
             set-normalise(v) => { root.set-normalise(v); }

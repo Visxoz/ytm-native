@@ -24,6 +24,16 @@ const POOL_IDLE: Duration = Duration::from_secs(5 * 60);
 const KEEP_ALIVE_EVERY: Duration = Duration::from_secs(30);
 const KEEP_ALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Hands `url` to the default browser, through explorer.exe.
+pub fn open_in_browser(url: &Url) {
+    if let Err(e) = std::process::Command::new("explorer")
+        .arg(url.as_str())
+        .spawn()
+    {
+        log::warn!("could not open a link in the browser: {e}");
+    }
+}
+
 /// Whether the app may request `url`: HTTPS on an allowed domain. URLs
 /// from YouTube's responses, such as artwork and streams, are checked with
 /// this before they are fetched, and every redirect is too.

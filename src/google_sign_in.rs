@@ -95,13 +95,7 @@ fn open_in_browser(url: &str) {
         .host_str()
         .is_some_and(|host| host.starts_with(ACCOUNTS_SUBDOMAIN));
     if is_web && !is_sign_in {
-        // explorer.exe hands a URL to the default browser.
-        if let Err(e) = std::process::Command::new("explorer")
-            .arg(url.as_str())
-            .spawn()
-        {
-            log::warn!("could not open a link in the browser: {e}");
-        }
+        crate::http::open_in_browser(&url);
     }
 }
 

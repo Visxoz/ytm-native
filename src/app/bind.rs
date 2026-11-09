@@ -160,6 +160,8 @@ impl App {
             .update_settings(|s| s.look = Look::from_index(index)));
         on!(on_set_accent, |app, index| app
             .update_settings(|s| s.accent = Accent::from_index(index)));
+        on!(on_lastfm_connect, |app| app.connect_lastfm());
+        on!(on_lastfm_disconnect, |app| app.disconnect_lastfm());
         on!(on_set_autoplay, |app, value| app
             .update_settings(|s| s.autoplay = value));
         on!(on_set_check_updates, |app, value| {

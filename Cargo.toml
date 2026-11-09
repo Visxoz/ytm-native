@@ -17,6 +17,8 @@ cpal = "0.18.2"
 discord-rich-presence = "1.1.0"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "webp"] }
 log = "0.4.34"
+# Last.fm signs its API calls with MD5.
+md-5 = "0.10"
 oxc_allocator = "0.155"
 oxc_ast = "0.155"
 oxc_ast_visit = "0.155"

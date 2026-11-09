@@ -1,5 +1,6 @@
 //! What is kept between runs: the queue and position, restored on the next
-//! start, the history of songs played, and the recent searches.
+//! start, the history of songs played, the recent searches, and plays not
+//! yet sent to Last.fm.
 
 use std::{rc::Rc, time::Duration};
 
@@ -16,7 +17,8 @@ use crate::{
 const PERSIST_AFTER: Duration = Duration::from_secs(2);
 
 impl App {
-    /// Adds the playing track to the history, as its sound starts.
+    /// Adds the playing track to the history as its sound starts, and
+    /// starts logging it to Last.fm.
     pub(super) fn record_play(self: &Rc<Self>) {
         {
             let mut state = self.state.borrow_mut();
@@ -27,6 +29,7 @@ impl App {
             history.record(track);
         }
         self.persist_soon();
+        self.scrobble_started();
     }
 
     /// The history as a page, newest first, or `None` when nothing has
@@ -65,14 +68,16 @@ impl App {
             });
     }
 
-    /// Writes the session and history now, as on exit, and the recent
-    /// searches should saving them as they changed have failed.
+    /// Writes the session, history and unsent scrobbles now, as on exit,
+    /// and the recent searches should saving them as they changed have
+    /// failed.
     pub(super) fn persist(&self) {
         self.persist_timer.stop();
         self.save_session();
         let mut state = self.state.borrow_mut();
         state.history.save();
         state.searches.save();
+        state.scrobbler.save();
     }
 
     /// The restored position, if the current track is the restored one.

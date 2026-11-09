@@ -32,13 +32,13 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     result
 }
 
-fn read_json<T: DeserializeOwned>(path: &Path) -> Option<T> {
+pub(crate) fn read_json<T: DeserializeOwned>(path: &Path) -> Option<T> {
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
 
 /// Saves `value` as JSON, returning whether it was saved. A failure is
 /// logged as `what` that could not be saved.
-fn save_json(path: &Path, value: &impl Serialize, what: &str) -> bool {
+pub(crate) fn save_json(path: &Path, value: &impl Serialize, what: &str) -> bool {
     let written = serde_json::to_vec(value)
         .map_err(io::Error::other)
         .and_then(|json| write_atomic(path, &json));

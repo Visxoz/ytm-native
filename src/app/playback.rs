@@ -423,6 +423,7 @@ impl App {
             let position = self.player.position();
             ui.set_np_position(position as f32);
             self.show_lyric_line(position);
+            self.scrobble_heard(position);
             let buffered = self.player.buffered();
             ui.set_np_buffered(buffered);
             let stalled = self.player.is_buffering() && !self.player.is_paused();

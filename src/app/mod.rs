@@ -14,6 +14,7 @@ mod page;
 mod playback;
 mod queue_panel;
 mod resolve;
+mod scrobble;
 mod session;
 mod smart_shuffle;
 mod song_version;
@@ -152,6 +153,7 @@ struct State {
     saving: Option<(String, Vec<api::PlaylistOption>)>,
     /// The accent taken from the playing song's artwork, once it loaded.
     artwork_accent: Option<slint::Color>,
+    scrobbler: scrobble::Scrobbler,
 }
 
 impl State {
@@ -263,6 +265,7 @@ impl App {
                 rating_generation: 0,
                 saving: None,
                 artwork_accent: None,
+                scrobbler: scrobble::Scrobbler::load(),
             }),
             rows: Rc::new(VecModel::default()),
             library: Rc::new(VecModel::default()),
@@ -492,6 +495,9 @@ impl App {
             }
         }
         self.warm_premium();
+        self.show_lastfm();
+        // Plays left over from a run that could not reach Last.fm.
+        self.send_scrobbles();
         self.navigate(Route::Home, false);
         // Once at startup, after the first page has had the network, then
         // twice a day for a copy left running.
