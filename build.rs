@@ -48,7 +48,7 @@ fn check_vendored() {
 fn main() {
     check_vendored();
 
-    let config = slint_build::CompilerConfiguration::new().with_style("fluent-dark".into());
+    let config = slint_build::CompilerConfiguration::new().with_style("fluent".into());
     slint_build::compile_with_config("ui/app.slint", config).expect("Slint UI compiles");
 
     let mut res = winresource::WindowsResource::new();

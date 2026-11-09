@@ -179,7 +179,7 @@ export component PlayerBar inherits Rectangle {
                     size: 36px;
                     playing: root.np-playing;
                     color: Theme.text;
-                    icon-color: #000000;
+                    icon-color: Theme.text-inverse;
                     clicked => { root.toggle-play(); }
                 }
             }
@@ -244,7 +244,7 @@ export component PlayerBar inherits Rectangle {
             height: 20px;
             border-radius: 4px;
             border-width: 1px;
-            border-color: root.np-premium ? Theme.accent : #ffffff30;
+            border-color: root.np-premium ? Theme.accent : Theme.ink.with-alpha(0.19);
             clip: true;
             badge := HorizontalLayout {
                 if root.np-premium: Rectangle {
@@ -255,7 +255,7 @@ export component PlayerBar inherits Rectangle {
                         font-size: 10px;
                         font-weight: 800;
                         letter-spacing: 0.5px;
-                        color: Theme.text;
+                        color: Theme.on-colour;
                     }
                 }
                 Rectangle {

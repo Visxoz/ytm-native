@@ -41,7 +41,7 @@ export component IconButton {
     Icon {
         path: root.icon;
         size: root.icon-size;
-        color: !root.enabled ? #ffffff40 : root.active ? Theme.accent : touch.has-hover ? Theme.text : root.color;
+        color: !root.enabled ? Theme.ink.with-alpha(0.25) : root.active ? Theme.accent : touch.has-hover ? Theme.text : root.color;
         transform-scale: touch.pressed ? 0.88 : 1.0;
         animate transform-scale { duration: 90ms; }
     }
@@ -65,7 +65,7 @@ export component PlayButton {
     in property <length> size: 56px;
     in property <bool> playing;
     in property <color> color: Theme.accent;
-    in property <color> icon-color: Theme.text;
+    in property <color> icon-color: Theme.on-colour;
     out property <bool> has-hover: touch.has-hover;
     callback clicked();
     width: root.size;
@@ -108,7 +108,7 @@ export component PillButton {
         border-radius: self.height / 2;
         background: root.primary ? Theme.text : transparent;
         border-width: root.primary ? 0 : 1px;
-        border-color: touch.has-hover ? Theme.text : #ffffff70;
+        border-color: touch.has-hover ? Theme.text : Theme.ink.with-alpha(0.44);
         transform-scale: touch.pressed ? 0.96 : touch.has-hover && root.primary ? 1.04 : 1.0;
         animate transform-scale { duration: Theme.fast; }
         animate border-color { duration: Theme.fast; }
@@ -118,7 +118,7 @@ export component PillButton {
         text: root.text;
         font-size: root.small ? 13px : 14px;
         font-weight: 700;
-        color: root.primary ? #000000 : Theme.text;
+        color: root.primary ? Theme.text-inverse : Theme.text;
     }
 
     touch := TouchArea {
@@ -134,13 +134,13 @@ export component Pill inherits Rectangle {
     height: 32px;
     width: text.preferred-width + 28px;
     border-radius: 16px;
-    background: root.active ? Theme.text : touch.has-hover ? #ffffff26 : #ffffff14;
+    background: root.active ? Theme.text : touch.has-hover ? Theme.ink.with-alpha(0.15) : Theme.hover;
     animate background { duration: Theme.fast; }
     text := Text {
         text: root.label;
         font-size: 14px;
         font-weight: 600;
-        color: root.active ? #000000 : Theme.text;
+        color: root.active ? Theme.text-inverse : Theme.text;
     }
 
     touch := TouchArea {

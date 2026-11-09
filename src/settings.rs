@@ -114,6 +114,102 @@ impl Quality {
     }
 }
 
+/// The app's colours: dark, light, or pure black for OLED screens.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Look {
+    #[default]
+    Dark,
+    Light,
+    Black,
+}
+
+impl Look {
+    pub fn index(self) -> i32 {
+        self as i32
+    }
+
+    pub fn from_index(i: i32) -> Self {
+        match i {
+            1 => Look::Light,
+            2 => Look::Black,
+            _ => Look::Dark,
+        }
+    }
+}
+
+/// YouTube Music's red, the default accent.
+pub const YOUTUBE_RED: u32 = 0xff0033;
+
+/// The colour of active controls: one of a few, or one taken from the
+/// playing song's artwork.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum Accent {
+    #[default]
+    Red,
+    Orange,
+    Green,
+    Teal,
+    Blue,
+    Purple,
+    Pink,
+    Artwork,
+}
+
+impl Accent {
+    /// In the order the Settings dialog offers them, which is their index.
+    pub const ALL: [Self; 8] = [
+        Accent::Red,
+        Accent::Orange,
+        Accent::Green,
+        Accent::Teal,
+        Accent::Blue,
+        Accent::Purple,
+        Accent::Pink,
+        Accent::Artwork,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Accent::Red => "Red",
+            Accent::Orange => "Orange",
+            Accent::Green => "Green",
+            Accent::Teal => "Teal",
+            Accent::Blue => "Blue",
+            Accent::Purple => "Purple",
+            Accent::Pink => "Pink",
+            Accent::Artwork => "From the artwork",
+        }
+    }
+
+    /// The colour as `0xRRGGBB`, or `None` for the artwork's, which changes
+    /// with the song.
+    pub fn rgb(self) -> Option<u32> {
+        match self {
+            Accent::Red => Some(YOUTUBE_RED),
+            Accent::Orange => Some(0xff6a13),
+            Accent::Green => Some(0x1db954),
+            Accent::Teal => Some(0x00a89d),
+            Accent::Blue => Some(0x3d7bff),
+            Accent::Purple => Some(0x9b5cff),
+            Accent::Pink => Some(0xf0458f),
+            Accent::Artwork => None,
+        }
+    }
+
+    pub fn index(self) -> i32 {
+        self as i32
+    }
+
+    pub fn from_index(i: i32) -> Self {
+        usize::try_from(i)
+            .ok()
+            .and_then(|i| Self::ALL.get(i).copied())
+            .unwrap_or_default()
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -143,6 +239,8 @@ pub struct Settings {
     pub equaliser: bool,
     /// Each band's gain in dB, kept while the equaliser is off.
     pub equaliser_gains: crate::audio::eq::Gains,
+    pub look: Look,
+    pub accent: Accent,
     pub window: Option<WindowGeometry>,
 }
 
@@ -165,6 +263,8 @@ impl Default for Settings {
             check_updates: true,
             equaliser: false,
             equaliser_gains: Default::default(),
+            look: Look::Dark,
+            accent: Accent::Red,
             window: None,
         }
     }
@@ -525,5 +625,25 @@ mod tests {
             Quality::Normal
         );
         assert_eq!(Quality::High.max_kbps(), None);
+    }
+
+    #[test]
+    fn looks_and_accents_round_trip_their_index() {
+        for (i, accent) in Accent::ALL.into_iter().enumerate() {
+            assert_eq!(accent.index(), i as i32, "ALL is in declaration order");
+            assert_eq!(Accent::from_index(accent.index()), accent);
+        }
+        assert_eq!(Accent::from_index(-1), Accent::Red);
+        assert_eq!(Accent::from_index(99), Accent::Red);
+        assert_eq!(Accent::Artwork.rgb(), None);
+        for look in [Look::Dark, Look::Light, Look::Black] {
+            assert_eq!(Look::from_index(look.index()), look);
+        }
+        let settings: Settings =
+            serde_json::from_str(r#"{"look":"black","accent":"artwork"}"#).unwrap();
+        assert_eq!(
+            (settings.look, settings.accent),
+            (Look::Black, Accent::Artwork)
+        );
     }
 }

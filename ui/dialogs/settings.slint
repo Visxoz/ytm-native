@@ -1,11 +1,49 @@
 import { Theme } from "../theme.slint";
-import { Api } from "../types.slint";
+import { AccentChoice, Api } from "../types.slint";
 import { Pill, PillButton } from "../widgets/buttons.slint";
 import { Toggle } from "../widgets/toggle.slint";
 import { Dialog, SettingRow, ToggleRow } from "dialog.slint";
 
-/// The Settings dialog: playback, updates and the account, with a way on to
-/// the equaliser and sign-in, which it closes itself to make way for.
+/// A round colour to pick, ringed while picked.
+component Swatch inherits Rectangle {
+    in property <brush> fill;
+    in property <bool> active;
+    in property <string> name;
+    callback clicked();
+    width: 28px;
+    height: 28px;
+    border-radius: self.height / 2;
+    border-width: 2px;
+    border-color: root.active ? Theme.text : touch.has-hover ? Theme.ink.with-alpha(0.3) : transparent;
+    animate border-color { duration: Theme.fast; }
+    accessible-role: button;
+    accessible-label: root.name;
+    accessible-checked: root.active;
+    accessible-action-default => { root.clicked(); }
+    Rectangle {
+        width: 20px;
+        height: 20px;
+        border-radius: self.height / 2;
+        background: root.fill;
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
+
+/// One tab's rows, all tabs the same height so the dialog keeps its size
+/// when switching between them.
+component Tab inherits VerticalLayout {
+    spacing: 18px;
+    alignment: start;
+    min-height: 400px;
+}
+
+/// The Settings dialog, in tabs: playback, appearance, the account and
+/// updates, with a way on to the equaliser and sign-in, which it closes
+/// itself to make way for.
 export component SettingsDialog inherits Dialog {
     in-out property <bool> settings-open;
     in-out property <bool> eq-open;
@@ -23,122 +61,176 @@ export component SettingsDialog inherits Dialog {
     in property <string> update-version;
     in property <bool> update-busy;
     in property <bool> check-updates;
+    in property <[AccentChoice]> accents;
+    in property <int> accent-choice;
     callback set-quality(value: int);
     callback set-normalise(value: bool);
     callback set-crossfade(value: bool);
     callback set-autoplay(value: bool);
     callback set-discord(value: bool);
     callback set-check-updates(value: bool);
+    callback set-look(index: int);
+    callback set-accent(index: int);
     callback install-update();
     callback sign-out();
+    property <int> tab;
 
     title: "Settings";
     open: root.settings-open;
     close => { root.settings-open = false; }
-    SettingRow {
-        label: "Audio quality";
-        detail: root.quality == 0 ? "About 50 kbps, a third of the data of Normal. For a metered connection."
-            : root.quality == 1 ? "About 130 kbps, as YouTube Music plays without Premium."
-            : root.premium-status;
-        VerticalLayout {
-            alignment: center;
-            HorizontalLayout {
-                spacing: 6px;
-                for name[i] in ["Low", "Normal", "High"]: Pill {
-                    label: name;
-                    active: root.quality == i;
-                    clicked => { root.set-quality(i); }
+    HorizontalLayout {
+        spacing: 6px;
+        alignment: start;
+        for name[i] in ["Playback", "Appearance", "Account", "About"]: Pill {
+            label: name;
+            active: root.tab == i;
+            clicked => { root.tab = i; }
+        }
+    }
+
+    if root.tab == 0: Tab {
+        SettingRow {
+            label: "Audio quality";
+            detail: root.quality == 0 ? "About 50 kbps, a third of the data of Normal. For a metered connection."
+                : root.quality == 1 ? "About 130 kbps, as YouTube Music plays without Premium."
+                : root.premium-status;
+            VerticalLayout {
+                alignment: center;
+                HorizontalLayout {
+                    spacing: 6px;
+                    for name[i] in ["Low", "Normal", "High"]: Pill {
+                        label: name;
+                        active: root.quality == i;
+                        clicked => { root.set-quality(i); }
+                    }
                 }
             }
         }
-    }
 
-    ToggleRow {
-        label: "Normalise volume";
-        detail: "Plays every track at a similar loudness, as YouTube Music does.";
-        checked: root.normalise;
-        toggled(v) => { root.set-normalise(v); }
-    }
-
-    ToggleRow {
-        label: "Crossfade";
-        detail: "Fades each track into the next. Tracks of an album played in order still run straight on.";
-        checked: root.crossfade;
-        toggled(v) => { root.set-crossfade(v); }
-    }
-
-    SettingRow {
-        label: "Equaliser";
-        detail: !root.equaliser ? "Off" : root.eq-preset >= 0 ? root.eq-presets[root.eq-preset] : "Custom";
-        PillButton {
-            y: (parent.height - self.height) / 2;
-            text: "Adjust";
-            small: true;
-            clicked => {
-                root.settings-open = false;
-                root.eq-open = true;
-            }
+        ToggleRow {
+            label: "Normalise volume";
+            detail: "Plays every track at a similar loudness, as YouTube Music does.";
+            checked: root.normalise;
+            toggled(v) => { root.set-normalise(v); }
         }
-    }
 
-    ToggleRow {
-        label: "Autoplay";
-        detail: "Keeps playing similar music when the queue ends.";
-        checked: root.autoplay;
-        toggled(v) => { root.set-autoplay(v); }
-    }
-
-    ToggleRow {
-        label: "Discord Rich Presence";
-        detail: "Shows what you are listening to on Discord.";
-        checked: root.discord;
-        toggled(v) => { root.set-discord(v); }
-    }
-
-    SettingRow {
-        label: "Updates";
-        detail: root.update-status;
-        if root.update-version != "" && !root.update-busy: PillButton {
-            y: (parent.height - self.height) / 2;
-            text: "Update to " + root.update-version;
-            primary: true;
-            small: true;
-            clicked => { root.install-update(); }
+        ToggleRow {
+            label: "Crossfade";
+            detail: "Fades each track into the next. Tracks of an album played in order still run straight on.";
+            checked: root.crossfade;
+            toggled(v) => { root.set-crossfade(v); }
         }
-        if root.update-version == "": Toggle {
-            y: (parent.height - self.height) / 2;
-            checked: root.check-updates;
-            toggled(v) => { root.set-check-updates(v); }
-        }
-    }
 
-    Rectangle {
-        height: 1px;
-        background: Theme.divider;
-    }
-
-    SettingRow {
-        label: Api.signed-in ? "Signed in" : "Not signed in";
-        detail: Api.signed-in ? "Your library and history come from your YouTube account." : "Sign in to see your library and history.";
-        PillButton {
-            y: (parent.height - self.height) / 2;
-            text: Api.signed-in ? "Sign out" : "Sign in";
-            small: true;
-            clicked => {
-                if Api.signed-in {
-                    root.sign-out();
-                } else {
+        SettingRow {
+            label: "Equaliser";
+            detail: !root.equaliser ? "Off" : root.eq-preset >= 0 ? root.eq-presets[root.eq-preset] : "Custom";
+            PillButton {
+                y: (parent.height - self.height) / 2;
+                text: "Adjust";
+                small: true;
+                clicked => {
                     root.settings-open = false;
-                    root.sign-in-open = true;
+                    root.eq-open = true;
+                }
+            }
+        }
+
+        ToggleRow {
+            label: "Autoplay";
+            detail: "Keeps playing similar music when the queue ends.";
+            checked: root.autoplay;
+            toggled(v) => { root.set-autoplay(v); }
+        }
+    }
+
+    if root.tab == 1: Tab {
+        SettingRow {
+            label: "Theme";
+            VerticalLayout {
+                alignment: center;
+                HorizontalLayout {
+                    spacing: 6px;
+                    for name[i] in ["Dark", "Light", "Black"]: Pill {
+                        label: name;
+                        active: Theme.look == i;
+                        clicked => { root.set-look(i); }
+                    }
+                }
+            }
+        }
+
+        SettingRow {
+            label: "Accent colour";
+            detail: root.accents[root.accent-choice].artwork ? "Follows the artwork of the song playing." : root.accents[root.accent-choice].name;
+            HorizontalLayout {
+                alignment: center;
+                spacing: 2px;
+                for accent[i] in root.accents: Swatch {
+                    y: (parent.height - self.height) / 2;
+                    name: accent.name;
+                    fill: accent.artwork ? @linear-gradient(135deg, #ff0033 0%, #9b5cff 50%, #00a89d 100%) : accent.colour;
+                    active: root.accent-choice == i;
+                    clicked => { root.set-accent(i); }
                 }
             }
         }
     }
 
-    Text {
-        text: "Shortcuts: Space play/pause • Ctrl+K search • Ctrl+B sidebar • Ctrl+←/→ previous/next";
-        font-size: 12px;
-        color: Theme.text-dim;
-        wrap: word-wrap;
+    if root.tab == 2: Tab {
+        SettingRow {
+            label: Api.signed-in ? "Signed in" : "Not signed in";
+            detail: Api.signed-in ? "Your library and history come from your YouTube account." : "Sign in to see your library and history.";
+            PillButton {
+                y: (parent.height - self.height) / 2;
+                text: Api.signed-in ? "Sign out" : "Sign in";
+                small: true;
+                clicked => {
+                    if Api.signed-in {
+                        root.sign-out();
+                    } else {
+                        root.settings-open = false;
+                        root.sign-in-open = true;
+                    }
+                }
+            }
+        }
+
+        ToggleRow {
+            label: "Discord Rich Presence";
+            detail: "Shows what you are listening to on Discord.";
+            checked: root.discord;
+            toggled(v) => { root.set-discord(v); }
+        }
+    }
+
+    if root.tab == 3: Tab {
+        SettingRow {
+            label: "Updates";
+            detail: root.update-status;
+            if root.update-version != "" && !root.update-busy: PillButton {
+                y: (parent.height - self.height) / 2;
+                text: "Update to " + root.update-version;
+                primary: true;
+                small: true;
+                clicked => { root.install-update(); }
+            }
+            if root.update-version == "": Toggle {
+                y: (parent.height - self.height) / 2;
+                checked: root.check-updates;
+                toggled(v) => { root.set-check-updates(v); }
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Theme.divider;
+        }
+
+        Text {
+            text: "Shortcuts: Space play/pause • Ctrl+K search • Ctrl+B sidebar • Ctrl+←/→ previous/next";
+            font-size: 12px;
+            color: Theme.text-dim;
+            wrap: word-wrap;
+        }
     }
 }

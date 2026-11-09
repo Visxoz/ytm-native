@@ -8,7 +8,7 @@ use slint::TimerMode;
 use super::{App, State};
 use crate::{
     api::{self, Header, Page, QueueMode, Section},
-    images, settings,
+    settings,
 };
 
 /// How long after the last change the session and history are written.
@@ -122,9 +122,7 @@ impl App {
         }
         self.show_track_details(&self.ui(), &track, session.position);
         self.show_playing(false);
-        self.load_image(track.thumb.clone(), images::PLAYER, |app, image| {
-            app.ui().set_np_art(image);
-        });
+        self.load_player_art(&track);
         self.refresh_queue();
     }
 }

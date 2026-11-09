@@ -8,16 +8,19 @@ import { PlayerBar } from "shell/player-bar.slint";
 import { Sidebar } from "shell/sidebar.slint";
 import { TopBar } from "shell/top-bar.slint";
 import { Theme } from "theme.slint";
-import { Api, CardItem, PlaylistChoice, QueueItem, RowItem, RowKind, TrackItem } from "types.slint";
+import { AccentChoice, Api, CardItem, PlaylistChoice, QueueItem, RowItem, RowKind, TrackItem } from "types.slint";
+import { Palette } from "std-widgets.slint";
 
 export {
     Api,
+    Theme,
     TrackItem,
     CardItem,
     RowItem,
     RowKind,
     QueueItem,
     PlaylistChoice,
+    AccentChoice,
 }
 
 export component AppWindow inherits Window {
@@ -97,6 +100,8 @@ export component AppWindow inherits Window {
     in property <int> quality: 2;
     in property <bool> crossfade;
     in property <string> premium-status;
+    in property <[AccentChoice]> accents;
+    in property <int> accent-choice;
     // The equaliser.
     in-out property <bool> eq-open;
     in-out property <bool> equaliser;
@@ -161,6 +166,8 @@ export component AppWindow inherits Window {
     callback set-autoplay(value: bool);
     callback set-quality(value: int);
     callback set-crossfade(value: bool);
+    callback set-look(index: int);
+    callback set-accent(index: int);
     callback set-equaliser(on: bool);
     callback set-eq-preset(index: int);
     /// A band's slider, from 0 to 1, moved; `done` once it is let go.
@@ -178,6 +185,11 @@ export component AppWindow inherits Window {
             root.panel-tab-changed(tab);
         }
     }
+
+    // Std widgets, such as the sign-in dialog's text box, follow the look.
+    property <bool> light: Theme.light;
+    init => { Palette.color-scheme = root.light ? ColorScheme.light : ColorScheme.dark; }
+    changed light => { Palette.color-scheme = root.light ? ColorScheme.light : ColorScheme.dark; }
 
     property <bool> dialog-open: root.settings-open || root.sign-in-open || root.picker-open || root.eq-open;
 
@@ -245,7 +257,7 @@ export component AppWindow inherits Window {
     }
 
     Rectangle {
-        background: root.repaint-flip ? #010101 : Theme.background;
+        background: root.repaint-flip ? Theme.background.mix(Theme.ink, 0.995) : Theme.background;
     }
 
     forward-focus: keys;
@@ -437,7 +449,7 @@ export component AppWindow inherits Window {
                 horizontal-alignment: center;
                 font-size: 14px;
                 font-weight: 600;
-                color: #000000;
+                color: Theme.text-inverse;
             }
         }
 
@@ -458,7 +470,11 @@ export component AppWindow inherits Window {
             update-version: root.update-version;
             update-busy: root.update-busy;
             check-updates: root.check-updates;
+            accents: root.accents;
+            accent-choice: root.accent-choice;
             set-quality(i) => { root.set-quality(i); }
+            set-look(i) => { root.set-look(i); }
+            set-accent(i) => { root.set-accent(i); }
             set-normalise(v) => { root.set-normalise(v); }
             set-crossfade(v) => { root.set-crossfade(v); }
             set-autoplay(v) => { root.set-autoplay(v); }
@@ -504,7 +520,8 @@ export component AppWindow inherits Window {
 export component SignInWindow inherits Window {
     title: "Sign in to YouTube Music";
     icon: @image-url("../app-icon.png");
-    background: Theme.background;
+    // White like Google's page, which covers it once loaded, in every look.
+    background: #ffffff;
     preferred-width: 480px;
     preferred-height: 700px;
     min-width: 400px;

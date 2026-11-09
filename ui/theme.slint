@@ -1,19 +1,33 @@
 export global Theme {
+    /// 0 dark, 1 light, 2 pure black, from the settings.
+    in property <int> look;
+    in property <color> accent: #ff0033;
+    out property <bool> light: root.look == 1;
+    property <bool> black: root.look == 2;
+
     // Surfaces, from the window outwards.
-    out property <color> background: #000000;
-    out property <color> panel: #121212;
-    out property <color> elevated: #1f1f1f;
-    out property <color> highlight: #2a2a2a;
-    out property <color> menu: #282828;
-    out property <color> hover: #ffffff14;
-    out property <color> divider: #ffffff1a;
+    out property <color> background: root.light ? #e8e8e8 : #000000;
+    out property <color> panel: root.light ? #ffffff : root.black ? #000000 : #121212;
+    out property <color> elevated: root.light ? #f0f0f0 : root.black ? #141414 : #1f1f1f;
+    out property <color> highlight: root.light ? #e0e0e0 : root.black ? #222222 : #2a2a2a;
+    out property <color> menu: root.light ? #ffffff : root.black ? #1a1a1a : #282828;
+    /// Controls on the window's own background, such as the search box.
+    out property <color> control: root.light ? #ffffff : root.elevated;
+    out property <color> control-hover: root.light ? root.elevated : root.highlight;
+    /// What translucent washes over the surfaces are made of.
+    out property <color> ink: root.light ? #000000 : #ffffff;
+    out property <color> hover: root.ink.with-alpha(0.08);
+    out property <color> divider: root.ink.with-alpha(0.1);
 
-    out property <color> text: #ffffff;
-    out property <color> text-secondary: #b3b3b3;
-    out property <color> text-dim: #7a7a7a;
+    out property <color> text: root.light ? #0f0f0f : #ffffff;
+    out property <color> text-secondary: root.light ? #5c5c5c : #b3b3b3;
+    out property <color> text-dim: root.light ? #8a8a8a : #7a7a7a;
+    /// Text on a fill of `text`'s colour, such as a primary button.
+    out property <color> text-inverse: root.light ? #ffffff : #000000;
+    /// Text and icons on the accent, artwork and other strong colours,
+    /// which stay white in every look.
+    out property <color> on-colour: #ffffff;
 
-    // YouTube Music's red.
-    out property <color> accent: #ff0033;
     out property <color> home-tint: #5c0f1c;
 
     out property <length> gap: 8px;
@@ -30,6 +44,12 @@ export global Theme {
     out property <string> display-font: "Segoe UI Variable Display";
     out property <duration> fast: 120ms;
     out property <duration> normal: 220ms;
+
+    /// A colour picked for behind white text, such as an artwork's, paled
+    /// in the light look so dark text reads on it.
+    public pure function tint(c: color) -> color {
+        root.light ? c.mix(#ffffff, 0.3) : c
+    }
 }
 
 /// Material Symbols paths on a 24×24 grid.

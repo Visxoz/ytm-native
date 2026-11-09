@@ -60,6 +60,14 @@ export struct QueueItem {
     selected: bool,
 }
 
+/// An accent colour offered in Settings.
+export struct AccentChoice {
+    name: string,
+    colour: color,
+    /// Taken from the playing song's artwork rather than `colour`.
+    artwork: bool,
+}
+
 /// One of the account's playlists, offered for saving a song to.
 export struct PlaylistChoice {
     title: string,

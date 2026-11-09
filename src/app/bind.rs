@@ -9,7 +9,7 @@ use crate::{
     Api as ApiGlobal, AppWindow,
     api::{Rating, Route},
     audio::eq,
-    settings::Quality,
+    settings::{Accent, Look, Quality},
 };
 
 impl App {
@@ -156,6 +156,10 @@ impl App {
                 }
             });
         });
+        on!(on_set_look, |app, index| app
+            .update_settings(|s| s.look = Look::from_index(index)));
+        on!(on_set_accent, |app, index| app
+            .update_settings(|s| s.accent = Accent::from_index(index)));
         on!(on_set_autoplay, |app, value| app
             .update_settings(|s| s.autoplay = value));
         on!(on_set_check_updates, |app, value| {

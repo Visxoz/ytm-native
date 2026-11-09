@@ -10,7 +10,7 @@ export component TopResult inherits Rectangle {
     property <bool> hot: touch.has-hover || top-play.has-hover;
     height: Layout.top-height - 36px;
     border-radius: 8px;
-    background: root.hot ? Theme.highlight : #181818;
+    background: root.hot ? Theme.highlight : Theme.elevated;
     animate background { duration: Theme.normal; }
     touch := TouchArea {
         mouse-cursor: pointer;
@@ -75,6 +75,9 @@ export component PageHeader {
     property <bool> has-art: root.data.art.width > 0 || root.data.can-play;
     property <length> art-height: Layout.header-art-height(root.data);
     property <length> title-size: root.data.title.character-count <= 12 ? 76px : root.data.title.character-count <= 18 ? 60px : root.data.title.character-count <= 28 ? 44px : 34px;
+    // A banner is darkened behind its text, which stays white in every look.
+    property <color> fg: root.data.banner ? Theme.on-colour : Theme.text;
+    property <color> fg-secondary: root.data.banner ? Theme.on-colour.with-alpha(0.7) : Theme.text-secondary;
 
     if root.data.banner: Rectangle {
         x: -Theme.page-padding;
@@ -120,7 +123,7 @@ export component PageHeader {
                 text: root.data.label;
                 font-size: 14px;
                 font-weight: 600;
-                color: Theme.text;
+                color: root.fg;
             }
 
             Text {
@@ -129,7 +132,7 @@ export component PageHeader {
                 font-weight: 800;
                 font-family: Theme.display-font;
                 letter-spacing: -1px;
-                color: Theme.text;
+                color: root.fg;
                 overflow: elide;
             }
 
@@ -140,18 +143,18 @@ export component PageHeader {
                     text: root.data.subtitle;
                     font-size: 14px;
                     font-weight: 700;
-                    color: Theme.text;
+                    color: root.fg;
                     overflow: elide;
                 }
                 if root.data.subtitle != "" && root.data.meta != "": Text {
                     text: "  •  ";
                     font-size: 14px;
-                    color: Theme.text;
+                    color: root.fg;
                 }
                 if root.data.meta != "": Text {
                     text: root.data.meta;
                     font-size: 14px;
-                    color: Theme.text-secondary;
+                    color: root.fg-secondary;
                     overflow: elide;
                 }
             }

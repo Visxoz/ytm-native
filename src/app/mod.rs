@@ -28,11 +28,14 @@ use std::{
     time::{Duration, Instant},
 };
 
-use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
+use slint::{
+    ComponentHandle, Image, Model, ModelRc, SharedString, Timer, TimerMode, VecModel,
+    winit_030::{WinitWindowAccessor, winit},
+};
 use tokio::runtime::Handle;
 
 use crate::{
-    Api as ApiGlobal, AppWindow, CardItem, QueueItem, RowItem,
+    AccentChoice, Api as ApiGlobal, AppWindow, CardItem, QueueItem, RowItem, Theme,
     api::{self, Api, Page, Route, Track},
     audio::{Player, PlayerEvent, eq},
     google_sign_in::GoogleSignIn,
@@ -40,7 +43,7 @@ use crate::{
     media_controls::{Action, Controls},
     presence::PresenceHandle,
     queue::{Queue, Repeat},
-    settings::{self, Settings},
+    settings::{self, Accent, Look, Settings},
     streams::ResolvedStream,
     update,
 };
@@ -147,6 +150,8 @@ struct State {
     rating_generation: u64,
     /// The song being saved to a playlist, and the playlists offered.
     saving: Option<(String, Vec<api::PlaylistOption>)>,
+    /// The accent taken from the playing song's artwork, once it loaded.
+    artwork_accent: Option<slint::Color>,
 }
 
 impl State {
@@ -192,6 +197,11 @@ pub struct App {
 
 fn s(text: impl AsRef<str>) -> SharedString {
     SharedString::from(text.as_ref())
+}
+
+/// The colour `0xRRGGBB`, ignoring any alpha byte.
+fn opaque(rgb: u32) -> slint::Color {
+    slint::Color::from_argb_encoded(0xff00_0000 | (rgb & 0x00ff_ffff))
 }
 
 /// The local date and time, or UTC when Windows will not say the offset.
@@ -252,6 +262,7 @@ impl App {
                 smart: smart_shuffle::Smart::default(),
                 rating_generation: 0,
                 saving: None,
+                artwork_accent: None,
             }),
             rows: Rc::new(VecModel::default()),
             library: Rc::new(VecModel::default()),
@@ -290,6 +301,15 @@ impl App {
         ui.set_eq_bands(ModelRc::new(VecModel::from(labels)));
         let presets: Vec<SharedString> = eq::PRESETS.iter().map(|(name, _)| s(name)).collect();
         ui.set_eq_presets(ModelRc::new(VecModel::from(presets)));
+        let accents: Vec<AccentChoice> = Accent::ALL
+            .iter()
+            .map(|accent| AccentChoice {
+                name: s(accent.name()),
+                colour: accent.rgb().map(opaque).unwrap_or_default(),
+                artwork: accent.rgb().is_none(),
+            })
+            .collect();
+        ui.set_accents(ModelRc::new(VecModel::from(accents)));
         app.show_recent_searches();
         app
     }
@@ -381,6 +401,37 @@ impl App {
             self.eq_gains.set_row_data(band, db);
         }
         ui.set_update_status(updates::up_to_date_status(settings.check_updates).into());
+        ui.set_accent_choice(settings.accent.index());
+        drop(state);
+        self.apply_theme(ui);
+    }
+
+    /// Colours the window, and its title bar, in the chosen look and
+    /// accent, made readable in that look. With the accent taken from the
+    /// artwork, YouTube Music's red stands in until a song's has loaded, and
+    /// for greyish artwork.
+    fn apply_theme(&self, ui: &AppWindow) {
+        let state = self.state.borrow();
+        let settings = &state.settings;
+        let light = settings.look == Look::Light;
+        let accent = settings
+            .accent
+            .rgb()
+            .map(opaque)
+            .or(state.artwork_accent)
+            .unwrap_or_else(|| opaque(settings::YOUTUBE_RED));
+        let theme = ui.global::<Theme>();
+        theme.set_look(settings.look.index());
+        theme.set_accent(images::readable(accent, light));
+        // Windows draws the title bar. Until the native window exists this
+        // does nothing, and `attach_window` applies the theme again.
+        ui.window().with_winit_window(|window| {
+            window.set_theme(Some(if light {
+                winit::window::Theme::Light
+            } else {
+                winit::window::Theme::Dark
+            }));
+        });
     }
 
     fn update_settings(&self, change: impl FnOnce(&mut Settings)) {
@@ -459,7 +510,10 @@ impl App {
             });
     }
 
-    pub fn attach_media_controls(&self, hwnd: *mut std::ffi::c_void) {
+    /// Hooks up what needs the native window, which appears some time after
+    /// the event loop starts: the media overlay and the title bar's colours.
+    pub fn attach_window(&self, hwnd: *mut std::ffi::c_void) {
+        self.apply_theme(&self.ui());
         let weak = self.ui.clone();
         let controls = Controls::new(hwnd, move |action| {
             let (name, value) = match action {

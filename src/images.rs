@@ -240,8 +240,75 @@ fn accent_of(image: &image::DynamicImage) -> Color {
         total += weight;
     }
     let (h, s, _) = rgb_to_hsl(r / total, g / total, b / total);
-    let (r, g, b) = hsl_to_rgb(h, s.clamp(0.25, 0.7), 0.32);
-    Color::from_rgb_u8((r * 255.0) as u8, (g * 255.0) as u8, (b * 255.0) as u8)
+    from_hsl(h, s.clamp(MIN_ACCENT_SATURATION, 0.7), 0.32)
+}
+
+/// The least saturation `accent_of` gives, which greyish artwork gets.
+const MIN_ACCENT_SATURATION: f32 = 0.25;
+
+/// A saturated take on an `accent`, for controls drawn in it rather than
+/// backgrounds behind white text, or `None` for greyish artwork, whose hue
+/// means nothing.
+pub fn vivid(accent: Color) -> Option<Color> {
+    let (r, g, b) = channels(accent);
+    let (h, s, _) = rgb_to_hsl(r, g, b);
+    // A little above the floor, as the colour went through 8-bit channels.
+    (s > MIN_ACCENT_SATURATION + 0.05).then(|| from_hsl(h, s.max(0.5), 0.5))
+}
+
+/// `colour` made just light or dark enough to read: as text on the light
+/// look's white, or, in the dark looks, as text on black and behind white
+/// icons. WCAG asks 4.5:1 of text and 3:1 of icons.
+pub fn readable(colour: Color, light: bool) -> Color {
+    let (lowest, highest) = if light { (0.0, 0.18) } else { (0.175, 0.3) };
+    let (r, g, b) = channels(colour);
+    let lum = luminance(r, g, b);
+    if (lowest..=highest).contains(&lum) {
+        return colour;
+    }
+    // A little inside the range, which rounding to 8-bit channels could
+    // otherwise step out of.
+    let target = if lum > highest {
+        highest - 0.01
+    } else {
+        lowest + 0.01
+    };
+    // Luminance rises with lightness, so halve the range towards the target.
+    let (h, s, _) = rgb_to_hsl(r, g, b);
+    let (mut low, mut high) = (0.0f32, 1.0f32);
+    for _ in 0..20 {
+        let mid = f32::midpoint(low, high);
+        let (r, g, b) = hsl_to_rgb(h, s, mid);
+        if luminance(r, g, b) < target {
+            low = mid;
+        } else {
+            high = mid;
+        }
+    }
+    from_hsl(h, s, f32::midpoint(low, high))
+}
+
+/// WCAG's relative luminance.
+fn luminance(r: f32, g: f32, b: f32) -> f32 {
+    let linear = |c: f32| {
+        if c <= 0.04045 {
+            c / 12.92
+        } else {
+            ((c + 0.055) / 1.055).powf(2.4)
+        }
+    };
+    0.2126 * linear(r) + 0.7152 * linear(g) + 0.0722 * linear(b)
+}
+
+fn channels(colour: Color) -> (f32, f32, f32) {
+    let [r, g, b] = [colour.red(), colour.green(), colour.blue()].map(|c| f32::from(c) / 255.0);
+    (r, g, b)
+}
+
+fn from_hsl(h: f32, s: f32, l: f32) -> Color {
+    let (r, g, b) = hsl_to_rgb(h, s, l);
+    let byte = |c: f32| (c * 255.0).round() as u8;
+    Color::from_rgb_u8(byte(r), byte(g), byte(b))
 }
 
 fn rgb_to_hsl(r: f32, g: f32, b: f32) -> (f32, f32, f32) {
@@ -306,5 +373,37 @@ mod tests {
         let accent = accent_of(&red);
         assert!(accent.red() > accent.green() && accent.red() > accent.blue());
         assert!(accent.red() < 180, "dark enough for white text");
+
+        let bright = vivid(accent).expect("red artwork has a hue");
+        assert!(bright.red() > accent.red(), "brighter");
+        assert!(
+            bright.red() > bright.green() && bright.red() > bright.blue(),
+            "same hue"
+        );
+
+        let grey = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            8,
+            8,
+            image::Rgb([128, 128, 128]),
+        ));
+        assert_eq!(vivid(accent_of(&grey)), None, "no hue to follow");
+    }
+
+    #[test]
+    fn makes_accents_readable_in_each_look() {
+        let lum = |c: Color| {
+            let (r, g, b) = channels(c);
+            luminance(r, g, b)
+        };
+        let green = Color::from_rgb_u8(0x1d, 0xb9, 0x54);
+        assert!(lum(readable(green, true)) <= 0.18, "darkened on white");
+        let red = Color::from_rgb_u8(0xff, 0x00, 0x33);
+        assert_eq!(readable(red, false), red, "already fine on black");
+        let blue = Color::from_rgb_u8(0, 0, 0xff);
+        assert!(lum(readable(blue, false)) >= 0.175, "lightened on black");
+        let yellow = Color::from_rgb_u8(0xee, 0xee, 0x22);
+        let fixed = readable(yellow, false);
+        assert!(lum(fixed) <= 0.3, "dark enough behind white icons");
+        assert!(fixed.red() > fixed.blue(), "keeps its hue");
     }
 }

@@ -8,7 +8,7 @@ export component Toggle {
     height: 22px;
     Rectangle {
         border-radius: self.height / 2;
-        background: root.checked ? Theme.accent : #ffffff38;
+        background: root.checked ? Theme.accent : Theme.ink.with-alpha(0.22);
         animate background { duration: Theme.normal; }
     }
 
@@ -18,7 +18,7 @@ export component Toggle {
         width: 16px;
         height: 16px;
         border-radius: 8px;
-        background: Theme.text;
+        background: Theme.on-colour;
         animate x {
             duration: Theme.normal;
             easing: ease-in-out;

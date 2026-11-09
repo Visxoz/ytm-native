@@ -1,6 +1,6 @@
 //! Tracks and cards as the UI's row and card items.
 
-use super::s;
+use super::{opaque, s};
 use crate::{
     CardItem, RowItem, RowKind, TrackItem,
     api::{self, Card, CardKind, Track},
@@ -39,9 +39,7 @@ pub(super) fn track_row(track: &Track, index: usize, numbered: bool, section: us
 }
 
 pub(super) fn card_item(card: &Card, edge: u32) -> CardItem {
-    let tint = card.color.map_or(slint::Color::default(), |c| {
-        slint::Color::from_argb_encoded(0xFF00_0000 | (c & 0x00FF_FFFF))
-    });
+    let tint = card.color.map_or(slint::Color::default(), opaque);
     CardItem {
         kind: s(card.kind.as_str()),
         id: s(&card.id),

@@ -12,7 +12,7 @@ export component NavRow inherits Rectangle {
     callback clicked();
     height: 44px;
     border-radius: 6px;
-    background: root.active ? Theme.hover : touch.has-hover ? #ffffff0a : transparent;
+    background: root.active ? Theme.hover : touch.has-hover ? Theme.ink.with-alpha(0.04) : transparent;
     animate background { duration: Theme.fast; }
     Icon {
         x: root.wide ? 14px : (parent.width - self.width) / 2;

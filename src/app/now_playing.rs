@@ -64,27 +64,7 @@ impl App {
         ui.set_np_buffered(0.0);
         self.show_playing(true);
         ui.set_np_art(images::cached_or_empty(track.thumb.as_deref(), images::ROW));
-        let id = track.id.clone();
-        let art = track.thumb.clone();
-        self.load_image(art.clone(), images::PLAYER, move |app, image| {
-            if !app
-                .state
-                .borrow()
-                .queue
-                .current()
-                .is_some_and(|t| t.id == id)
-            {
-                return;
-            }
-            let ui = app.ui();
-            ui.set_np_art(image);
-            if let Some(color) = art
-                .as_deref()
-                .and_then(|url| images::accent(url, images::PLAYER))
-            {
-                ui.set_np_accent(color);
-            }
-        });
+        self.load_player_art(track);
 
         if let Some(media) = self.media.borrow_mut().as_mut() {
             let large = track.large_thumb();
@@ -109,6 +89,39 @@ impl App {
         }
         if ui.get_panel_open() && ui.get_panel_tab() == 1 {
             self.load_lyrics();
+        }
+    }
+
+    /// Loads `track`'s artwork into the player bar, with the colours taken
+    /// from it, unless another track is playing by then.
+    pub(super) fn load_player_art(self: &Rc<Self>, track: &Track) {
+        let id = track.id.clone();
+        let url = track.thumb.clone();
+        self.load_image(url.clone(), images::PLAYER, move |app, image| {
+            if !app
+                .state
+                .borrow()
+                .queue
+                .current()
+                .is_some_and(|t| t.id == id)
+            {
+                return;
+            }
+            let ui = app.ui();
+            ui.set_np_art(image);
+            if let Some(color) = url
+                .as_deref()
+                .and_then(|url| images::accent(url, images::PLAYER))
+            {
+                ui.set_np_accent(color);
+                app.state.borrow_mut().artwork_accent = images::vivid(color);
+                app.apply_theme(&ui);
+            }
+        });
+        // Without artwork, the last song's colour would linger.
+        if track.thumb.is_none() {
+            self.state.borrow_mut().artwork_accent = None;
+            self.apply_theme(&self.ui());
         }
     }
 

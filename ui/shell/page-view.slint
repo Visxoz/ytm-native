@@ -28,7 +28,7 @@ export component PageView inherits Rectangle {
     Rectangle {
         y: root.page-scroll;
         height: 420px;
-        background: @linear-gradient(180deg, root.accent 0%, Theme.panel 100%);
+        background: @linear-gradient(180deg, Theme.tint(root.accent) 0%, Theme.panel 100%);
         animate background { duration: 500ms; }
     }
 
@@ -55,7 +55,7 @@ export component PageView inherits Rectangle {
     Rectangle {
         y: 0;
         height: 64px;
-        background: root.accent.darker(0.35);
+        background: Theme.tint(root.accent.darker(0.35));
         opacity: root.page-title != "" && -root.page-scroll > 280px ? 1 : 0;
         visible: self.opacity > 0;
         animate opacity { duration: Theme.normal; }

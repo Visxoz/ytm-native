@@ -46,7 +46,7 @@ export component SidePanel inherits Rectangle {
         x: 0;
         width: Theme.right-panel;
         if root.panel-tab == 1: Rectangle {
-            background: @linear-gradient(180deg, root.np-accent 0%, root.np-accent.darker(0.5) 100%);
+            background: @linear-gradient(180deg, Theme.tint(root.np-accent) 0%, Theme.tint(root.np-accent.darker(0.5)) 100%);
             animate background { duration: 500ms; }
         }
         VerticalLayout {

@@ -62,7 +62,7 @@ export component SearchBox inherits Rectangle {
 
     height: 48px;
     border-radius: self.height / 2;
-    background: input.has-focus || touch.has-hover ? Theme.highlight : Theme.elevated;
+    background: input.has-focus || touch.has-hover ? Theme.control-hover : Theme.control;
     border-width: 2px;
     border-color: input.has-focus ? Theme.text : transparent;
     animate background, border-color { duration: Theme.fast; }
@@ -87,7 +87,7 @@ export component SearchBox inherits Rectangle {
         single-line: true;
         font-size: 15px;
         color: Theme.text;
-        selection-background-color: #ff003380;
+        selection-background-color: Theme.accent.with-alpha(0.5);
         accepted => {
             root.accepted(self.text);
             root.close();
@@ -242,7 +242,7 @@ export component TopBar inherits Rectangle {
         size: 32px;
         icon-size: 22px;
         color: Theme.text;
-        background: Theme.elevated;
+        background: Theme.control;
         enabled: root.can-back;
         clicked => { root.back(); }
     }
@@ -253,7 +253,7 @@ export component TopBar inherits Rectangle {
         size: 32px;
         icon-size: 22px;
         color: Theme.text;
-        background: Theme.elevated;
+        background: Theme.control;
         enabled: root.can-forward;
         clicked => { root.forward(); }
     }
@@ -268,8 +268,8 @@ export component TopBar inherits Rectangle {
             size: 48px;
             icon-size: 24px;
             color: root.nav-current == "home" ? Theme.text : Theme.text-secondary;
-            background: Theme.elevated;
-            hover-background: Theme.highlight;
+            background: Theme.control;
+            hover-background: Theme.control-hover;
             clicked => { root.go("home"); }
         }
 
@@ -294,17 +294,17 @@ export component TopBar inherits Rectangle {
         width: 36px;
         height: 36px;
         border-radius: 18px;
-        background: account-touch.has-hover ? Theme.highlight : Theme.elevated;
+        background: account-touch.has-hover ? Theme.control-hover : Theme.control;
         animate background { duration: Theme.fast; }
         Rectangle {
             width: 26px;
             height: 26px;
             border-radius: 13px;
-            background: Api.signed-in ? Theme.accent : #535353;
+            background: Api.signed-in ? Theme.accent : Theme.ink.with-alpha(0.3);
             Icon {
                 path: Icons.account;
                 size: 18px;
-                color: Theme.text;
+                color: Api.signed-in ? Theme.on-colour : Theme.text;
             }
 
             if Api.signed-in && root.account-photo.width > 0: Art {

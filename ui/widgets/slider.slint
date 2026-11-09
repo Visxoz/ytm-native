@@ -17,12 +17,12 @@ export component Slider {
         y: (parent.height - self.height) / 2;
         height: 4px;
         border-radius: 2px;
-        background: #ffffff30;
+        background: Theme.ink.with-alpha(0.19);
         clip: true;
         Rectangle {
             x: 0;
             width: parent.width * clamp(root.buffered, 0, 1);
-            background: #ffffff28;
+            background: Theme.ink.with-alpha(0.16);
         }
 
         Rectangle {

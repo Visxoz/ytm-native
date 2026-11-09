@@ -1,3 +1,5 @@
+import { Theme } from "../theme.slint";
+
 /// A stand-in for the std `ListView` whose scrolling always rests on whole
 /// physical pixels. Skia snaps text to the pixel grid but draws shapes at
 /// fractional positions, so the std wheel animation made text jitter against
@@ -106,7 +108,7 @@ export component ListView {
             x: parent.width - 4px - self.width;
             y: (parent.height - self.height) * (-root.content-y / max(root.max-scroll, 1px));
             border-radius: self.width / 2;
-            background: bar.has-hover || bar.pressed ? #ffffff8c : #ffffff52;
+            background: Theme.ink.with-alpha(bar.has-hover || bar.pressed ? 0.55 : 0.32);
             animate width, background {
                 duration: 150ms;
                 easing: ease-out;

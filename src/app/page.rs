@@ -9,7 +9,7 @@ use slint::{Model, ModelRc, VecModel};
 use super::{
     App,
     items::{card_item, track_row},
-    s,
+    opaque, s,
 };
 use crate::{
     CardItem, RowItem, RowKind,
@@ -341,7 +341,7 @@ fn route_tint(route: &Route) -> slint::Color {
         Route::Search(_) => 0x2a2a2a,
         _ => 0x333333,
     };
-    slint::Color::from_argb_encoded(0xff00_0000 | rgb)
+    opaque(rgb)
 }
 
 #[cfg(test)]

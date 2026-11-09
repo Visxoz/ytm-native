@@ -216,7 +216,7 @@ fn main() {
             let Some(ui) = weak.upgrade() else { return };
             let found = hwnd(&ui);
             if let Some(hwnd) = found {
-                media_app.attach_media_controls(hwnd);
+                media_app.attach_window(hwnd);
             } else if attempts.get() < 50 {
                 return;
             } else {
