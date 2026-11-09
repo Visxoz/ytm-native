@@ -48,6 +48,7 @@ export struct RowItem {
 }
 
 export struct QueueItem {
+    id: string,
     title: string,
     artists: string,
     duration: string,
@@ -59,6 +60,13 @@ export struct QueueItem {
     selected: bool,
 }
 
+/// One of the account's playlists, offered for saving a song to.
+export struct PlaylistChoice {
+    title: string,
+    /// Already holds the song.
+    contains: bool,
+}
+
 /// Calls from anywhere in the UI into Rust, and state many components read.
 export global Api {
     callback navigate(kind: string, id: string, title: string);
@@ -67,9 +75,21 @@ export global Api {
     callback play-card(kind: string, id: string);
     callback card-radio(kind: string, id: string);
     callback header-action(action: string);
+    /// Likes (1) or dislikes (2) a song, or takes that back if it had it;
+    /// 0 removes either.
+    callback rate(id: string, rating: int);
+    callback save-to-playlist(id: string);
+    in property <bool> signed-in;
+    /// How the account rated the playing song: 0 none, 1 like, 2 dislike.
+    in property <int> playing-rating;
     in-out property <string> playing-id;
     in-out property <bool> is-playing;
     /// Advanced a few times a second while playing; drives the equalisers
     /// without repainting every frame.
     in property <int> eq-phase;
+
+    /// The rating known for `id`: only the playing song's is.
+    public pure function rating-of(id: string) -> int {
+        id == root.playing-id ? root.playing-rating : 0
+    }
 }

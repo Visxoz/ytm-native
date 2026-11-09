@@ -287,7 +287,7 @@ impl App {
         }
     }
 
-    fn stop(self: &Rc<Self>) {
+    pub(super) fn stop(self: &Rc<Self>) {
         self.state.borrow_mut().playback.started = false;
         self.player.stop();
         self.player.set_paused(true);

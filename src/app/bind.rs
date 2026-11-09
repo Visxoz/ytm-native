@@ -5,7 +5,12 @@ use std::rc::Rc;
 use slint::ComponentHandle;
 
 use super::{App, updates::up_to_date_status};
-use crate::{Api as ApiGlobal, AppWindow, api::Route, audio::eq, settings::Quality};
+use crate::{
+    Api as ApiGlobal, AppWindow,
+    api::{Rating, Route},
+    audio::eq,
+    settings::Quality,
+};
 
 impl App {
     pub(super) fn bind(self: &Rc<Self>, ui: &AppWindow) {
@@ -211,5 +216,11 @@ impl App {
         ));
         on!(api.on_header_action, |app, action| app
             .header_action(&action));
+        on!(api.on_rate, |app, id, rating| app
+            .rate(id.to_string(), Rating::from_index(rating)));
+        on!(api.on_save_to_playlist, |app, id| app
+            .open_playlist_picker(id.to_string()));
+        on!(on_pick_playlist, |app, index| app
+            .pick_playlist(index as usize));
     }
 }

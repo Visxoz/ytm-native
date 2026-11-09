@@ -91,6 +91,28 @@ export component TrackRow inherits Rectangle {
                 activated => { Api.track-action("radio", root.section, root.index); }
             }
 
+            if Api.signed-in: MenuSeparator { }
+
+            if Api.signed-in: MenuItem {
+                title: Api.rating-of(root.track.id) == 1 ? "Remove from liked songs" : "Like";
+                activated => { Api.rate(root.track.id, 1); }
+            }
+
+            if Api.signed-in: MenuItem {
+                title: Api.rating-of(root.track.id) == 2 ? "Remove dislike" : "Dislike";
+                activated => { Api.rate(root.track.id, 2); }
+            }
+
+            if Api.signed-in && root.track.id != Api.playing-id: MenuItem {
+                title: "Remove rating";
+                activated => { Api.rate(root.track.id, 0); }
+            }
+
+            if Api.signed-in: MenuItem {
+                title: "Save to playlist";
+                activated => { Api.save-to-playlist(root.track.id); }
+            }
+
             MenuSeparator { }
 
             MenuItem {

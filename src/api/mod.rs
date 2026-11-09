@@ -4,6 +4,7 @@ mod account;
 mod convert;
 mod format;
 mod home_feed;
+mod library;
 mod lyrics;
 mod model;
 mod pages;
@@ -19,6 +20,7 @@ use tokio::sync::OnceCell;
 pub use convert::resize_thumb;
 use convert::tracks;
 pub use format::{format_duration, songs};
+pub use library::{PlaylistOption, Rating};
 pub use lyrics::Lyrics;
 pub use model::*;
 
@@ -123,45 +125,6 @@ impl Api {
     pub async fn playlist_tracks(&self, id: &str) -> Result<Vec<Track>> {
         let playlist = self.fetch_playlist(id, true).await?;
         Ok(tracks(playlist.tracks.items))
-    }
-
-    /// Makes a private playlist of `video_ids` for the signed-in account,
-    /// and returns its ID. Large playlists are filled in after creation,
-    /// as the create call takes only so many.
-    pub async fn create_playlist(&self, title: &str, video_ids: &[String]) -> Result<String> {
-        const PER_REQUEST: usize = 100;
-        let q = self.q().authenticated();
-        let (first, rest) = video_ids.split_at(video_ids.len().min(PER_REQUEST));
-        let created = q
-            .raw(
-                ClientType::DesktopMusic,
-                "playlist/create",
-                &serde_json::json!({
-                    "title": title,
-                    "privacyStatus": "PRIVATE",
-                    "videoIds": first,
-                }),
-            )
-            .await
-            .map_err(err)?;
-        let id = serde_json::from_str::<serde_json::Value>(&created)
-            .ok()
-            .and_then(|v| v["playlistId"].as_str().map(str::to_owned))
-            .ok_or("YouTube did not return the new playlist")?;
-        for chunk in rest.chunks(PER_REQUEST) {
-            let actions: Vec<_> = chunk
-                .iter()
-                .map(|v| serde_json::json!({ "action": "ACTION_ADD_VIDEO", "addedVideoId": v }))
-                .collect();
-            q.raw(
-                ClientType::DesktopMusic,
-                "browse/edit_playlist",
-                &serde_json::json!({ "playlistId": id, "actions": actions }),
-            )
-            .await
-            .map_err(err)?;
-        }
-        Ok(id)
     }
 
     pub async fn radio(&self, radio_id: &str) -> Result<Vec<Track>> {

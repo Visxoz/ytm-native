@@ -41,6 +41,7 @@ pub(super) fn queue_item(
         None
     };
     let item = QueueItem {
+        id: s(&track.id),
         title: s(&track.title),
         artists: s(track.artist_names()),
         duration: s(track.duration.map(api::format_duration).unwrap_or_default()),
@@ -57,6 +58,8 @@ impl App {
     /// queue, the media overlay, Discord, the lyrics and the saved session.
     pub(super) fn present(self: &Rc<Self>, track: &Track, position: f64) {
         let ui = self.ui();
+        // Not a song shown again, as on repeat or a retry.
+        let new_song = ui.global::<ApiGlobal>().get_playing_id() != track.id.as_str();
         self.show_track_details(&ui, track, position);
         ui.set_np_buffered(0.0);
         self.show_playing(true);
@@ -96,6 +99,9 @@ impl App {
         self.refresh_queue();
         self.persist_soon();
         self.update_presence();
+        if new_song {
+            self.load_rating(track.id.clone());
+        }
         {
             let mut state = self.state.borrow_mut();
             state.lyrics_for = None;

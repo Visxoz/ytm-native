@@ -7,7 +7,8 @@ use slint::{ComponentHandle, Image, Model, SharedString, Timer, TimerMode};
 
 use super::{App, items::card_item};
 use crate::{
-    CardItem, api::Route, google_sign_in::GoogleSignIn, images, settings, streams::premium,
+    Api as ApiGlobal, CardItem, api::Route, google_sign_in::GoogleSignIn, images, settings,
+    streams::premium,
 };
 
 impl App {
@@ -43,8 +44,11 @@ impl App {
                         app.premium.set_cookie(Some(header));
                         app.update_settings(|s| s.premium_account = false);
                         app.warm_premium();
-                        ui.set_signed_in(true);
+                        ui.global::<ApiGlobal>().set_signed_in(true);
                         ui.set_sign_in_open(false);
+                        if let Some(id) = app.playing_id() {
+                            app.load_rating(id);
+                        }
                         app.toast("Signed in");
                         app.show_fresh(Route::Library);
                     }
@@ -194,7 +198,7 @@ impl App {
         settings::remove_home();
         self.library.set_vec(Vec::new());
         let ui = self.ui();
-        ui.set_signed_in(false);
+        ui.global::<ApiGlobal>().set_signed_in(false);
         ui.set_account_photo(Image::default());
     }
 

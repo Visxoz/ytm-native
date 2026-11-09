@@ -7,6 +7,7 @@ mod actions;
 mod bind;
 mod gapless;
 mod items;
+mod library;
 mod navigation;
 mod now_playing;
 mod page;
@@ -32,7 +33,7 @@ use tokio::runtime::Handle;
 
 use crate::{
     Api as ApiGlobal, AppWindow, CardItem, QueueItem, RowItem,
-    api::{Api, Page, Route, Track},
+    api::{self, Api, Page, Route, Track},
     audio::{Player, PlayerEvent, eq},
     google_sign_in::GoogleSignIn,
     images,
@@ -141,6 +142,11 @@ struct State {
     /// The last few searches, offered in the search box until the user types.
     searches: settings::Searches,
     smart: smart_shuffle::Smart,
+    /// Bumped as the playing song changes or is rated, so a rating fetched
+    /// before then is not shown.
+    rating_generation: u64,
+    /// The song being saved to a playlist, and the playlists offered.
+    saving: Option<(String, Vec<api::PlaylistOption>)>,
 }
 
 impl State {
@@ -244,6 +250,8 @@ impl App {
                 history: settings::History::load(),
                 searches: settings::Searches::load(),
                 smart: smart_shuffle::Smart::default(),
+                rating_generation: 0,
+                saving: None,
             }),
             rows: Rc::new(VecModel::default()),
             library: Rc::new(VecModel::default()),
@@ -424,10 +432,13 @@ impl App {
         // for YouTube to confirm it.
         let signed_in = self.api.has_cookie();
         self.state.borrow_mut().signed_in = signed_in;
-        self.ui().set_signed_in(signed_in);
+        self.ui().global::<ApiGlobal>().set_signed_in(signed_in);
         if signed_in {
             self.load_library();
             self.load_account_photo();
+            if let Some(id) = self.playing_id() {
+                self.load_rating(id);
+            }
         }
         self.warm_premium();
         self.navigate(Route::Home, false);

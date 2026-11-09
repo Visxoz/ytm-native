@@ -21,6 +21,7 @@ import {
     RowItem,
     RowKind,
     QueueItem,
+    PlaylistChoice,
 } from "types.slint";
 
 export {
@@ -30,6 +31,7 @@ export {
     RowItem,
     RowKind,
     QueueItem,
+    PlaylistChoice,
 }
 
 /// YouTube Music's mark: a red disc with a ring and a centred play triangle.
@@ -408,6 +410,28 @@ component QueueRow inherits Rectangle {
                     }
                 }
             }
+
+            if Api.signed-in && !root.many: MenuSeparator { }
+
+            if Api.signed-in && !root.many: MenuItem {
+                title: Api.rating-of(root.item.id) == 1 ? "Remove from liked songs" : "Like";
+                activated => { Api.rate(root.item.id, 1); }
+            }
+
+            if Api.signed-in && !root.many: MenuItem {
+                title: Api.rating-of(root.item.id) == 2 ? "Remove dislike" : "Dislike";
+                activated => { Api.rate(root.item.id, 2); }
+            }
+
+            if Api.signed-in && !root.many && !root.item.current: MenuItem {
+                title: "Remove rating";
+                activated => { Api.rate(root.item.id, 0); }
+            }
+
+            if Api.signed-in && !root.many: MenuItem {
+                title: "Save to playlist";
+                activated => { Api.save-to-playlist(root.item.id); }
+            }
         }
 
         touch := TouchArea {
@@ -687,7 +711,6 @@ export component AppWindow inherits Window {
     in property <bool> lyrics-loading;
 
     // Account and settings
-    in property <bool> signed-in;
     in property <image> account-photo;
     in property <bool> signing-in;
     in property <bool> signing-in-browser;
@@ -711,6 +734,10 @@ export component AppWindow inherits Window {
     /// The preset the gains match, or -1.
     in property <int> eq-preset;
     in property <float> eq-max-db;
+    // Saving a song to a playlist.
+    in-out property <bool> picker-open;
+    in property <bool> picker-loading;
+    in property <[PlaylistChoice]> playlist-choices;
     // A newer version to install, or empty, and the Updates row's text.
     in property <string> update-version;
     in property <string> update-status;
@@ -758,6 +785,7 @@ export component AppWindow inherits Window {
     callback set-discord(value: bool);
     callback set-check-updates(value: bool);
     callback install-update();
+    callback pick-playlist(index: int);
     callback set-autoplay(value: bool);
     callback set-quality(value: int);
     callback set-crossfade(value: bool);
@@ -794,7 +822,7 @@ export component AppWindow inherits Window {
         }
     }
 
-    property <bool> dialog-open: root.settings-open || root.sign-in-open || root.eq-open;
+    property <bool> dialog-open: root.settings-open || root.sign-in-open || root.picker-open || root.eq-open;
 
     function toggle-sidebar() {
         root.sidebar-collapsed = !root.sidebar-collapsed;
@@ -869,6 +897,7 @@ export component AppWindow inherits Window {
             if ev.text == Key.Escape && root.dialog-open {
                 root.settings-open = false;
                 root.sign-in-open = false;
+                root.picker-open = false;
                 root.eq-open = false;
                 return accept;
             }
@@ -987,14 +1016,14 @@ export component AppWindow inherits Window {
                         width: 26px;
                         height: 26px;
                         border-radius: 13px;
-                        background: root.signed-in ? Theme.accent : #535353;
+                        background: Api.signed-in ? Theme.accent : #535353;
                         Icon {
                             path: Icons.account;
                             size: 18px;
                             color: Theme.text;
                         }
 
-                        if root.signed-in && root.account-photo.width > 0: Art {
+                        if Api.signed-in && root.account-photo.width > 0: Art {
                             width: 100%;
                             height: 100%;
                             round: true;
@@ -1087,7 +1116,7 @@ export component AppWindow inherits Window {
                             }
                         }
 
-                        if root.signed-in: library-list := ListView {
+                        if Api.signed-in: library-list := ListView {
                             vertical-stretch: 1;
                             for item in root.library: LibraryRow {
                                 width: library-list.visible-width;
@@ -1095,7 +1124,7 @@ export component AppWindow inherits Window {
                                 wide: sidebar.wide;
                             }
                         }
-                        if !root.signed-in && sidebar.wide: Rectangle {
+                        if !Api.signed-in && sidebar.wide: Rectangle {
                             height: card.preferred-height;
                             border-radius: 8px;
                             background: Theme.elevated;
@@ -1128,7 +1157,7 @@ export component AppWindow inherits Window {
                                 }
                             }
                         }
-                        if !root.signed-in: Rectangle {
+                        if !Api.signed-in: Rectangle {
                             vertical-stretch: 1;
                         }
                     }
@@ -1217,10 +1246,10 @@ export component AppWindow inherits Window {
                         HorizontalLayout {
                             alignment: center;
                             PillButton {
-                                text: root.nav-current == "library" && !root.signed-in ? "Sign in" : "Try again";
+                                text: root.nav-current == "library" && !Api.signed-in ? "Sign in" : "Try again";
                                 primary: true;
                                 clicked => {
-                                    if root.nav-current == "library" && !root.signed-in {
+                                    if root.nav-current == "library" && !Api.signed-in {
                                         root.sign-in-open = true;
                                     } else {
                                         root.go("reload");
@@ -1326,7 +1355,7 @@ export component AppWindow inherits Window {
                                         icon-size: 16px;
                                         clicked => { root.queue-clear-selection(); }
                                     }
-                                    if root.queue-selected == 0 && root.signed-in && root.queue.length > 0: PanelAction {
+                                    if root.queue-selected == 0 && Api.signed-in && root.queue.length > 0: PanelAction {
                                         text: "Save";
                                         clicked => { root.queue-save(); }
                                     }
@@ -1425,9 +1454,28 @@ export component AppWindow inherits Window {
                 height: Theme.player-bar;
 
                 // Now playing
-                HorizontalLayout {
+                ContextMenuArea {
                     x: 8px;
                     width: parent.width * 0.3;
+                    enabled: root.has-track;
+                    Menu {
+                        if Api.signed-in: MenuItem {
+                            title: "Save to playlist";
+                            activated => { Api.save-to-playlist(Api.playing-id); }
+                        }
+                        MenuItem {
+                            title: "Go to artist";
+                            enabled: root.np-has-artist;
+                            activated => { root.np-go-artist(); }
+                        }
+                        MenuItem {
+                            title: "Go to album";
+                            enabled: root.np-has-album;
+                            activated => { root.np-go-album(); }
+                        }
+                    }
+
+                HorizontalLayout {
                     spacing: 14px;
                     opacity: root.has-track ? 1 : 0;
                     animate opacity { duration: Theme.normal; }
@@ -1466,6 +1514,27 @@ export component AppWindow inherits Window {
                             }
                         }
                     }
+
+                    if Api.signed-in && root.has-track: HorizontalLayout {
+                        IconButton {
+                            y: (parent.height - self.height) / 2;
+                            icon: Api.playing-rating == 2 ? Icons.thumb-down-filled : Icons.thumb-down;
+                            color: Api.playing-rating == 2 ? Theme.text : Theme.text-secondary;
+                            size: 32px;
+                            icon-size: 18px;
+                            clicked => { Api.rate(Api.playing-id, 2); }
+                        }
+
+                        IconButton {
+                            y: (parent.height - self.height) / 2;
+                            icon: Api.playing-rating == 1 ? Icons.thumb-up-filled : Icons.thumb-up;
+                            color: Api.playing-rating == 1 ? Theme.text : Theme.text-secondary;
+                            size: 32px;
+                            icon-size: 18px;
+                            clicked => { Api.rate(Api.playing-id, 1); }
+                        }
+                    }
+                }
                 }
 
                 // Transport
@@ -1756,14 +1825,14 @@ export component AppWindow inherits Window {
             }
 
             SettingRow {
-                label: root.signed-in ? "Signed in" : "Not signed in";
-                detail: root.signed-in ? "Your library and history come from your YouTube account." : "Sign in to see your library and history.";
+                label: Api.signed-in ? "Signed in" : "Not signed in";
+                detail: Api.signed-in ? "Your library and history come from your YouTube account." : "Sign in to see your library and history.";
                 PillButton {
                     y: (parent.height - self.height) / 2;
-                    text: root.signed-in ? "Sign out" : "Sign in";
+                    text: Api.signed-in ? "Sign out" : "Sign in";
                     small: true;
                     clicked => {
-                        if root.signed-in {
+                        if Api.signed-in {
                             root.sign-out();
                         } else {
                             root.settings-open = false;
@@ -1838,6 +1907,54 @@ export component AppWindow inherits Window {
                     vertical-alignment: center;
                     font-size: 13px;
                     color: root.equaliser ? Theme.text : Theme.text-dim;
+                }
+            }
+        }
+
+        Dialog {
+            title: "Save to playlist";
+            dialog-width: 420px;
+            open: root.picker-open;
+            close => { root.picker-open = false; }
+            if root.picker-loading: Rectangle {
+                height: 64px;
+                Spinner { }
+            }
+            if !root.picker-loading && root.playlist-choices.length == 0: Text {
+                text: "You have no playlists of your own yet.";
+                color: Theme.text-secondary;
+            }
+            if !root.picker-loading && root.playlist-choices.length > 0: picks := ListView {
+                height: min(360px, root.playlist-choices.length * 44px);
+                for choice[i] in root.playlist-choices: Rectangle {
+                    width: picks.visible-width;
+                    height: 44px;
+                    border-radius: 6px;
+                    background: pick.has-hover ? Theme.hover : transparent;
+                    pick := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => { root.pick-playlist(i); }
+                    }
+
+                    HorizontalLayout {
+                        padding-left: 12px;
+                        padding-right: 12px;
+                        spacing: 12px;
+                        Text {
+                            text: choice.title;
+                            vertical-alignment: center;
+                            overflow: elide;
+                            font-size: 14px;
+                            color: Theme.text;
+                        }
+
+                        if choice.contains: Icon {
+                            y: (parent.height - self.height) / 2;
+                            path: Icons.check;
+                            size: 18px;
+                            color: Theme.text-secondary;
+                        }
+                    }
                 }
             }
         }
