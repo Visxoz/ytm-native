@@ -1,0 +1,91 @@
+import { Theme } from "theme.slint";
+
+/// The lyrics, line by line. Synced lyrics light up the line being sung,
+/// glide it to the middle, and seek to a line when it is clicked.
+export component Lyrics inherits Flickable {
+    in property <[string]> lines;
+    in property <bool> synced;
+    in property <int> current: -1;
+    in property <string> source;
+    callback line-clicked(index: int);
+
+    // An ease-out glide, written on whole pixels as the lists scroll.
+    property <length> glide-from;
+    property <length> glide-to;
+    property <duration> glide-start;
+    property <bool> gliding;
+    property <float> glide-t: root.gliding ? min(1, (animation-tick() - root.glide-start) / 500ms) : 1;
+
+    changed glide-t => {
+        if root.gliding {
+            root.content-y = round((root.glide-from + (root.glide-to - root.glide-from) * (1 - pow(1 - root.glide-t, 3))) / 1phx) * 1phx;
+            root.gliding = root.glide-t < 1;
+        }
+    }
+
+    // Where the current line is.
+    property <length> line-y;
+    property <length> line-height;
+
+    /// The scroll offset that puts the current line in the middle.
+    pure function centred() -> length {
+        clamp(root.height / 2 - root.line-y - root.line-height / 2, min(0px, root.height - root.content-height), 0px)
+    }
+
+    // A line made current as the rows are created sees only the rows before
+    // it, so it is centred again once the column has its full height.
+    changed content-height => {
+        if root.current >= 0 && !root.gliding {
+            root.content-y = root.centred();
+        }
+    }
+
+    content-height: column.preferred-height;
+
+    column := VerticalLayout {
+        width: root.width;
+        padding: 24px;
+        padding-top: 16px;
+        spacing: 12px;
+        for line[i] in root.lines: Text {
+            property <bool> is-current: i == root.current;
+            changed is-current => {
+                if self.is-current {
+                    root.line-y = self.y;
+                    root.line-height = self.height;
+                    root.glide-from = root.content-y;
+                    root.glide-to = root.centred();
+                    root.glide-start = animation-tick();
+                    root.gliding = true;
+                }
+            }
+            // Lyrics opened mid-song start at the line being sung.
+            init => {
+                if self.is-current {
+                    root.line-y = self.y;
+                    root.line-height = self.height;
+                    root.content-y = root.centred();
+                }
+            }
+            text: line;
+            wrap: word-wrap;
+            font-size: 22px;
+            font-weight: 700;
+            font-family: Theme.display-font;
+            color: Theme.text;
+            opacity: !root.synced || self.is-current ? 1 : touch.has-hover ? 0.8 : 0.5;
+            animate opacity { duration: Theme.normal; }
+
+            touch := TouchArea {
+                enabled: root.synced;
+                mouse-cursor: self.enabled ? pointer : default;
+                clicked => { root.line-clicked(i); }
+            }
+        }
+        if root.source != "": Text {
+            text: root.source;
+            font-size: 12px;
+            color: Theme.text-secondary;
+        }
+    }
+}

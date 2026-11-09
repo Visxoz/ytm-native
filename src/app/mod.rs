@@ -129,6 +129,8 @@ struct State {
     queue: Queue<Track>,
     playback: Playback,
     lyrics_for: Option<String>,
+    /// Each lyric line's start in seconds, when the lyrics shown are synced.
+    lyric_starts: Vec<f64>,
     suggest_generation: u64,
     /// Recently loaded pages, so going back does not fetch them again.
     page_cache: HashMap<Route, (Page, Instant)>,
@@ -167,6 +169,8 @@ pub struct App {
     selection: Cell<queue_panel::Selection>,
     tick: Timer,
     eq_timer: Timer,
+    /// Lights up the next lyric line as it starts, between ticks.
+    lyric_timer: Timer,
     premium: Arc<PremiumShared>,
     premium_shown: Cell<u8>,
     toast_timer: Timer,
@@ -233,6 +237,7 @@ impl App {
                 queue,
                 playback: Playback::default(),
                 lyrics_for: None,
+                lyric_starts: Vec::new(),
                 suggest_generation: 0,
                 page_cache: HashMap::new(),
                 song_versions: HashMap::new(),
@@ -248,6 +253,7 @@ impl App {
             selection: Cell::new(queue_panel::Selection::default()),
             tick: Timer::default(),
             eq_timer: Timer::default(),
+            lyric_timer: Timer::default(),
             premium: Arc::new(premium),
             premium_shown: Cell::new(u8::MAX),
             toast_timer: Timer::default(),

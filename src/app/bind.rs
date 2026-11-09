@@ -71,6 +71,12 @@ impl App {
                 app.load_lyrics();
             }
         });
+        on!(on_lyric_clicked, |app, index| {
+            let start = app.state.borrow().lyric_starts.get(index as usize).copied();
+            if let Some(start) = start {
+                app.seek_to(start);
+            }
+        });
         on!(on_np_go_artist, |app| {
             let id = app
                 .state

@@ -338,6 +338,7 @@ impl App {
             self.player.seek(secs);
         }
         self.ui().set_np_position(secs as f32);
+        self.show_lyric_line(secs);
         self.report_playback_at(secs);
     }
 
@@ -421,6 +422,7 @@ impl App {
         if started {
             let position = self.player.position();
             ui.set_np_position(position as f32);
+            self.show_lyric_line(position);
             let buffered = self.player.buffered();
             ui.set_np_buffered(buffered);
             let stalled = self.player.is_buffering() && !self.player.is_paused();

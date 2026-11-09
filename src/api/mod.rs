@@ -4,6 +4,7 @@ mod account;
 mod convert;
 mod format;
 mod home_feed;
+mod lyrics;
 mod model;
 mod pages;
 
@@ -18,6 +19,7 @@ use tokio::sync::OnceCell;
 pub use convert::resize_thumb;
 use convert::tracks;
 pub use format::{format_duration, songs};
+pub use lyrics::Lyrics;
 pub use model::*;
 
 /// Longest playlist loaded in one go.
@@ -186,24 +188,23 @@ impl Api {
             .find(|song| is_song_version(video, song)))
     }
 
-    pub async fn lyrics(&self, video_id: &str) -> Result<Option<String>> {
+    pub async fn lyrics(&self, video_id: &str) -> Result<Option<Lyrics>> {
         let details = self.q().music_details(video_id).await.map_err(err)?;
         let Some(lyrics_id) = details.lyrics_id else {
             return Ok(None);
         };
-        let lyrics = match self.q().music_lyrics(&lyrics_id).await {
-            Ok(lyrics) => lyrics,
+        match lyrics::timed(&lyrics_id).await {
+            Ok(Some(lyrics)) => return Ok(Some(lyrics)),
+            Ok(None) => log::debug!("timed lyrics came in an unknown shape"),
+            Err(e) => log::debug!("timed lyrics failed: {e}"),
+        }
+        match self.q().music_lyrics(&lyrics_id).await {
+            Ok(lyrics) => Ok(Some(Lyrics::plain(&lyrics.body, lyrics.footer))),
             Err(rustypipe::error::Error::Extraction(
                 rustypipe::error::ExtractionError::NotFound { .. },
-            )) => return Ok(None),
-            Err(e) => return Err(err(e)),
-        };
-        let mut text = lyrics.body;
-        if !lyrics.footer.is_empty() {
-            text.push_str("\n\n");
-            text.push_str(&lyrics.footer);
+            )) => Ok(None),
+            Err(e) => Err(err(e)),
         }
-        Ok(Some(text))
     }
 
     pub async fn suggestions(&self, query: &str) -> Vec<String> {

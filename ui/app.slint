@@ -1,4 +1,4 @@
-import { ScrollView, TextEdit } from "std-widgets.slint";
+import { TextEdit } from "std-widgets.slint";
 import { ListView } from "list.slint";
 import { Theme, Icons } from "theme.slint";
 import {
@@ -13,6 +13,7 @@ import {
     Equalizer,
 } from "widgets.slint";
 import { PageRow, Layout } from "rows.slint";
+import { Lyrics } from "lyrics.slint";
 import {
     Api,
     TrackItem,
@@ -679,7 +680,10 @@ export component AppWindow inherits Window {
     in property <int> queue-current;
     /// Rows picked with Ctrl- or Shift-click.
     in property <int> queue-selected;
-    in property <string> lyrics;
+    in property <[string]> lyrics;
+    in property <bool> lyrics-synced;
+    in property <int> lyrics-current: -1;
+    in property <string> lyrics-source;
     in property <bool> lyrics-loading;
 
     // Account and settings
@@ -743,6 +747,7 @@ export component AppWindow inherits Window {
     callback queue-clear();
     callback queue-save();
     callback panel-tab-changed(tab: int);
+    callback lyric-clicked(index: int);
     callback sidebar-changed(collapsed: bool);
     callback np-go-artist();
     callback np-go-album();
@@ -1402,21 +1407,12 @@ export component AppWindow inherits Window {
                                 if root.lyrics-loading: Spinner {
                                     size: 32px;
                                 }
-                                if !root.lyrics-loading: ScrollView {
-                                    width: 100%;
-                                    height: 100%;
-                                    content-height: lyrics-text.preferred-height + 48px;
-                                    lyrics-text := Text {
-                                        x: 24px;
-                                        y: 16px;
-                                        width: parent.width - 48px;
-                                        text: root.lyrics;
-                                        wrap: word-wrap;
-                                        font-size: 22px;
-                                        font-weight: 700;
-                                        font-family: Theme.display-font;
-                                        color: Theme.text;
-                                    }
+                                if !root.lyrics-loading: Lyrics {
+                                    lines: root.lyrics;
+                                    synced: root.lyrics-synced;
+                                    current: root.lyrics-current;
+                                    source: root.lyrics-source;
+                                    line-clicked(i) => { root.lyric-clicked(i); }
                                 }
                             }
                         }
