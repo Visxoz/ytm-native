@@ -71,7 +71,7 @@ impl PremiumShared {
 
     /// The signed-in account's cookie, cloned so no lock is held across an
     /// await.
-    fn cookie(&self) -> Option<String> {
+    pub(super) fn cookie(&self) -> Option<String> {
         self.cookie.read().unwrap().clone()
     }
 

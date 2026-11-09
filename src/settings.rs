@@ -218,6 +218,8 @@ pub struct Settings {
     pub normalise: bool,
     pub discord: bool,
     pub autoplay: bool,
+    /// Report songs played to the signed-in account's YouTube history.
+    pub youtube_history: bool,
     pub shuffle: bool,
     /// Shuffle with recommended tracks mixed in; a kind of shuffle, so it
     /// goes off with it.
@@ -252,6 +254,7 @@ impl Default for Settings {
             normalise: true,
             discord: true,
             autoplay: true,
+            youtube_history: true,
             shuffle: false,
             smart_shuffle: false,
             repeat: 0,

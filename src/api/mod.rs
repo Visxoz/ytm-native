@@ -3,6 +3,7 @@
 mod account;
 mod convert;
 mod format;
+mod history;
 mod home_feed;
 mod library;
 mod lyrics;

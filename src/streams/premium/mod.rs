@@ -22,7 +22,7 @@ use crate::streams::{self, ResolvedStream};
 
 pub use player::{Player, load_player};
 
-const WEB_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
+pub(crate) const WEB_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
     (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
 /// Formats only Premium accounts get: 256 kbps Opus and AAC.
 const PREMIUM_ITAGS: &[u32] = &[774, 141];

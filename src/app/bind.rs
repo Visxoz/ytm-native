@@ -162,6 +162,8 @@ impl App {
             .update_settings(|s| s.accent = Accent::from_index(index)));
         on!(on_lastfm_connect, |app| app.connect_lastfm());
         on!(on_lastfm_disconnect, |app| app.disconnect_lastfm());
+        on!(on_set_youtube_history, |app, value| app
+            .update_settings(|s| s.youtube_history = value));
         on!(on_set_autoplay, |app, value| app
             .update_settings(|s| s.autoplay = value));
         on!(on_set_check_updates, |app, value| {

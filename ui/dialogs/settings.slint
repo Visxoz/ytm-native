@@ -56,6 +56,7 @@ export component SettingsDialog inherits Dialog {
     in property <[string]> eq-presets;
     in property <int> eq-preset;
     in property <bool> autoplay;
+    in property <bool> youtube-history;
     in property <bool> discord;
     in property <string> update-status;
     in property <string> update-version;
@@ -70,6 +71,7 @@ export component SettingsDialog inherits Dialog {
     callback set-normalise(value: bool);
     callback set-crossfade(value: bool);
     callback set-autoplay(value: bool);
+    callback set-youtube-history(value: bool);
     callback set-discord(value: bool);
     callback set-check-updates(value: bool);
     callback set-look(index: int);
@@ -198,6 +200,13 @@ export component SettingsDialog inherits Dialog {
                     }
                 }
             }
+        }
+
+        if Api.signed-in: ToggleRow {
+            label: "YouTube history";
+            detail: "Adds songs played here to your YouTube Music history, so your recommendations and Listen again reflect them.";
+            checked: root.youtube-history;
+            toggled(v) => { root.set-youtube-history(v); }
         }
 
         SettingRow {

@@ -17,8 +17,8 @@ use crate::{
 const PERSIST_AFTER: Duration = Duration::from_secs(2);
 
 impl App {
-    /// Adds the playing track to the history as its sound starts, and
-    /// starts logging it to Last.fm.
+    /// Adds the playing track to the history as its sound starts, starts
+    /// logging it to Last.fm, and reports it to YouTube.
     pub(super) fn record_play(self: &Rc<Self>) {
         {
             let mut state = self.state.borrow_mut();
@@ -30,6 +30,35 @@ impl App {
         }
         self.persist_soon();
         self.scrobble_started();
+        self.report_play();
+    }
+
+    /// Adds the playing song to the YouTube account's history, as YouTube
+    /// Music does, so its recommendations and Listen again follow what
+    /// plays here too.
+    fn report_play(self: &Rc<Self>) {
+        let id = {
+            let state = self.state.borrow();
+            if !(state.signed_in && state.settings.youtube_history) {
+                return;
+            }
+            let Some(track) = state.queue.current() else {
+                return;
+            };
+            track.id.clone()
+        };
+        let Some(cookie) = self.premium.cookie() else {
+            return;
+        };
+        let api = self.api.clone();
+        self.spawn(
+            async move { api.report_play(&id, &cookie).await },
+            |_, result| {
+                if let Err(e) = result {
+                    log::warn!("could not add a play to the YouTube history: {e}");
+                }
+            },
+        );
     }
 
     /// The history as a page, newest first, or `None` when nothing has
