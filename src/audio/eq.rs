@@ -8,6 +8,9 @@ use std::f64::consts::PI;
 pub const BANDS: [f64; 6] = [60.0, 150.0, 400.0, 1_000.0, 2_400.0, 15_000.0];
 /// The furthest a band goes either way, in dB.
 pub const MAX_DB: f32 = 12.0;
+/// The decoder only gives mono or stereo; channels past this would pass
+/// through unfiltered.
+const MAX_CHANNELS: usize = 2;
 /// How wide the peaks are: about an octave and a half.
 const Q: f64 = 0.9;
 /// Filter memory below this is flushed to zero, as denormal floats would
@@ -69,8 +72,10 @@ pub(super) struct Equaliser {
     /// Every band's filter, so the memory keeps its layout as gains change.
     filters: [Biquad; BANDS.len()],
     /// Each channel's memory for each filter, channel by channel. Kept
-    /// through a change of gains, as zeroing it mid-song would click.
-    memory: Vec<[f32; 2]>,
+    /// through a change of gains, as zeroing it mid-song would click. Sized
+    /// for the most channels the decoder gives, so the device callback
+    /// never allocates.
+    memory: [[f32; 2]; BANDS.len() * MAX_CHANNELS],
     /// Lowers the whole signal by the peak of the combined boost, so the
     /// bands cannot push the music past full scale.
     preamp: f32,
@@ -92,8 +97,8 @@ impl Equaliser {
     fn rebuild(&mut self, rate: u32, channels: usize) {
         let gains = self.gains.unwrap_or_default();
         self.filters = std::array::from_fn(|band| Biquad::new(band, gains[band], rate));
-        if self.memory.len() != BANDS.len() * channels {
-            self.memory = vec![[0.0; 2]; BANDS.len() * channels];
+        if channels != self.channels {
+            self.memory.fill([0.0; 2]);
         }
         // Neighbouring bands overlap and their boosts add, so the peak is
         // found on a sixth-octave grid from 20 Hz to below Nyquist.
@@ -231,7 +236,7 @@ mod tests {
         eq.set(Some([6.0, 0.0, 0.0, 0.0, 0.0, 0.0]));
         let mut samples = vec![0.5f32; 4_800];
         eq.process(&mut samples, 48_000, 1);
-        let memory = eq.memory.clone();
+        let memory = eq.memory;
         eq.set(Some([6.0, 0.0, 0.0, 0.0, 0.0, 0.0]));
         assert!(!eq.stale, "the same gains change nothing");
         eq.set(Some([7.0, 0.0, 0.0, 0.0, 0.0, 0.0]));

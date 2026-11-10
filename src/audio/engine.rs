@@ -19,6 +19,7 @@ use super::{
     Command, Opening, PlayerEvent, SILENCE_TRIM_SECS, Shared,
     decode::{Decoded, Decoder},
     loudness_gain,
+    opus::MAX_FRAME,
     output::{Output, fill},
     source::{Download, StreamReader},
 };
@@ -121,15 +122,16 @@ fn is_silent(frame: &[f32]) -> bool {
 /// Splits a finished track's held samples at the tail to fade from: up to
 /// `fade` samples, ending where its trailing silence, at most `trim`
 /// samples of it, begins. What comes before the tail moves on to `out`, and
-/// the tail keeps the held buffer, so nothing is copied or allocated. With
-/// no fade, gapless, everything moves on and no silence is cut.
+/// the tail keeps the held buffer, so nothing is allocated; the caller
+/// lines it up as a `Vec` once the output is unlocked. With no fade,
+/// gapless, everything moves on and no silence is cut.
 fn take_tail(
     held: &mut VecDeque<f32>,
     out: &mut VecDeque<f32>,
     channels: usize,
     fade: usize,
     trim: usize,
-) -> Vec<f32> {
+) -> VecDeque<f32> {
     if fade > 0 {
         let silent = held
             .make_contiguous()
@@ -141,7 +143,7 @@ fn take_tail(
     }
     let start = held.len().saturating_sub(fade);
     out.extend(held.drain(..start));
-    std::mem::take(held).into()
+    std::mem::take(held)
 }
 
 /// Opens the queued track and, for a crossfade, decodes up to its first
@@ -298,9 +300,15 @@ impl Engine {
         } else {
             0
         };
-        // Sized once, as growing by doubling would overshoot by up to half.
+        // Sized once, as growing by doubling would overshoot by up to half,
+        // with room for the packet that lands before the excess spills.
+        let room = if hold > 0 {
+            hold + MAX_FRAME * channels
+        } else {
+            0
+        };
         self.held
-            .reserve_exact(hold.saturating_sub(self.held.len()));
+            .reserve_exact(room.saturating_sub(self.held.len()));
         let (tx, opened) = mpsc::channel();
         let reader = download.reader();
         let mime = opening.mime;
@@ -363,6 +371,9 @@ impl Engine {
         if !finished || !ready || self.previous.is_some() {
             return;
         }
+        // Lined up before the output is locked, which the device callback
+        // waits on; only what plays before the fade still moves under it.
+        self.held.make_contiguous();
         let mut output = self.shared.output.lock().unwrap();
         let opened = self.next.as_ref().and_then(|n| n.ready.as_ref());
         let same_format = opened.is_some_and(|o| same_format(&o.decoder, &output));
@@ -406,7 +417,7 @@ impl Engine {
                     1.0
                 };
                 self.fade = Some(Fade {
-                    tail,
+                    tail: tail.into(),
                     channels,
                     mixed: 0,
                     old_gain,
@@ -474,9 +485,9 @@ impl Engine {
         }
         if self.held.is_empty() && self.hold() == 0 {
             let mut output = self.shared.output.lock().unwrap();
-            output.samples.extend(samples.iter().copied());
+            output.samples.extend(samples.iter());
         } else {
-            self.held.extend(samples.iter().copied());
+            self.held.extend(samples.iter());
             self.spill();
         }
     }

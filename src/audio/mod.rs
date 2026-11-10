@@ -22,7 +22,6 @@ mod output;
 mod source;
 
 use std::{
-    collections::VecDeque,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU32, Ordering},
@@ -107,8 +106,7 @@ struct Shared {
     paused: AtomicBool,
     /// Set by the device's error callback once its stream needs reopening.
     device_lost: AtomicBool,
-    /// Linear gain as f32 bits: volume curve times loudness correction.
-    gain: AtomicU32,
+    /// The volume and the loudness correction, as f32 bits.
     volume: AtomicU32,
     normalise: AtomicBool,
     loudness_gain: AtomicU32,
@@ -121,7 +119,6 @@ struct Shared {
 impl Shared {
     fn set_loudness(&self, gain: f32) {
         self.loudness_gain.store(gain.to_bits(), Ordering::Relaxed);
-        self.update_gain();
     }
 
     fn cancel_current(&self) {
@@ -132,7 +129,8 @@ impl Shared {
         cancel(&self.next_download);
     }
 
-    fn update_gain(&self) {
+    /// Linear gain: volume curve times loudness correction.
+    fn gain(&self) -> f32 {
         let volume = f32::from_bits(self.volume.load(Ordering::Relaxed));
         let loudness = if self.normalise.load(Ordering::Relaxed) {
             f32::from_bits(self.loudness_gain.load(Ordering::Relaxed))
@@ -140,8 +138,7 @@ impl Shared {
             1.0
         };
         // Squared so the slider feels even to the ear.
-        self.gain
-            .store((volume * volume * loudness).to_bits(), Ordering::Relaxed);
+        volume * volume * loudness
     }
 }
 
@@ -155,21 +152,12 @@ impl Player {
     pub fn spawn(on_event: impl Fn(PlayerEvent) + Send + 'static) -> Self {
         let shared = Arc::new(Shared {
             output: Mutex::new(Output {
-                samples: VecDeque::new(),
-                rate: 0,
                 channels: 2,
-                base_secs: 0.0,
-                frames_played: 0,
-                underrun: false,
-                switch_at: None,
                 next_loudness: 1.0,
-                next_base_secs: 0.0,
-                advanced: false,
-                eq: Default::default(),
+                ..Default::default()
             }),
             paused: AtomicBool::new(false),
             device_lost: AtomicBool::new(false),
-            gain: AtomicU32::new(1f32.to_bits()),
             volume: AtomicU32::new(1f32.to_bits()),
             normalise: AtomicBool::new(true),
             loudness_gain: AtomicU32::new(1f32.to_bits()),
@@ -240,7 +228,6 @@ impl Player {
         self.shared
             .volume
             .store(volume.clamp(0.0, 1.0).to_bits(), Ordering::Relaxed);
-        self.shared.update_gain();
     }
 
     /// Shapes the sound with each band's gain, or plays it as it is.
@@ -250,7 +237,6 @@ impl Player {
 
     pub fn set_normalise(&self, normalise: bool) {
         self.shared.normalise.store(normalise, Ordering::Relaxed);
-        self.shared.update_gain();
     }
 
     /// Current position in seconds.

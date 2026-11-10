@@ -5,6 +5,7 @@ use std::{collections::VecDeque, sync::atomic::Ordering};
 use super::{Shared, eq::Equaliser};
 
 /// State shared with the device callback.
+#[derive(Default)]
 pub(super) struct Output {
     pub(super) samples: VecDeque<f32>,
     pub(super) rate: u32,
@@ -64,7 +65,7 @@ pub(super) fn fill(shared: &Shared, data: &mut [f32]) {
         data.fill(0.0);
         return;
     }
-    let gain = f32::from_bits(shared.gain.load(Ordering::Relaxed));
+    let gain = shared.gain();
     let mut output = shared.output.lock().unwrap();
     let channels = output.channels.max(1);
     let n = data.len().min(output.samples.len());
@@ -87,17 +88,11 @@ mod tests {
 
     fn output() -> Output {
         Output {
-            samples: VecDeque::new(),
             rate: 48_000,
             channels: 2,
             base_secs: 30.0,
-            frames_played: 0,
-            underrun: false,
-            switch_at: None,
             next_loudness: 0.5,
-            next_base_secs: 0.0,
-            advanced: false,
-            eq: Equaliser::default(),
+            ..Default::default()
         }
     }
 
