@@ -28,7 +28,8 @@ export global Theme {
     /// which stay white in every look.
     out property <color> on-colour: #ffffff;
 
-    out property <color> home-tint: #5c0f1c;
+    /// Behind Home, a dark take on the accent; YouTube Music's red gives #5c0012.
+    out property <color> home-tint: root.accent.mix(#000000, 0.36);
 
     out property <length> gap: 8px;
     out property <length> panel-radius: 8px;

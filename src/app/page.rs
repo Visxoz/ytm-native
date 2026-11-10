@@ -335,7 +335,8 @@ fn greeting_for(hour: u8) -> &'static str {
 /// The header tint for pages without artwork.
 fn route_tint(route: &Route) -> slint::Color {
     let rgb = match route {
-        Route::Home => 0x5c0f1c,
+        // Transparent, for the page to follow the theme's accent.
+        Route::Home => return slint::Color::default(),
         Route::Explore => 0x1e3264,
         Route::Library => 0x3d1f5c,
         Route::Search(_) => 0x2a2a2a,
