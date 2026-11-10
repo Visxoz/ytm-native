@@ -14,8 +14,8 @@ use serde_json::json;
 const PLAYER_URL: &str = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false";
 
 /// A client YouTube hands plain URLs to, as yt-dlp describes it.
-pub(crate) struct Client {
-    pub(crate) name: &'static str,
+struct Client {
+    name: &'static str,
     id: &'static str,
     version: &'static str,
     user_agent: &'static str,
@@ -28,7 +28,7 @@ pub(crate) struct Client {
 
 /// In order of trial. The first is the usual one; the rest only answer
 /// once it fails, so they cost nothing while it works.
-pub(crate) const CLIENTS: &[Client] = &[
+const CLIENTS: &[Client] = &[
     Client {
         name: "VISIONOS",
         id: "101",
@@ -73,10 +73,11 @@ pub struct ResolvedStream {
     pub mime: String,
     pub headers: Vec<(String, String)>,
     pub codec: String,
-    pub bitrate_kbps: Option<f64>,
+    pub bitrate_kbps: f64,
     pub duration: Option<f64>,
     pub loudness_db: Option<f32>,
-    /// Came from the signed-in Premium path.
+    /// A Premium format (774 or 141). Free formats the web client gives a
+    /// Premium account are not.
     pub premium: bool,
     /// YouTube's format number: 774 and 141 are the Premium ones.
     pub itag: u32,
@@ -130,6 +131,7 @@ pub(crate) struct Format {
     #[serde(default)]
     is_drc: bool,
     audio_track: Option<AudioTrack>,
+    audio_channels: Option<u32>,
 }
 
 #[derive(Deserialize, Debug, Clone)]
@@ -140,12 +142,15 @@ struct AudioTrack {
 }
 
 impl Format {
-    pub fn is_opus(&self) -> bool {
+    fn is_opus(&self) -> bool {
         self.mime_type.starts_with("audio/webm") && self.mime_type.contains("opus")
     }
 
+    /// AAC-LC only: Symphonia decodes no other AAC, so HE-AAC (`mp4a.40.5`,
+    /// itag 139, the only AAC under the Low cap) fails or plays muffled. The
+    /// quotes keep out `mp4a.40.29`.
     fn is_aac(&self) -> bool {
-        self.mime_type.starts_with("audio/mp4")
+        self.mime_type.starts_with("audio/mp4") && self.mime_type.contains("\"mp4a.40.2\"")
     }
 
     fn has_url(&self) -> bool {
@@ -190,7 +195,7 @@ impl PlayerResponse {
             mime: mime.into(),
             headers: vec![("User-Agent".into(), user_agent.into())],
             codec: codec.into(),
-            bitrate_kbps: Some(format.bitrate as f64 / 1000.0),
+            bitrate_kbps: format.bitrate as f64 / 1000.0,
             duration: format
                 .approx_duration_ms
                 .as_deref()
@@ -230,7 +235,7 @@ pub async fn resolve(
 }
 
 /// Asks the player endpoint as one client.
-pub(crate) async fn resolve_with(
+async fn resolve_with(
     client: &Client,
     video_id: &str,
     visitor_data: &str,
@@ -268,10 +273,10 @@ pub(crate) async fn resolve_with(
         .send()
         .await
         .and_then(|r| r.error_for_status())
-        .map_err(|e| format!("player request failed: {e}"))?
+        .map_err(|e| format!("player request failed: {}", e.without_url()))?
         .text()
         .await
-        .map_err(|e| format!("player request failed: {e}"))?;
+        .map_err(|e| format!("player request failed: {}", e.without_url()))?;
     parse(&text, client.user_agent, max_kbps)
 }
 
@@ -300,14 +305,16 @@ fn parse(json: &str, user_agent: &str, max_kbps: Option<u64>) -> Result<Resolved
 }
 
 /// The highest-bitrate Opus stream, else the best AAC. Skips dynamic-range
-/// compressed variants and dubbed tracks. With `max_kbps`, the best within
-/// it, or the lowest there is when none fits.
+/// compressed variants, dubbed tracks and surround mixes, which the decoders
+/// can't play. With `max_kbps`, the best within it, or the lowest there is
+/// when none fits.
 pub(crate) fn best_audio(formats: &[Format], max_kbps: Option<u64>) -> Option<&Format> {
     let candidates = |codec: fn(&Format) -> bool| {
         formats.iter().filter(move |f| {
             codec(f)
                 && f.has_url()
                 && !f.is_drc
+                && f.audio_channels.is_none_or(|c| c <= 2)
                 && f.audio_track.as_ref().is_none_or(|t| t.audio_is_default)
         })
     };
@@ -371,6 +378,17 @@ mod tests {
             "https://a/251",
             "nothing within the cap, so the lowest Opus"
         );
+    }
+
+    #[test]
+    fn skips_aac_and_surround_the_decoders_refuse() {
+        const HE_AAC: &str = r#"{"itag":139,"url":"https://a/139","mimeType":"audio/mp4; codecs=\"mp4a.40.5\"",
+            "bitrate":50000}"#;
+        const SURROUND: &str = r#"{"itag":258,"url":"https://a/258","mimeType":"audio/mp4; codecs=\"mp4a.40.2\"",
+            "bitrate":384000,"audioChannels":6}"#;
+        let all = response(&[HE_AAC, AAC, SURROUND].join(","));
+        assert_eq!(parse(&all, UA, Some(64)).unwrap().url, "https://a/140");
+        assert_eq!(parse(&all, UA, None).unwrap().url, "https://a/140");
     }
 
     #[test]
@@ -438,7 +456,7 @@ mod tests {
                             "{}: {} {} kbps, serves bytes",
                             client.name,
                             stream.codec,
-                            stream.bitrate_kbps.unwrap_or(0.0).round()
+                            stream.bitrate_kbps.round()
                         ),
                         Err(e) => failures.push(format!("{}: resolved but {e}", client.name)),
                     },

@@ -163,10 +163,10 @@ async fn player_request(
         .send()
         .await
         .and_then(|r| r.error_for_status())
-        .map_err(|e| format!("{} player request failed: {e}", client.name))?
+        .map_err(|e| format!("{} player request failed: {}", client.name, e.without_url()))?
         .text()
         .await
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| format!("{} player request failed: {}", client.name, e.without_url()))?;
     streams::parse_response(&text)
 }
 
@@ -218,10 +218,35 @@ fn unscramble(format: &streams::Format, player: &Player) -> Result<String, Strin
     Ok(url.into())
 }
 
+/// The format to play from a web client's answer: `Err` when signed in
+/// without `any_format` and no Premium one plays, `Ok(None)` when no audio
+/// does. Premium formats come first, so a song with AAC 141 but no Opus 774
+/// doesn't fall to the free Opus beside them; a bitrate cap, which they
+/// never fit, goes to the rest.
+fn choose(
+    formats: &[streams::Format],
+    signed_in: bool,
+    any_format: bool,
+    max_kbps: Option<u64>,
+) -> Result<Option<streams::Format>, ()> {
+    let premium: Vec<streams::Format> = formats
+        .iter()
+        .filter(|f| PREMIUM_ITAGS.contains(&f.itag))
+        .cloned()
+        .collect();
+    match streams::best_audio(&premium, None) {
+        Some(format) if signed_in && max_kbps.is_none() => Ok(Some(format.clone())),
+        _ if signed_in && !any_format => Err(()),
+        _ => Ok(streams::best_audio(formats, max_kbps).cloned()),
+    }
+}
+
 /// Resolves a Premium stream. `cookie` is `None` only for dry runs, which
-/// time the path without a Premium account. With `any_format`, the best
-/// stream the web client has within `max_kbps` is taken whether or not it
-/// is Premium: the last resort when no client hands out plain URLs.
+/// time the path without a Premium account. With `any_format`, a song
+/// without a Premium stream takes the best the web client has within
+/// `max_kbps`: for an account known to have Premium, as its free formats
+/// play without a second request, and as the last resort when no client
+/// hands out plain URLs.
 pub async fn resolve(
     video_id: &str,
     cookie: Option<&str>,
@@ -244,15 +269,19 @@ pub async fn resolve(
             };
         let requested = started.elapsed();
         let itags: Vec<u32> = response.audio_formats().iter().map(|f| f.itag).collect();
-        let premium = itags.iter().any(|i| PREMIUM_ITAGS.contains(i));
-        if !premium && cookie.is_some() && !any_format {
+        let Ok(chosen) = choose(
+            response.audio_formats(),
+            cookie.is_some(),
+            any_format,
+            max_kbps,
+        ) else {
             diag(format!(
                 "{video_id}: {} has no Premium version ({itags:?}); playing the free stream",
                 client.name
             ));
             return Ok(Outcome::NoPremiumFormats);
-        }
-        let Some(format) = streams::best_audio(response.audio_formats(), max_kbps).cloned() else {
+        };
+        let Some(format) = chosen else {
             last_error = "no audio formats".into();
             continue;
         };
@@ -287,6 +316,9 @@ pub fn cookie_header(pasted: &str) -> String {
     if pasted.contains('\t') {
         return pasted
             .lines()
+            // Exporters write HttpOnly cookies, the session ones among them,
+            // behind this prefix.
+            .map(|l| l.strip_prefix("#HttpOnly_").unwrap_or(l))
             .filter(|l| !l.starts_with('#'))
             .filter_map(|line| {
                 let fields: Vec<&str> = line.split('\t').collect();
@@ -322,9 +354,50 @@ mod tests {
     }
 
     #[test]
+    fn chooses_premium_formats_first() {
+        let format = |itag: u32, mime: &str, bitrate: u32| {
+            serde_json::from_value::<streams::Format>(serde_json::json!({
+                "itag": itag, "url": "https://a", "mimeType": mime, "bitrate": bitrate,
+            }))
+            .unwrap()
+        };
+        let opus = r#"audio/webm; codecs="opus""#;
+        let free = format(251, opus, 140_000);
+        let premium_opus = format(774, opus, 260_000);
+        let premium_aac = format(141, r#"audio/mp4; codecs="mp4a.40.2""#, 260_000);
+        let itag = |chosen: Result<Option<streams::Format>, ()>| chosen.map(|f| f.map(|f| f.itag));
+        let all = [free.clone(), premium_aac.clone(), premium_opus];
+        let no_774 = [free.clone(), premium_aac];
+        let only_free = [free];
+
+        assert_eq!(itag(choose(&all, true, false, None)), Ok(Some(774)));
+        assert_eq!(
+            itag(choose(&no_774, true, false, None)),
+            Ok(Some(141)),
+            "Premium AAC over free Opus"
+        );
+        assert_eq!(itag(choose(&only_free, true, false, None)), Err(()));
+        assert_eq!(
+            itag(choose(&only_free, true, true, None)),
+            Ok(Some(251)),
+            "a known Premium account plays the free one from the same answer"
+        );
+        assert_eq!(
+            itag(choose(&all, true, true, Some(192))),
+            Ok(Some(251)),
+            "a cap goes to the free formats"
+        );
+        assert_eq!(
+            itag(choose(&only_free, false, false, None)),
+            Ok(Some(251)),
+            "a dry run takes what there is"
+        );
+    }
+
+    #[test]
     fn converts_pasted_cookies() {
         assert_eq!(cookie_header("Cookie: SID=a; HSID=b"), "SID=a; HSID=b");
-        let txt = "# Netscape\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\ta\n.google.com\tTRUE\t/\tTRUE\t0\tNID\tz\n";
-        assert_eq!(cookie_header(txt), "SID=a");
+        let txt = "# Netscape\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\ta\n#HttpOnly_.youtube.com\tTRUE\t/\tTRUE\t0\tHSID\tb\n.google.com\tTRUE\t/\tTRUE\t0\tNID\tz\n";
+        assert_eq!(cookie_header(txt), "SID=a; HSID=b");
     }
 }

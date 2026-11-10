@@ -17,10 +17,9 @@ use crate::{
 /// kbps; others show the stream's bitrate.
 fn quality_label(stream: &ResolvedStream) -> String {
     let codec = stream.codec.to_uppercase();
-    match (stream.itag, stream.bitrate_kbps) {
-        (774 | 141, _) => format!("{codec} 256"),
-        (_, Some(kbps)) => format!("{codec} {}", kbps.round()),
-        (_, None) => codec,
+    match stream.itag {
+        774 | 141 => format!("{codec} 256"),
+        _ => format!("{codec} {}", stream.bitrate_kbps.round()),
     }
 }
 
@@ -441,7 +440,7 @@ mod tests {
             mime: String::new(),
             headers: Vec::new(),
             codec: "Opus".into(),
-            bitrate_kbps: Some(kbps),
+            bitrate_kbps: kbps,
             duration: None,
             loudness_db: None,
             premium: itag == 774,

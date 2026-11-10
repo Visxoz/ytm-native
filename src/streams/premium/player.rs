@@ -92,14 +92,20 @@ pub async fn load_player() -> Result<Player, String> {
     .await
     .map_err(|e| e.to_string())??;
 
-    // Check the result works before trusting it.
+    // Check both functions work before trusting it, as it is cached until
+    // YouTube's next player, and Premium formats always need the signature.
+    const N: &str = "abcdefghijklmnop";
+    const SIG: &str = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789abcdefghijklmnopqrstuvwxyz";
     let player = Player { id, sts, code };
     let check = player.clone();
-    let solved = tokio::task::spawn_blocking(move || check.solve("abcdefghijklmnop", None))
+    let (n, sig) = tokio::task::spawn_blocking(move || check.solve(N, Some(SIG)))
         .await
         .map_err(|e| e.to_string())??;
-    if solved.0 == "abcdefghijklmnop" {
+    if n == N {
         return Err("the player's n function did nothing".into());
+    }
+    if sig.as_deref() == Some(SIG) {
+        return Err("the player's signature function did nothing".into());
     }
     diag(format!(
         "player {}: fetched in {} ms, trimmed to {} KB in {} ms",
