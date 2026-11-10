@@ -55,3 +55,108 @@ index 640a0cd..d4705b0 100644
  
          // Due to  https://issues.skia.org/issues/310510989, fonts from true type collections
          // with an index > 0 fail to load on macOS. As a workaround, we manually extract the font from the
+diff --git a/lib.rs b/lib.rs
+index 3451a0b..1d9477e 100644
+--- a/lib.rs
++++ b/lib.rs
+@@ -377,6 +377,9 @@ pub struct SkiaRenderer {
+     rendering_first_time: Cell<bool>,
+     surface: RefCell<Option<Box<dyn Surface>>>,
+     surface_factory: SurfaceFactoryFn,
++    /// The window the surface was made for, to make it again after it was
++    /// dropped while the window was minimised.
++    window_handles: RefCell<Option<WindowHandles>>,
+     pre_present_callback: RefCell<Option<Box<dyn FnMut()>>>,
+     partial_rendering_state: Option<PartialRenderingState>,
+     dirty_region_debug_mode: DirtyRegionDebugMode,
+@@ -385,6 +388,14 @@ pub struct SkiaRenderer {
+     shared_context: SkiaSharedContext,
+ }
+ 
++#[derive(Clone)]
++struct WindowHandles {
++    window: Arc<dyn raw_window_handle::HasWindowHandle + Send + Sync>,
++    display: Arc<dyn raw_window_handle::HasDisplayHandle + Send + Sync>,
++    requested_graphics_api: Option<RequestedGraphicsAPI>,
++    transparent: bool,
++}
++
+ /// Function pointer for creating the surface to render on, when needed.
+ type SurfaceFactoryFn = fn(
+     &SkiaSharedContext,
+@@ -424,6 +435,7 @@ impl SkiaRenderer {
+             rendering_first_time: Default::default(),
+             surface: Default::default(),
+             surface_factory,
++            window_handles: Default::default(),
+             pre_present_callback: Default::default(),
+             partial_rendering_state,
+             dirty_region_debug_mode: Default::default(),
+@@ -590,6 +602,8 @@ impl SkiaRenderer {
+         // the vivante drivers using zwp_linux_explicit_synchronization_v1 and
+         // trying to create a second synchronization object and that's not allowed.
+         self.clear_surface();
++        // The window may be going away, so don't keep it alive.
++        self.window_handles.borrow_mut().take();
+         Ok(())
+     }
+ 
+@@ -604,6 +618,12 @@ impl SkiaRenderer {
+     ) -> Result<(), PlatformError> {
+         // just in case
+         self.suspend()?;
++        let handles = WindowHandles {
++            window: window_handle.clone(),
++            display: display_handle.clone(),
++            requested_graphics_api: requested_graphics_api.clone(),
++            transparent,
++        };
+         let surface = (self.surface_factory)(
+             &self.shared_context,
+             window_handle,
+@@ -613,12 +633,16 @@ impl SkiaRenderer {
+         )?;
+         surface.set_transparent(transparent)?;
+         self.set_surface(surface);
++        *self.window_handles.borrow_mut() = Some(handles);
+         Ok(())
+     }
+ 
+     /// Adjusts the surface for a window that became transparent or opaque after it was created,
+     /// so that the scene's alpha is kept or discarded to match.
+     pub fn set_transparent(&self, transparent: bool) -> Result<(), PlatformError> {
++        if let Some(handles) = self.window_handles.borrow_mut().as_mut() {
++            handles.transparent = transparent;
++        }
+         match self.surface.borrow().as_ref() {
+             Some(surface) => surface.set_transparent(transparent),
+             None => Ok(()),
+@@ -660,6 +684,28 @@ impl SkiaRenderer {
+         surface_size: PhysicalWindowSize,
+         post_render_cb: Option<&dyn Fn(&mut dyn ItemRenderer)>,
+     ) -> Result<DrawOutcome, i_slint_core::platform::PlatformError> {
++        // A minimised window shows nothing, so drop the surface and the GPU
++        // caches (tens of MB of RAM, hundreds of MB of video memory) until it's
++        // back. Only a surface made from window handles can be made again.
++        let can_remake = self.window_handles.borrow().is_some();
++        if can_remake {
++            if self.window_adapter()?.window().is_minimized() {
++                self.clear_surface();
++                return Ok(DrawOutcome::Success);
++            }
++            let missing = self.surface.borrow().is_none();
++            let handles = if missing { self.window_handles.borrow().clone() } else { None };
++            if let Some(h) = handles {
++                self.set_window_handle(
++                    h.window,
++                    h.display,
++                    surface_size,
++                    h.requested_graphics_api,
++                    h.transparent,
++                )?;
++            }
++        }
++
+         let surface = self.surface.borrow();
+         let Some(surface) = surface.as_ref() else { return Ok(DrawOutcome::Success) };
+         self.invoke_rendering_notifier_setup(surface.as_ref())?;

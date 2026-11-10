@@ -257,13 +257,23 @@ fn main() {
         move || {
             let Some(ui) = weak.upgrade() else { return };
             let minimized = is_minimized(&ui);
-            if was_minimized.replace(minimized) && !minimized {
+            let was = was_minimized.replace(minimized);
+            if minimized && !was {
+                // Minimising asks for no frame, so ask for one: the patched
+                // renderer drops its GPU surface on it (patches/).
+                ui.window().request_redraw();
+            }
+            if was && !minimized {
                 // Again after the restore animation, which can swallow frames.
                 for delay in [0, 150, 500] {
                     let weak = ui.as_weak();
                     slint::Timer::single_shot(Duration::from_millis(delay), move || {
                         if let Some(ui) = weak.upgrade() {
                             ui.set_repaint_flip(!ui.get_repaint_flip());
+                            // Frames skipped while minimised leave Slint's
+                            // redraw tracker dirty, so a property change alone
+                            // asks for no frame.
+                            ui.window().request_redraw();
                         }
                     });
                 }

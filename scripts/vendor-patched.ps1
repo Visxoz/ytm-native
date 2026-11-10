@@ -25,11 +25,12 @@ $crates = @(
     },
     @{
         # Slint's fallback fonts read from their memory-mapped files instead of
-        # copied. The renderer is pinned to the same version as i-slint-core,
-        # which always comes from crates.io, so read the version from there.
+        # copied, and the GPU surface dropped while the window is minimised.
+        # The renderer is pinned to the same version as i-slint-core, which
+        # always comes from crates.io, so read the version from there.
         Name    = 'i-slint-renderer-skia'
         Version = $slintVersion
-        Hint    = 'Slint changed the renderer. Check whether it still copies font data, and update or drop the patch.'
+        Hint    = 'Slint changed the renderer. Check whether it still copies font data and keeps its surface while minimised, and update or drop the patch.'
     },
     @{
         # Playlists the signed-in user owns, and visitor IDs fetched from the
