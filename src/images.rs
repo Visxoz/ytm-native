@@ -222,29 +222,63 @@ fn decode(
     Some((buffer, accent))
 }
 
-/// The artwork's most colourful average, darkened enough for white text,
-/// as Spotify tints its page headers.
+/// The artwork's strongest colour, darkened enough for white text, as
+/// Spotify tints its page headers.
 fn accent_of(image: &image::DynamicImage) -> Color {
     let small = image
         .resize_exact(16, 16, image::imageops::FilterType::Triangle)
         .to_rgb8();
-    let (mut r, mut g, mut b, mut total) = (0.0f32, 0.0f32, 0.0f32, 0.0f32);
+    // Pixels are pooled by hue, so artwork of several colours gives its
+    // strongest one rather than their average, which tends to grey.
+    const HUES: usize = 12;
+    let mut pools = [[0.0f32; 5]; HUES];
     for p in small.pixels() {
         let [pr, pg, pb] = p.0.map(|c| c as f32 / 255.0);
-        let (_, s, l) = rgb_to_hsl(pr, pg, pb);
-        // Favour saturated mid-tones over greys, black and white.
-        let weight = 0.05 + s * (1.0 - (2.0 * l - 1.0).abs());
-        r += pr * weight;
-        g += pg * weight;
-        b += pb * weight;
-        total += weight;
+        let (h, s, l) = rgb_to_hsl(pr, pg, pb);
+        // Saturated mid-tones count; greys, black and white hardly do.
+        let chroma = s * (1.0 - (2.0 * l - 1.0).abs());
+        // Cubed, so a vivid area outweighs a larger dull one: a sky over
+        // beige buildings is blue, not beige.
+        let weight = chroma.powi(3);
+        // Offset half a pool, so red, which sits at 0° and 360°, and the
+        // other primaries fall in the middle of one rather than across two.
+        let pool = &mut pools[((h / 360.0 * HUES as f32) + 0.5) as usize % HUES];
+        for (sum, c) in pool
+            .iter_mut()
+            .zip([pr * weight, pg * weight, pb * weight, weight, chroma])
+        {
+            *sum += c;
+        }
     }
-    let (h, s, _) = rgb_to_hsl(r / total, g / total, b / total);
-    from_hsl(h, s.clamp(MIN_ACCENT_SATURATION, 0.7), 0.32)
+    let [r, g, b, total, colour] = pools
+        .into_iter()
+        .max_by(|a, b| a[3].total_cmp(&b[3]))
+        .unwrap_or_default();
+    let (r, g, b) = if total > 0.0 {
+        (r / total, g / total, b / total)
+    } else {
+        (0.0, 0.0, 0.0)
+    };
+    let (h, s, _) = rgb_to_hsl(r, g, b);
+    // Muted artwork with a hue all the same, such as a bluish photo, stays
+    // clear of greyish artwork's floor, so `vivid` can tell them apart.
+    // Chroma, unlike saturation, stays low for near-black with a cast.
+    let chroma = r.max(g).max(b) - r.min(g).min(b);
+    let s = if chroma >= 0.05 && colour >= COLOURFUL_WEIGHT {
+        s.clamp(MIN_ACCENT_SATURATION + 0.1, 0.7)
+    } else {
+        MIN_ACCENT_SATURATION
+    };
+    // Bright hues such as yellow are darkened further to keep white text
+    // at 4.5:1.
+    readable(from_hsl(h, s, 0.32), true)
 }
 
 /// The least saturation `accent_of` gives, which greyish artwork gets.
 const MIN_ACCENT_SATURATION: f32 = 0.25;
+/// How much colour, summed over `accent_of`'s 256 pixels, makes a hue
+/// worth following: a few strong pixels, or a faint wash over a tenth.
+const COLOURFUL_WEIGHT: f32 = 2.0;
 
 /// A saturated take on an `accent`, for controls drawn in it rather than
 /// backgrounds behind white text, or `None` for greyish artwork, whose hue
@@ -387,6 +421,58 @@ mod tests {
             image::Rgb([128, 128, 128]),
         ));
         assert_eq!(vivid(accent_of(&grey)), None, "no hue to follow");
+    }
+
+    #[test]
+    fn follows_muted_and_mixed_artwork() {
+        let muted = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            8,
+            8,
+            image::Rgb([90, 100, 130]),
+        ));
+        let blue = vivid(accent_of(&muted)).expect("a bluish photo has a hue");
+        assert!(blue.blue() > blue.red() && blue.blue() > blue.green());
+
+        // Red and cyan halves, which average to grey.
+        let halves = image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(8, 8, |x, _| {
+            if x < 4 {
+                image::Rgb([230, 20, 20])
+            } else {
+                image::Rgb([20, 230, 230])
+            }
+        }));
+        let (r, g, b) = channels(vivid(accent_of(&halves)).expect("one of the two colours"));
+        let (h, _, _) = rgb_to_hsl(r, g, b);
+        assert!(
+            !(15.0..165.0).contains(&h) && !(195.0..345.0).contains(&h),
+            "red or cyan"
+        );
+
+        // A quarter of sky over beige buildings, the dull area the larger.
+        let sky = image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(8, 8, |_, y| {
+            if y < 2 {
+                image::Rgb([90, 150, 220])
+            } else {
+                image::Rgb([200, 170, 130])
+            }
+        }));
+        let blue = vivid(accent_of(&sky)).expect("the sky's colour");
+        assert!(blue.blue() > blue.red(), "the sky, not the beige");
+
+        let near_black = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            8,
+            8,
+            image::Rgb([40, 36, 32]),
+        ));
+        assert_eq!(vivid(accent_of(&near_black)), None, "a cast isn't a colour");
+
+        let yellow = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            8,
+            8,
+            image::Rgb([240, 220, 20]),
+        ));
+        let (r, g, b) = channels(accent_of(&yellow));
+        assert!(luminance(r, g, b) <= 0.18, "white text still reads on it");
     }
 
     #[test]
