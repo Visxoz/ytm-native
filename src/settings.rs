@@ -3,8 +3,12 @@
 use std::{
     collections::VecDeque,
     io,
+    ops::Range,
     path::{Path, PathBuf},
-    sync::atomic::{AtomicU64, Ordering},
+    sync::{
+        Mutex, PoisonError,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -47,6 +51,44 @@ pub(crate) fn save_json(path: &Path, value: &impl Serialize, what: &str) -> bool
     }
     written.is_ok()
 }
+
+/// Numbers one file's saves, which run off the UI thread and can finish
+/// out of order, so an older one finishing late can't overwrite a newer.
+pub struct Saves {
+    issued: AtomicU64,
+    written: Mutex<u64>,
+}
+
+impl Saves {
+    const fn new() -> Self {
+        Self {
+            issued: AtomicU64::new(0),
+            written: Mutex::new(0),
+        }
+    }
+
+    /// Taken on the UI thread, in the order the saves are asked for.
+    pub fn ticket(&self) -> u64 {
+        self.issued.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
+    /// Saves `value` unless a later ticket's save has been written, which
+    /// counts as saved. Returns whether it was saved.
+    fn save(&self, ticket: u64, path: &Path, value: &impl Serialize, what: &str) -> bool {
+        let mut written = self.written.lock().unwrap_or_else(PoisonError::into_inner);
+        if ticket < *written {
+            return true;
+        }
+        let saved = save_json(path, value, what);
+        if saved {
+            *written = ticket;
+        }
+        saved
+    }
+}
+
+pub static SESSION_SAVES: Saves = Saves::new();
+pub static HISTORY_SAVES: Saves = Saves::new();
 
 /// The signed-in session's `Cookie` header, for Premium stream requests.
 pub fn load_cookie() -> Option<String> {
@@ -338,21 +380,18 @@ impl Session {
         read_json::<Self>(&session_path()).filter(|s| s.index < s.queue.len())
     }
 
-    pub fn save(mut self) {
-        // Keep the window around the current track if the queue is long.
-        if self.queue.len() > SESSION_QUEUE_LIMIT {
-            let start = self.index.saturating_sub(SESSION_QUEUE_LIMIT / 2);
-            let end = (start + SESSION_QUEUE_LIMIT).min(self.queue.len());
-            self.queue = self.queue[start..end].to_vec();
-            self.index -= start;
-            self.recommended = self
-                .recommended
-                .iter()
-                .filter(|&&i| (start..end).contains(&i))
-                .map(|i| i - start)
-                .collect();
+    /// The part of a queue `len` long that is kept: all of it, or the
+    /// window around the track at `index` if it is long.
+    pub fn window(len: usize, index: usize) -> Range<usize> {
+        if len <= SESSION_QUEUE_LIMIT {
+            return 0..len;
         }
-        save_json(&session_path(), &self, "the session");
+        let start = index.saturating_sub(SESSION_QUEUE_LIMIT / 2);
+        start..(start + SESSION_QUEUE_LIMIT).min(len)
+    }
+
+    pub fn save(&self, ticket: u64) {
+        SESSION_SAVES.save(ticket, &session_path(), self, "the session");
     }
 }
 
@@ -383,8 +422,13 @@ pub fn remove_home() {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct History {
     tracks: VecDeque<crate::api::Track>,
+    /// Bumped with each play, and how far a save is known to have got: a
+    /// copy handed to a background save counts only once it is written, so
+    /// the save on exit still writes plays that one never did.
     #[serde(skip)]
-    changed: bool,
+    revision: u64,
+    #[serde(skip)]
+    saved: u64,
 }
 
 const HISTORY_LIMIT: usize = 500;
@@ -416,14 +460,29 @@ impl History {
         self.tracks.retain(|t| t.id != track.id);
         self.tracks.push_front(track.clone());
         self.tracks.truncate(HISTORY_LIMIT);
-        self.changed = true;
+        self.revision += 1;
     }
 
-    /// Writes the history, if it changed since the last save.
-    pub fn save(&mut self) {
-        if self.changed && save_json(&history_path(), self, "the history") {
-            self.changed = false;
-        }
+    /// A copy to save and the revision it holds, if there are plays not
+    /// yet known to be saved.
+    pub fn unsaved(&self) -> Option<(Self, u64)> {
+        (self.revision != self.saved).then(|| {
+            let copy = Self {
+                tracks: self.tracks.clone(),
+                ..Self::default()
+            };
+            (copy, self.revision)
+        })
+    }
+
+    /// Records that a copy from `unsaved` was written.
+    pub fn saved_up_to(&mut self, revision: u64) {
+        self.saved = self.saved.max(revision);
+    }
+
+    /// Returns whether it was saved.
+    pub fn save(&self, ticket: u64) -> bool {
+        HISTORY_SAVES.save(ticket, &history_path(), self, "the history")
     }
 }
 
@@ -501,6 +560,45 @@ impl Searches {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn session_keeps_short_queues_whole_and_long_ones_around_the_track() {
+        assert_eq!(Session::window(400, 350), 0..400);
+        assert_eq!(Session::window(1000, 100), 0..500);
+        assert_eq!(Session::window(1000, 600), 350..850);
+        assert_eq!(Session::window(1000, 990), 740..1000);
+    }
+
+    #[test]
+    fn history_stays_unsaved_until_its_latest_play_is_written() {
+        let track = |id: &str| crate::api::Track {
+            id: id.into(),
+            ..Default::default()
+        };
+        let mut history = History::default();
+        assert!(history.unsaved().is_none());
+        history.record(&track("a"));
+        let (_, first) = history.unsaved().unwrap();
+        // A play arriving while that copy is being written.
+        history.record(&track("b"));
+        history.saved_up_to(first);
+        let (copy, second) = history.unsaved().unwrap();
+        assert_eq!(copy.len(), 2);
+        history.saved_up_to(second);
+        history.saved_up_to(first);
+        assert!(history.unsaved().is_none());
+    }
+
+    #[test]
+    fn a_late_older_save_does_not_overwrite_a_newer_one() {
+        let saves = Saves::new();
+        let path = std::env::temp_dir().join(format!("ytm-saves-{}.json", std::process::id()));
+        let (older, newer) = (saves.ticket(), saves.ticket());
+        assert!(saves.save(newer, &path, &"newer", "a test"));
+        assert!(saves.save(older, &path, &"older", "a test"));
+        assert_eq!(read_json::<String>(&path).as_deref(), Some("newer"));
+        let _ = std::fs::remove_file(&path);
+    }
 
     #[test]
     fn searches_keep_the_newest_five_once_each() {

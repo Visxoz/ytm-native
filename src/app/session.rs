@@ -92,9 +92,33 @@ impl App {
         self.persist_timer
             .start(TimerMode::SingleShot, PERSIST_AFTER, move || {
                 if let Some(app) = weak.upgrade() {
-                    app.persist();
+                    app.persist_in_background();
                 }
             });
+    }
+
+    /// Writes the session and history off the UI thread, which only takes
+    /// copies of them, so a scroll never waits on the disk.
+    fn persist_in_background(self: &Rc<Self>) {
+        let session = self.session();
+        let history = self.state.borrow().history.unsaved();
+        let session_ticket = settings::SESSION_SAVES.ticket();
+        let history_ticket = settings::HISTORY_SAVES.ticket();
+        self.spawn(
+            async move {
+                if let Some(session) = session {
+                    session.save(session_ticket);
+                }
+                history.and_then(|(history, revision)| {
+                    history.save(history_ticket).then_some(revision)
+                })
+            },
+            |app, saved| {
+                if let Some(revision) = saved {
+                    app.state.borrow_mut().history.saved_up_to(revision);
+                }
+            },
+        );
     }
 
     /// Writes the session, history and unsent scrobbles now, as on exit,
@@ -102,9 +126,15 @@ impl App {
     /// failed.
     pub(super) fn persist(&self) {
         self.persist_timer.stop();
-        self.save_session();
+        if let Some(session) = self.session() {
+            session.save(settings::SESSION_SAVES.ticket());
+        }
         let mut state = self.state.borrow_mut();
-        state.history.save();
+        if let Some((history, revision)) = state.history.unsaved()
+            && history.save(settings::HISTORY_SAVES.ticket())
+        {
+            state.history.saved_up_to(revision);
+        }
         state.searches.save();
         state.scrobbler.save();
     }
@@ -119,26 +149,36 @@ impl App {
         }
     }
 
-    /// Saves the queue and position so the next start can resume.
-    fn save_session(&self) {
+    /// The queue and position to save, so the next start can resume. A long
+    /// queue is cut to the part around the current track before copying.
+    fn session(&self) -> Option<settings::Session> {
         let state = self.state.borrow();
-        let Some(index) = state.queue.current_index() else {
-            return;
-        };
+        let index = state.queue.current_index()?;
         let current = state.queue.current().map(|t| t.id.as_str());
         let position = match &state.playback.resume {
             Some((id, position)) if Some(id.as_str()) == current => *position,
             _ if state.playback.started => self.player.position(),
             _ => 0.0,
         };
-        settings::Session {
-            queue: state.queue.items().cloned().collect(),
-            index,
+        let window = settings::Session::window(state.queue.len(), index);
+        Some(settings::Session {
+            queue: state
+                .queue
+                .items()
+                .skip(window.start)
+                .take(window.len())
+                .cloned()
+                .collect(),
+            index: index - window.start,
             position,
             duration: state.playback.duration,
-            recommended: state.queue.recommended().collect(),
-        }
-        .save();
+            recommended: state
+                .queue
+                .recommended()
+                .filter(|i| window.contains(i))
+                .map(|i| i - window.start)
+                .collect(),
+        })
     }
 
     /// Shows the last run's track, paused, ready to resume where it was.
