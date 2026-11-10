@@ -2,7 +2,8 @@
 //! playlists, through the same calls YouTube Music's web player makes.
 
 use rustypipe::client::ClientType;
-use serde_json::{Value, json};
+use serde::Deserialize;
+use serde_json::{Value, json, value::RawValue};
 
 use super::{Api, Result, err};
 
@@ -130,12 +131,21 @@ fn succeeded(reply: &str) -> bool {
 
 /// The like button's state in a `next` response.
 fn parse_rating(json: &str) -> Rating {
-    let status = serde_json::from_str::<Value>(json).ok().and_then(|v| {
-        v.pointer("/playerOverlays/playerOverlayRenderer/actions/0/likeButtonRenderer/likeStatus")?
+    #[derive(Deserialize)]
+    #[serde(rename_all = "camelCase")]
+    struct Next<'a> {
+        /// Kept raw, so the large `contents` beside it is only scanned.
+        #[serde(borrow)]
+        player_overlays: &'a RawValue,
+    }
+    let overlays = serde_json::from_str::<Next>(json)
+        .ok()
+        .and_then(|next| serde_json::from_str::<Value>(next.player_overlays.get()).ok());
+    let status = overlays.as_ref().and_then(|v| {
+        v.pointer("/playerOverlayRenderer/actions/0/likeButtonRenderer/likeStatus")?
             .as_str()
-            .map(str::to_owned)
     });
-    match status.as_deref() {
+    match status {
         Some("LIKE") => Rating::Like,
         Some("DISLIKE") => Rating::Dislike,
         _ => Rating::None,
