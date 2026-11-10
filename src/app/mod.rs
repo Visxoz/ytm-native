@@ -295,6 +295,12 @@ impl App {
         });
         app.bind(ui);
         app.apply_settings_to_ui(ui);
+        app.apply_theme(ui);
+        // Set here and by the switch only, so other settings changing can't
+        // wipe out a found update's line.
+        ui.set_update_status(
+            updates::up_to_date_status(app.state.borrow().settings.check_updates).into(),
+        );
         ui.set_rows(ModelRc::from(Rc::clone(&app.rows)));
         ui.set_library(ModelRc::from(Rc::clone(&app.library)));
         ui.set_queue(ModelRc::from(Rc::clone(&app.queue_model)));
@@ -411,29 +417,20 @@ impl App {
         for (band, &db) in settings.equaliser_gains.iter().enumerate() {
             self.eq_gains.set_row_data(band, db);
         }
-        ui.set_update_status(updates::up_to_date_status(settings.check_updates).into());
         ui.set_accent_choice(settings.accent.index());
-        drop(state);
-        self.apply_theme(ui);
     }
 
     /// Colours the window, and its title bar, in the chosen look and
     /// accent, made readable in that look. With the accent taken from the
     /// artwork, YouTube Music's red stands in until a song's has loaded, and
-    /// for greyish artwork.
+    /// for greyish artwork. Run where the look changes, not with every
+    /// setting or song, as it makes Windows restyle the window; the accent
+    /// alone goes through `apply_accent`.
     fn apply_theme(&self, ui: &AppWindow) {
-        let state = self.state.borrow();
-        let settings = &state.settings;
-        let light = settings.look == Look::Light;
-        let accent = settings
-            .accent
-            .rgb()
-            .map(opaque)
-            .or(state.artwork_accent)
-            .unwrap_or_else(|| opaque(settings::YOUTUBE_RED));
-        let theme = ui.global::<Theme>();
-        theme.set_look(settings.look.index());
-        theme.set_accent(images::readable(accent, light));
+        let look = self.state.borrow().settings.look;
+        ui.global::<Theme>().set_look(look.index());
+        self.apply_accent(ui);
+        let light = look == Look::Light;
         // Windows draws the title bar. Until the native window exists this
         // does nothing, and `attach_window` applies the theme again.
         ui.window().with_winit_window(|window| {
@@ -443,6 +440,34 @@ impl App {
                 winit::window::Theme::Dark
             }));
         });
+    }
+
+    /// Sets the accent alone, which leaves the title bar as it is.
+    fn apply_accent(&self, ui: &AppWindow) {
+        let state = self.state.borrow();
+        let settings = &state.settings;
+        let accent = settings
+            .accent
+            .rgb()
+            .map(opaque)
+            .or(state.artwork_accent)
+            .unwrap_or_else(|| opaque(settings::YOUTUBE_RED));
+        ui.global::<Theme>()
+            .set_accent(images::readable(accent, settings.look == Look::Light));
+    }
+
+    /// Keeps the playing artwork's colour, recolouring the window only when
+    /// the accent follows the artwork and the colour changed.
+    fn set_artwork_accent(&self, accent: Option<slint::Color>) {
+        let recolour = {
+            let mut state = self.state.borrow_mut();
+            let changed = state.artwork_accent != accent;
+            state.artwork_accent = accent;
+            changed && state.settings.accent == Accent::Artwork
+        };
+        if recolour {
+            self.apply_accent(&self.ui());
+        }
     }
 
     fn update_settings(&self, change: impl FnOnce(&mut Settings)) {

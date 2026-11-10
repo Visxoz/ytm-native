@@ -168,6 +168,16 @@ fn main() {
     };
 
     let settings = settings::Settings::load();
+    // winit puts the system's theme back on the title bar at every
+    // WM_SETTINGCHANGE unless the window was created with one, which
+    // `set_theme` does not count as. Only the main window, made first: the
+    // sign-in window's page is white in every look.
+    let title_bar = if settings.look == settings::Look::Light {
+        slint::winit_030::winit::window::Theme::Light
+    } else {
+        slint::winit_030::winit::window::Theme::Dark
+    };
+    let main_window = std::cell::Cell::new(true);
     // Skia on the GPU through Direct3D 12, which takes most of the work of
     // scrolling off the CPU for about 50 MB of driver memory. Without a usable
     // GPU, Skia falls back to drawing into a CPU buffer.
@@ -175,6 +185,13 @@ fn main() {
         && let Err(e) = slint::BackendSelector::new()
             .backend_name("winit".into())
             .renderer_name("skia".into())
+            .with_winit_window_attributes_hook(move |attributes| {
+                if main_window.replace(false) {
+                    attributes.with_theme(Some(title_bar))
+                } else {
+                    attributes
+                }
+            })
             .select()
     {
         log::warn!("could not select the Skia renderer: {e}");

@@ -114,14 +114,12 @@ impl App {
                 .and_then(|url| images::accent(url, images::PLAYER))
             {
                 ui.set_np_accent(color);
-                app.state.borrow_mut().artwork_accent = images::vivid(color);
-                app.apply_theme(&ui);
+                app.set_artwork_accent(images::vivid(color));
             }
         });
         // Without artwork, the last song's colour would linger.
         if track.thumb.is_none() {
-            self.state.borrow_mut().artwork_accent = None;
-            self.apply_theme(&self.ui());
+            self.set_artwork_accent(None);
         }
     }
 

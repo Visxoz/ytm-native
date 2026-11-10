@@ -156,10 +156,14 @@ impl App {
                 }
             });
         });
-        on!(on_set_look, |app, index| app
-            .update_settings(|s| s.look = Look::from_index(index)));
-        on!(on_set_accent, |app, index| app
-            .update_settings(|s| s.accent = Accent::from_index(index)));
+        on!(on_set_look, |app, index| {
+            app.update_settings(|s| s.look = Look::from_index(index));
+            app.apply_theme(&app.ui());
+        });
+        on!(on_set_accent, |app, index| {
+            app.update_settings(|s| s.accent = Accent::from_index(index));
+            app.apply_accent(&app.ui());
+        });
         on!(on_lastfm_connect, |app| app.connect_lastfm());
         on!(on_lastfm_disconnect, |app| app.disconnect_lastfm());
         on!(on_set_youtube_history, |app, value| app
@@ -168,9 +172,7 @@ impl App {
             .update_settings(|s| s.autoplay = value));
         on!(on_set_check_updates, |app, value| {
             app.update_settings(|s| s.check_updates = value);
-            let ui = app.ui();
-            ui.set_check_updates(value);
-            ui.set_update_status(up_to_date_status(value).into());
+            app.ui().set_update_status(up_to_date_status(value).into());
             if value {
                 app.check_for_update();
             }
