@@ -64,6 +64,9 @@ impl Api {
         let rp = RustyPipe::builder()
             .storage(Box::new(crate::secret::EncryptedStorage::new(&dir)))
             .storage_dir(dir)
+            // Its reports hold whole responses, signed-in ones too, written
+            // unencrypted and never cleared; nothing reads them.
+            .no_reporter()
             .no_botguard()
             .build_with_client(crate::http::keep_alive(reqwest::ClientBuilder::new()))
             .map_err(err)?;
