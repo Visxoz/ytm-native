@@ -42,6 +42,14 @@ struct Biquad {
 
 impl Biquad {
     fn new(band: usize, db: f32, rate: u32) -> Self {
+        // A centre at or past Nyquist makes the filter unstable, which would
+        // turn the music into full-scale noise; such a band passes through.
+        if BANDS[band] >= f64::from(rate) * 0.45 {
+            return Self {
+                b0: 1.0,
+                ..Self::default()
+            };
+        }
         let a = 10f64.powf(f64::from(db) / 40.0);
         let w0 = 2.0 * PI * BANDS[band] / f64::from(rate);
         let (sin, cos) = w0.sin_cos();
@@ -147,8 +155,10 @@ impl Equaliser {
                 *sample = x * self.preamp;
             }
         }
+        // A filter that blew up anyway is put back at rest rather than left
+        // sending infinities to the device.
         for z in self.memory.iter_mut().flatten() {
-            if z.abs() < DENORMAL {
+            if z.abs() < DENORMAL || !z.is_finite() {
                 *z = 0.0;
             }
         }
@@ -228,6 +238,21 @@ mod tests {
             let peak = tones[48_000..].iter().fold(0f32, |m, s| m.max(s.abs()));
             assert!(peak <= 1.02, "{gains:?} peaks at {peak}");
         }
+    }
+
+    #[test]
+    fn bands_past_nyquist_pass_through() {
+        let mut eq = Equaliser::default();
+        eq.set(Some(PRESETS[2].1));
+        let mut tone: Vec<f32> = (0..22_050)
+            .map(|i| (2.0 * PI * 1_000.0 * f64::from(i) / 22_050.0).sin() as f32)
+            .collect();
+        eq.process(&mut tone, 22_050, 1);
+        let peak = tone.iter().fold(0f32, |m, s| m.max(s.abs()));
+        assert!(
+            peak <= 1.02,
+            "the 15 kHz band stays stable at 22 kHz: {peak}"
+        );
     }
 
     #[test]
