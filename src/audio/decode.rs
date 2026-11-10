@@ -13,6 +13,10 @@ use symphonia::core::{
 
 /// Opus always decodes at 48 kHz.
 const OPUS_RATE: u32 = 48_000;
+/// Decoded and dropped ahead of an Opus seek's target, as a fresh decoder
+/// takes this long to settle (RFC 7845's recommended pre-roll); the WebM
+/// reader lands on the frame holding the target, with none.
+const OPUS_PRE_ROLL_SECS: f64 = 0.08;
 
 enum Codec {
     Symphonia {
@@ -22,7 +26,8 @@ enum Codec {
     Opus {
         decoder: OpusDecoder,
         buf: Vec<f32>,
-        /// Encoder delay still to drop from the start of the stream.
+        /// Samples still to drop: the encoder delay at the start, or a
+        /// seek's pre-roll up to its target.
         pre_skip: usize,
     },
 }
@@ -157,7 +162,14 @@ impl Decoder {
 
     /// Seeks to `secs` and returns the position actually reached.
     pub fn seek(&mut self, secs: f64) -> Result<f64, String> {
-        let time = Time::try_from_secs_f64(secs.max(0.0)).ok_or("invalid seek time")?;
+        let secs = secs.max(0.0);
+        let opus = matches!(self.codec, Codec::Opus { .. });
+        let target = if opus {
+            (secs - OPUS_PRE_ROLL_SECS).max(0.0)
+        } else {
+            secs
+        };
+        let time = Time::try_from_secs_f64(target).ok_or("invalid seek time")?;
         let seeked = self
             .format
             .seek(
@@ -168,15 +180,6 @@ impl Decoder {
                 },
             )
             .map_err(|e| format!("seek failed: {e}"))?;
-        match &mut self.codec {
-            Codec::Symphonia { decoder, .. } => decoder.reset(),
-            Codec::Opus {
-                decoder, pre_skip, ..
-            } => {
-                decoder.reset()?;
-                *pre_skip = 0;
-            }
-        }
         let reached = self
             .format
             .tracks()
@@ -184,8 +187,22 @@ impl Decoder {
             .find(|t| t.id == self.track_id)
             .and_then(|t| t.time_base)
             .and_then(|tb| tb.calc_time(seeked.actual_ts))
-            .map_or(secs, |t| t.as_secs_f64());
-        Ok(reached)
+            .map_or(target, |t| t.as_secs_f64());
+        match &mut self.codec {
+            Codec::Symphonia { decoder, .. } => {
+                decoder.reset();
+                Ok(reached)
+            }
+            Codec::Opus {
+                decoder, pre_skip, ..
+            } => {
+                decoder.reset()?;
+                // Up to the target, which near the start drops the encoder
+                // delay too, as the first frame's time is before zero.
+                *pre_skip = ((secs - reached).max(0.0) * f64::from(OPUS_RATE)).round() as usize;
+                Ok(secs.max(reached))
+            }
+        }
     }
 }
 

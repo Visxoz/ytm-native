@@ -411,22 +411,19 @@ impl Engine {
             output.next_base_secs = skipped_secs;
             drop(output);
             if !tail.is_empty() {
-                let old_gain = if self.shared.normalise.load(Ordering::Relaxed) {
-                    f32::from_bits(self.shared.loudness_gain.load(Ordering::Relaxed)) / loudness
-                } else {
-                    1.0
-                };
                 self.fade = Some(Fade {
                     tail: tail.into(),
                     channels,
                     mixed: 0,
-                    old_gain,
+                    old_gain: self.shared.loudness() / self.shared.correction(loudness),
                 });
             }
             self.previous = self.track.replace(track);
         } else {
             drop(output);
             if let Err(e) = self.ensure_stream(rate, channels) {
+                // Dropped, or the finished track would then report it ended.
+                self.track = None;
                 (self.on_event)(PlayerEvent::Error(e));
                 return;
             }
@@ -442,13 +439,18 @@ impl Engine {
     /// samples leave the queue and the previous track plays out, its tail
     /// held back again as it was before any fade.
     fn undo_switch(&mut self) -> bool {
-        let Some(previous) = self.previous.take() else {
+        if self.previous.is_none() {
             return false;
-        };
-        if let Some(switched) = self.track.replace(previous) {
-            switched.download.cancel();
         }
         let mut output = self.shared.output.lock().unwrap();
+        // Crossed already, which `check_advanced` has yet to see: the
+        // switched track is the one heard, so it stays.
+        if output.advanced {
+            return false;
+        }
+        if let Some(switched) = std::mem::replace(&mut self.track, self.previous.take()) {
+            switched.download.cancel();
+        }
         if let Some(at) = output.switch_at.take() {
             let frames = at.saturating_sub(output.frames_played) as usize;
             let keep = frames * output.channels;
@@ -611,7 +613,8 @@ impl Engine {
         scratch.clear();
         match track.decoder.decode_next(&mut scratch) {
             Ok(Decoded::Samples) => {
-                let first = !std::mem::replace(&mut track.started, true);
+                // A seek's pre-roll decodes to nothing, which is not a sound.
+                let first = !scratch.is_empty() && !std::mem::replace(&mut track.started, true);
                 self.push(&mut scratch);
                 if first {
                     (self.on_event)(PlayerEvent::Started);
@@ -631,6 +634,9 @@ impl Engine {
                 // Errors from a download cancelled by a newer load are expected.
                 let download = Arc::clone(&track.download);
                 if self.is_current(&download) {
+                    // Dropped, or as a finished track it would also report
+                    // that it ended, skipping a second track.
+                    self.track = None;
                     (self.on_event)(PlayerEvent::Error(e));
                 }
             }
@@ -675,6 +681,10 @@ impl Engine {
             let mut output = self.shared.output.lock().unwrap();
             output.rate = rate;
             output.channels = channels;
+            // A device opened mid-track, as after losing one, fades in too.
+            if self.stream.is_none() {
+                output.gain = 0.0;
+            }
         }
         if self.stream.is_some() {
             return Ok(());

@@ -14,7 +14,7 @@
 //! track's first, whose leading silence was cut as it opened. The mix sits
 //! in the queue like any samples, so the device callback does no more work.
 
-pub mod decode;
+mod decode;
 mod engine;
 pub mod eq;
 mod opus;
@@ -32,8 +32,8 @@ use std::{
 
 use engine::Engine;
 use output::Output;
-use source::Download;
-pub use source::{Refresh, Source};
+pub use source::Source;
+use source::{Download, Refresh};
 
 /// The most silence cut from either side of a crossfade, so a quiet
 /// passage or a hidden track is not mistaken for the end.
@@ -63,7 +63,7 @@ impl StreamSpec {
     }
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug)]
 pub enum PlayerEvent {
     /// The track has started producing sound.
     Started,
@@ -129,16 +129,26 @@ impl Shared {
         cancel(&self.next_download);
     }
 
+    /// The correction applied to a track of loudness gain `gain`: that gain
+    /// while normalising, else none.
+    fn correction(&self, gain: f32) -> f32 {
+        if self.normalise.load(Ordering::Relaxed) {
+            gain
+        } else {
+            1.0
+        }
+    }
+
+    /// The audible track's loudness correction.
+    fn loudness(&self) -> f32 {
+        self.correction(f32::from_bits(self.loudness_gain.load(Ordering::Relaxed)))
+    }
+
     /// Linear gain: volume curve times loudness correction.
     fn gain(&self) -> f32 {
         let volume = f32::from_bits(self.volume.load(Ordering::Relaxed));
-        let loudness = if self.normalise.load(Ordering::Relaxed) {
-            f32::from_bits(self.loudness_gain.load(Ordering::Relaxed))
-        } else {
-            1.0
-        };
         // Squared so the slider feels even to the ear.
-        volume * volume * loudness
+        volume * volume * self.loudness()
     }
 }
 

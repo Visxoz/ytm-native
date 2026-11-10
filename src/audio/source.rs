@@ -129,9 +129,17 @@ impl Download {
                 }
                 Err(e) => e,
             };
-            // Nobody reads a cancelled download, so it neither waits nor asks.
-            if self.state.lock().unwrap().cancelled {
-                return;
+            {
+                let state = self.state.lock().unwrap();
+                // Nobody reads a cancelled download, so it neither waits nor asks.
+                if state.cancelled {
+                    return;
+                }
+                // A range that broke off after some bytes still got somewhere,
+                // so only failures in a row that bring nothing give up.
+                if state.data.len() as u64 > offset {
+                    retries = 0;
+                }
             }
             let refused = is_refused(&*error);
             if refused && refreshes < MAX_REFRESHES {
