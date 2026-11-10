@@ -2,7 +2,10 @@
 
 use std::future::Future;
 
-use rustypipe::model::{AlbumType, MusicGenreItem, MusicItem};
+use rustypipe::{
+    model::{AlbumType, MusicGenreItem, MusicItem},
+    param::AlbumOrder,
+};
 
 use super::{
     Api, Card, CardKind, CardLayout, Header, More, MoreShelves, MoreTracks, PLAYLIST_LIMIT, Page,
@@ -488,7 +491,28 @@ impl Api {
     }
 
     async fn artist(&self, id: &str) -> Result<Page> {
-        let artist = self.q().music_artist(id, true).await.map_err(err)?;
+        // The page and the full discography together, rather than one after
+        // the other as rustypipe does; the page's own albums stand in if the
+        // discography fails or has nothing more.
+        let q = self.q();
+        let (artist, discography) = tokio::join!(
+            q.music_artist(id, false),
+            q.music_artist_albums(id, None, Some(AlbumOrder::Recency)),
+        );
+        let mut artist = artist.map_err(err)?;
+        // An alias redirects to the artist's own ID, which the discography
+        // must be asked by.
+        let discography = if artist.id == id {
+            discography
+        } else {
+            q.music_artist_albums(&artist.id, None, Some(AlbumOrder::Recency))
+                .await
+        };
+        match discography {
+            Ok(all) if all.len() > artist.albums.len() => artist.albums = all,
+            Ok(_) => {}
+            Err(e) => log::warn!("could not load the artist's discography: {e}"),
+        }
         let top = tracks(artist.tracks);
         let header = Header {
             label: "Artist".to_owned(),
