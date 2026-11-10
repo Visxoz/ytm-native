@@ -45,8 +45,7 @@ impl Api {
             Route::Home => self.home(signed_in, home_feed::ATTEMPTS).await,
             Route::Explore => self.explore().await,
             Route::Library => self.library().await,
-            // Kept by the app itself; never fetched.
-            Route::History => Err("the history is kept on this PC".into()),
+            Route::History => self.history().await,
             Route::Search(query) => self.search(query).await,
             Route::Album(id) => self.album(id).await,
             Route::Playlist(id) => self.playlist(id).await,
@@ -187,6 +186,34 @@ impl Api {
             QueueMode::Radio,
         ));
         Ok(sections_page(sections))
+    }
+
+    /// The account's YouTube Music history, newest first, so plays on other
+    /// devices and the website show here too.
+    // shortcut: only the first page YouTube sends; follow its continuation
+    // if that turns out shorter than people scroll.
+    async fn history(&self) -> Result<Page> {
+        let history = self.user_q().music_history().await.map_err(err)?;
+        let tracks = tracks(history.items.into_iter().map(|h| h.item).collect());
+        if tracks.is_empty() {
+            return Err("Songs you play will show up here.".into());
+        }
+        Ok(Page {
+            header: Some(Header {
+                label: "Recently played".to_owned(),
+                title: "History".to_owned(),
+                // No count: with only the first page, it wouldn't be the
+                // whole history's.
+                ..Default::default()
+            }),
+            sections: vec![Section::Tracks {
+                title: String::new(),
+                tracks,
+                mode: QueueMode::Section,
+                numbered: false,
+            }],
+            more: None,
+        })
     }
 
     async fn library(&self) -> Result<Page> {

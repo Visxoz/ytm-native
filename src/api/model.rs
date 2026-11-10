@@ -186,7 +186,8 @@ pub enum Route {
     Home,
     Explore,
     Library,
-    /// The songs played, kept locally.
+    /// The songs played: the account's YouTube Music history when signed
+    /// in, otherwise the one kept locally.
     History,
     Search(String),
     Album(String),

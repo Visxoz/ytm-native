@@ -55,7 +55,10 @@ impl App {
             ui.set_sign_in_open(true);
             return;
         }
-        if route == Route::History {
+        // Signed in, the History page is the account's own, fetched fresh
+        // each visit; the local one stands in when plays aren't sent there.
+        let online_history = signed_in && self.state.borrow().settings.youtube_history;
+        if route == Route::History && !online_history {
             ui.set_page_loading(false);
             match self.history_page() {
                 Some(page) => self.show_page(page),
@@ -88,7 +91,11 @@ impl App {
                 let page = api.page(&route, signed_in).await;
                 (route, page)
             },
-            move |app, (route, result)| app.page_loaded(generation, result, Some(route)),
+            // The history isn't cached, so a song just played shows.
+            move |app, (route, result)| {
+                let cache_as = (route != Route::History).then_some(route);
+                app.page_loaded(generation, result, cache_as)
+            },
         );
     }
 
