@@ -213,12 +213,19 @@ impl Engine {
     }
 
     pub(super) fn run(mut self) {
+        // Whether a pass since the last command or decode found nothing to do.
+        let mut settled = false;
         loop {
             let command = if self.wants_samples() {
                 match self.rx.try_recv() {
                     Ok(command) => Some(command),
                     Err(mpsc::TryRecvError::Empty) => None,
                     Err(mpsc::TryRecvError::Disconnected) => return,
+                }
+            } else if settled && self.idle() {
+                match self.rx.recv() {
+                    Ok(command) => Some(command),
+                    Err(_) => return,
                 }
             } else {
                 match self.rx.recv_timeout(IDLE_POLL) {
@@ -227,6 +234,7 @@ impl Engine {
                     Err(RecvTimeoutError::Disconnected) => return,
                 }
             };
+            settled = false;
             // Ahead of the command, so a resume starts the new device.
             self.reopen_lost_device();
             match command {
@@ -248,17 +256,32 @@ impl Engine {
                         self.decode_some();
                     } else {
                         self.check_finished();
+                        settled = true;
                     }
                 }
             }
         }
     }
 
+    /// Whether only a command can change anything now, so the thread may
+    /// sleep until one comes rather than wake to look: paused or stopped,
+    /// with the device's stop behind it and no queued track still opening.
+    /// True only after a pass that found nothing to do, and only while all
+    /// the engine acts on in these states reaches it with a command.
+    fn idle(&self) -> bool {
+        let opening = self.next.as_ref().is_some_and(|n| n.ready.is_none());
+        let stopped = self.track.is_none() && self.previous.is_none();
+        self.pause_at.is_none()
+            && !opening
+            && (stopped || self.shared.paused.load(Ordering::Relaxed))
+    }
+
     fn clear(&mut self) {
         self.track = None;
         self.next = None;
         self.previous = None;
-        self.held.clear();
+        // Freed rather than emptied, as a crossfade's hold is megabytes.
+        self.held = VecDeque::new();
         self.fade = None;
         self.shared.output.lock().unwrap().reset(0.0);
     }
@@ -643,9 +666,6 @@ impl Engine {
             output.channels = channels;
         }
         if self.stream.is_some() {
-            // `Player::load` clears the pause without a command, so a stream
-            // stopped by an earlier pause must start again here.
-            self.apply_paused();
             return Ok(());
         }
 

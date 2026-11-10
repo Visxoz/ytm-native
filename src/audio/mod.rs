@@ -185,13 +185,14 @@ impl Player {
         Self { tx, shared }
     }
 
+    /// Loads a track in place of the current one. A pause is left as it is,
+    /// so one made while the stream was being found holds.
     pub fn load(&self, spec: StreamSpec) {
         // Cancel first so a decoder blocked on the old download wakes up.
         self.shared.cancel_current();
         self.shared.cancel_next();
         let (download, opening) = spec.start();
         *self.shared.download.lock().unwrap() = Some(Arc::clone(&download));
-        self.shared.paused.store(false, Ordering::Relaxed);
         let _ = self.tx.send(Command::Load(opening, download));
     }
 
@@ -224,7 +225,8 @@ impl Player {
 
     pub fn set_paused(&self, paused: bool) {
         // The flag silences the callback at once; the engine then stops the
-        // device, which cpal does asynchronously.
+        // device, which cpal does asynchronously. The command must follow
+        // every change of the flag, as the engine sleeps while paused.
         self.shared.paused.store(paused, Ordering::Relaxed);
         let _ = self.tx.send(Command::Pause);
     }
