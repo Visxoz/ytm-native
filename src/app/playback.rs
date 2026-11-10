@@ -110,8 +110,8 @@ impl App {
         if failures < MAX_CONSECUTIVE_FAILURES && has_next {
             self.next(true);
         } else {
-            self.ui().set_np_loading(false);
-            self.show_playing(false);
+            // Stopped like any other end, so the device does not run on.
+            self.stop();
         }
     }
 
@@ -280,6 +280,10 @@ impl App {
     pub(super) fn previous(self: &Rc<Self>) {
         if self.player.position() > RESTART_AFTER_SECS {
             self.seek_to(0.0);
+            // Starting over is a new play, as a replay through repeat-one is.
+            if self.state.borrow().playback.started {
+                self.record_play();
+            }
             return;
         }
         if self.state.borrow_mut().queue.back().is_some() {

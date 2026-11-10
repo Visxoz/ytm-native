@@ -271,9 +271,9 @@ pub struct Settings {
     pub repeat: i32,
     pub sidebar_collapsed: bool,
     pub quality: Quality,
-    /// Use 256 kbps streams when signed in with YouTube Premium: High
-    /// quality. Kept alongside `quality`, as the code and older settings
-    /// files use it.
+    /// What older versions had in place of `quality`'s High, and still
+    /// read. Kept in step for them, and read here only by `load`; the app
+    /// itself goes by `quality`.
     pub premium_audio: bool,
     /// The signed-in account has been served Premium formats, so songs
     /// without them, such as music videos, never mark it as not Premium.

@@ -150,11 +150,21 @@ impl App {
             // Whole dB steps; saved once the slider is let go.
             // Adding 0 turns the -0 just left of centre into 0.
             let db = ((value * 2.0 - 1.0) * eq::MAX_DB).round() + 0.0;
-            app.change_equaliser(done, |s| {
-                if let Some(gain) = s.equaliser_gains.get_mut(band as usize) {
-                    *gain = db;
-                }
-            });
+            // A drag sends every pointer move, most of them within the same dB.
+            let same = app
+                .state
+                .borrow()
+                .settings
+                .equaliser_gains
+                .get(band as usize)
+                == Some(&db);
+            if done || !same {
+                app.change_equaliser(done, |s| {
+                    if let Some(gain) = s.equaliser_gains.get_mut(band as usize) {
+                        *gain = db;
+                    }
+                });
+            }
         });
         on!(on_set_look, |app, index| {
             app.update_settings(|s| s.look = Look::from_index(index));

@@ -81,8 +81,6 @@ impl App {
         self.update_presence();
         if new_song {
             self.load_rating(track.id.clone());
-        }
-        {
             let mut state = self.state.borrow_mut();
             state.lyrics_for = None;
             state.lyric_starts.clear();
@@ -90,6 +88,8 @@ impl App {
         if ui.get_panel_open() && ui.get_panel_tab() == 1 {
             self.load_lyrics();
         }
+        // The same song again keeps its lyrics; light the line it starts at.
+        self.show_lyric_line(position);
     }
 
     /// Loads `track`'s artwork into the player bar, with the colours taken
@@ -412,6 +412,8 @@ impl App {
         ui.set_lyrics_current(line);
         if let Some(wait) = next.filter(|&wait| wait < TICK.as_secs_f64())
             && !self.player.is_paused()
+            // Until a track has started, the engine's position is not the bar's.
+            && self.state.borrow().playback.started
         {
             let weak = Rc::downgrade(self);
             self.lyric_timer.start(

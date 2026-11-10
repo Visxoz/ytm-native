@@ -15,6 +15,7 @@ use super::App;
 use crate::{
     api::Api,
     audio::{Opening, Source, StreamSpec},
+    settings::Quality,
     streams::{self, ResolvedStream, premium},
 };
 
@@ -371,7 +372,7 @@ impl App {
     fn resolver(&self, video_id: String) -> Resolver {
         let state = self.state.borrow();
         let want_premium = state.signed_in
-            && state.settings.premium_audio
+            && state.settings.quality == Quality::High
             && state.playback.force_free.as_deref() != Some(video_id.as_str());
         Resolver {
             api: self.api.clone(),
@@ -435,7 +436,7 @@ impl App {
         let wanted = {
             let state = self.state.borrow();
             state.signed_in
-                && state.settings.premium_audio
+                && state.settings.quality == Quality::High
                 && self.premium.cookie.read().unwrap().is_some()
         };
         if !wanted && !premium_dry_run() {
