@@ -154,6 +154,9 @@ struct State {
     /// The accent taken from the playing song's artwork, once it loaded.
     artwork_accent: Option<slint::Color>,
     scrobbler: scrobble::Scrobbler,
+    /// Whether the stored cookie has been checked this run, which the first
+    /// signed-in Home does with its picture.
+    cookie_checked: bool,
 }
 
 impl State {
@@ -268,6 +271,7 @@ impl App {
                 saving: None,
                 artwork_accent: None,
                 scrobbler: scrobble::Scrobbler::load(),
+                cookie_checked: false,
             }),
             rows: Rc::new(VecModel::default()),
             library: Rc::new(VecModel::default()),
@@ -491,9 +495,10 @@ impl App {
         let signed_in = self.api.has_cookie();
         self.state.borrow_mut().signed_in = signed_in;
         self.ui().global::<ApiGlobal>().set_signed_in(signed_in);
+        // Home, opened below, loads the account's picture and checks the
+        // cookie with it.
         if signed_in {
             self.load_library();
-            self.load_account_photo();
             if let Some(id) = self.playing_id() {
                 self.load_rating(id);
             }

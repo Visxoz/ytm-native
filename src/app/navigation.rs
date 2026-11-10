@@ -124,6 +124,11 @@ impl App {
     /// and what they fetch waits for the next visit, so the page never
     /// changes under the reader.
     fn load_personal_home(self: &Rc<Self>, generation: u64) {
+        // The picture is asked again with each fresh feed, so one changed
+        // elsewhere, or one that failed to load, shows within minutes rather
+        // than at the next start. The first also checks the stored cookie.
+        let check_cookie = !std::mem::replace(&mut self.state.borrow_mut().cookie_checked, true);
+        self.load_account_photo(check_cookie);
         let api = self.api.clone();
         self.spawn(
             async move { api.home_first_try().await },

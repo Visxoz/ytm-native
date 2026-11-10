@@ -39,7 +39,7 @@ impl App {
                         // It may be another account's.
                         settings::remove_home();
                         app.load_library();
-                        app.load_account_photo();
+                        app.load_account_photo(true);
                         settings::save_cookie(&header);
                         app.premium.set_cookie(Some(header));
                         app.update_settings(|s| s.premium_account = false);
@@ -202,9 +202,10 @@ impl App {
         ui.set_account_photo(Image::default());
     }
 
-    /// Puts the account's profile picture on the account button, and checks
-    /// the stored cookie if the menu didn't come back signed in.
-    pub(super) fn load_account_photo(self: &Rc<Self>) {
+    /// Puts the account's profile picture on the account button, and with
+    /// `check_cookie`, checks the stored cookie if the menu didn't come back
+    /// signed in. Refreshes leave that out, as a failed check signs out.
+    pub(super) fn load_account_photo(self: &Rc<Self>, check_cookie: bool) {
         let api = self.api.clone();
         // Signing in or out meanwhile makes both the photo and the check
         // another account's.
@@ -228,6 +229,9 @@ impl App {
                     }
                     Ok(None) => {}
                     Err(e) => log::warn!("could not load the account's picture: {e}"),
+                }
+                if !check_cookie {
+                    return;
                 }
                 let api = app.api.clone();
                 app.spawn(

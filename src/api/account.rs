@@ -19,20 +19,27 @@ impl Api {
         let _ = self.rp.user_auth_remove_cookie().await;
     }
 
-    /// The signed-in account's profile picture, from YouTube Music's
-    /// account menu.
+    /// The signed-in account's profile picture. YouTube's guide has the
+    /// current one, while the account menu has been seen to keep serving the
+    /// one before a change, so the menu is asked only when the guide has none.
     pub async fn account_photo(&self) -> Result<Option<String>> {
-        let json = self
-            .q()
-            .authenticated()
-            .raw(
-                ClientType::DesktopMusic,
-                "account/account_menu",
-                &serde_json::json!({}),
-            )
+        let ask = async |client, endpoint: &str| {
+            self.q()
+                .authenticated()
+                .raw(client, endpoint, &serde_json::json!({}))
+                .await
+        };
+        match ask(ClientType::Desktop, "guide").await {
+            Ok(guide) => match account_photo(&guide, GUIDE_PHOTO) {
+                Some(url) => return Ok(Some(url)),
+                None => log::debug!("the guide has no account picture"),
+            },
+            Err(e) => log::debug!("the guide failed: {e}"),
+        }
+        let menu = ask(ClientType::DesktopMusic, "account/account_menu")
             .await
             .map_err(err)?;
-        Ok(account_photo(&json))
+        Ok(account_photo(&menu, MENU_PHOTO))
     }
 
     /// Whether a sign-in cookie is stored, without asking YouTube.
@@ -54,17 +61,25 @@ impl Api {
     }
 }
 
-/// The largest profile picture in an account menu response.
-fn account_photo(json: &str) -> Option<String> {
-    let menu: serde_json::Value = serde_json::from_str(json).ok()?;
-    let header = &menu["actions"][0]["openPopupAction"]["popup"]["multiPageMenuRenderer"]["header"]
-        ["activeAccountHeaderRenderer"];
-    header["accountPhoto"]["thumbnails"]
+/// Where the profile pictures sit in the guide and account menu responses.
+const GUIDE_PHOTO: &str = "/userProfile/accountPhoto/thumbnails";
+const MENU_PHOTO: &str = "/actions/0/openPopupAction/popup/multiPageMenuRenderer/header/activeAccountHeaderRenderer/accountPhoto/thumbnails";
+
+/// The largest profile picture at `pointer` in a response, as a JPEG: an
+/// animated picture otherwise comes as a GIF, which artwork isn't decoded from.
+fn account_photo(json: &str, pointer: &str) -> Option<String> {
+    let response: serde_json::Value = serde_json::from_str(json).ok()?;
+    let url = response
+        .pointer(pointer)?
         .as_array()?
         .iter()
         .max_by_key(|t| t["width"].as_u64().unwrap_or(0))?["url"]
-        .as_str()
-        .map(str::to_owned)
+        .as_str()?;
+    Some(if url.contains('=') && !url.ends_with("-rj") {
+        format!("{url}-rj")
+    } else {
+        url.to_owned()
+    })
 }
 
 #[cfg(test)]
@@ -79,10 +94,17 @@ mod tests {
                 {"url":"https://yt3.ggpht.com/a=s88","width":88,"height":88},
                 {"url":"https://yt3.ggpht.com/a=s176","width":176,"height":176}]}}}}}}}]}"#;
         assert_eq!(
-            account_photo(menu).as_deref(),
-            Some("https://yt3.ggpht.com/a=s176")
+            account_photo(menu, MENU_PHOTO).as_deref(),
+            Some("https://yt3.ggpht.com/a=s176-rj")
         );
-        assert_eq!(account_photo("{}"), None);
-        assert_eq!(account_photo("not json"), None);
+        let guide = r#"{"items":[],"userProfile":{"accountPhoto":{"thumbnails":[
+            {"url":"https://yt3.ggpht.com/yti/b=s88-c-k-no-rj"}]}}}"#;
+        assert_eq!(
+            account_photo(guide, GUIDE_PHOTO).as_deref(),
+            Some("https://yt3.ggpht.com/yti/b=s88-c-k-no-rj")
+        );
+        assert_eq!(account_photo(menu, GUIDE_PHOTO), None);
+        assert_eq!(account_photo("{}", MENU_PHOTO), None);
+        assert_eq!(account_photo("not json", MENU_PHOTO), None);
     }
 }
