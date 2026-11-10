@@ -26,6 +26,9 @@ pub(super) const PREMIUM_NO: u8 = 2;
 /// to have Premium counts as without it, as some songs simply have no
 /// Premium version.
 const NOT_PREMIUM_AFTER: u8 = 3;
+/// The same for an account known to have Premium: only a long run of
+/// uploads reaches it, and a lapsed subscription soon does.
+const LAPSED_AFTER: u8 = 20;
 /// Cool-off after the player fails to prepare or Premium keeps failing, and
 /// between background checks of an account taken as without Premium.
 const PREMIUM_BACKOFF: Duration = Duration::from_secs(10 * 60);
@@ -121,7 +124,12 @@ impl PremiumShared {
             .misses
             .fetch_add(1, Ordering::Relaxed)
             .saturating_add(1);
-        if misses >= NOT_PREMIUM_AFTER && self.status() != PREMIUM_YES {
+        let limit = if self.status() == PREMIUM_YES {
+            LAPSED_AFTER
+        } else {
+            NOT_PREMIUM_AFTER
+        };
+        if misses >= limit {
             self.status.store(PREMIUM_NO, Ordering::Relaxed);
             *self.recheck_at.lock().unwrap() = Some(Instant::now() + PREMIUM_BACKOFF);
         }
@@ -256,7 +264,11 @@ impl Resolver {
                         .await
                     {
                         Ok(premium::Outcome::Stream(stream)) => {
-                            premium.record_premium();
+                            if stream.premium {
+                                premium.record_premium();
+                            } else {
+                                premium.record_miss();
+                            }
                             log::info!(
                                 "{video_id}: {} stream resolved in {} ms",
                                 if stream.premium { "Premium" } else { "web" },
@@ -464,13 +476,26 @@ mod tests {
     use super::*;
 
     #[test]
-    fn music_videos_never_turn_off_a_known_premium_account() {
+    fn only_a_long_run_of_misses_turns_off_a_known_premium_account() {
         let shared = PremiumShared::new(Some("SID=a".into()), true);
-        for _ in 0..10 {
+        for _ in 1..LAPSED_AFTER {
             shared.record_miss();
         }
-        assert_eq!(shared.status(), PREMIUM_YES);
-        assert!(!shared.skipped());
+        assert_eq!(shared.status(), PREMIUM_YES, "a run of uploads");
+        shared.record_premium();
+        for _ in 1..LAPSED_AFTER {
+            shared.record_miss();
+        }
+        assert_eq!(
+            shared.status(),
+            PREMIUM_YES,
+            "a Premium song starts the count again"
+        );
+
+        shared.record_miss();
+        assert_eq!(shared.status(), PREMIUM_NO, "a lapsed subscription");
+        assert!(shared.skipped());
+        assert!(!shared.take_recheck(), "not due until the cool-off ends");
     }
 
     #[test]

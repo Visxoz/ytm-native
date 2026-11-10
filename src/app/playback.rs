@@ -421,8 +421,13 @@ impl App {
                 }
                 .into(),
             );
-            if status == PREMIUM_YES && !self.state.borrow().settings.premium_account {
-                self.update_settings(|s| s.premium_account = true);
+            // Remembered across restarts, and forgotten once a subscription
+            // has lapsed.
+            let known = status == PREMIUM_YES;
+            if (known || status == PREMIUM_NO)
+                && known != self.state.borrow().settings.premium_account
+            {
+                self.update_settings(|s| s.premium_account = known);
             }
         }
         if !ui.get_has_track() {
