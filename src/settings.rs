@@ -320,12 +320,36 @@ impl Default for Settings {
 
 impl Settings {
     pub fn load() -> Self {
-        let mut settings: Self = read_json(&settings_path()).unwrap_or_default();
+        let mut settings = std::fs::read(settings_path())
+            .map(|json| Self::parse(&json))
+            .unwrap_or_default();
         // Premium audio turned off by an older version means Normal.
         if !settings.premium_audio && settings.quality == Quality::High {
             settings.quality = Quality::Normal;
         }
         settings
+    }
+
+    /// Reads each setting on its own, so one this version can't read (a hand
+    /// edit, or a choice added by a newer version) goes back to its default
+    /// alone rather than taking an opt-out such as `youtube_history` with it.
+    fn parse(json: &[u8]) -> Self {
+        let file = match serde_json::from_slice(json) {
+            Ok(serde_json::Value::Object(file)) => file,
+            _ => {
+                log::warn!("settings.json could not be read; using the defaults");
+                return Self::default();
+            }
+        };
+        let mut kept = serde_json::Map::new();
+        for (key, value) in file {
+            kept.insert(key.clone(), value);
+            if serde_json::from_value::<Self>(kept.clone().into()).is_err() {
+                log::warn!("setting {key} could not be read; using its default");
+                kept.remove(&key);
+            }
+        }
+        serde_json::from_value(kept.into()).unwrap_or_default()
     }
 
     pub fn set_quality(&mut self, quality: Quality) {
@@ -563,6 +587,18 @@ impl Searches {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_unreadable_setting_resets_only_itself() {
+        let settings = Settings::parse(
+            br#"{"youtube_history": false, "accent": "Blue", "equaliser_gains": [1], "volume": 0.5}"#,
+        );
+        assert!(!settings.youtube_history, "the opt-out is kept");
+        assert_eq!(settings.volume, 0.5);
+        assert_eq!(settings.accent, Accent::Red);
+        assert_eq!(settings.equaliser_gains, [0.0; 6]);
+        assert_eq!(Settings::parse(b"not json"), Settings::default());
+    }
 
     #[test]
     fn session_keeps_short_queues_whole_and_long_ones_around_the_track() {
