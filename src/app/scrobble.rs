@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use slint::Timer;
+use slint::{Timer, TimerMode};
 
 use super::{App, TICK};
 use crate::lastfm::{self, Error, Play};
@@ -15,6 +15,9 @@ use crate::lastfm::{self, Error, Play};
 /// and for how long before giving up.
 const POLL_EVERY: Duration = Duration::from_secs(3);
 const POLL_FOR: Duration = Duration::from_secs(5 * 60);
+/// How long to wait before sending again after Last.fm could not take the
+/// plays, or refused one.
+const RETRY_AFTER: Duration = Duration::from_secs(60);
 
 /// The song playing, until enough of it has been heard to count.
 struct Listening {
@@ -32,9 +35,9 @@ pub(super) struct Scrobbler {
     playing: Option<Listening>,
     /// A batch is on its way to Last.fm.
     sending: bool,
-    /// Last.fm refused a batch as invalid, so plays go one at a time until
-    /// the one it refuses is found and dropped.
-    one_at_a_time: bool,
+    /// Last.fm refused a batch as invalid, so this many of its plays go one
+    /// at a time, to find the one it refuses and drop it alone.
+    singles: usize,
     /// Bumped by connecting and disconnecting, so replies for an earlier
     /// account or attempt are ignored.
     generation: u64,
@@ -145,7 +148,7 @@ impl App {
                 return;
             }
             scrobbler.sending = true;
-            let batch = scrobbler.pending.batch(scrobbler.one_at_a_time);
+            let batch = scrobbler.pending.batch(scrobbler.singles > 0);
             (session, batch, scrobbler.generation)
         };
         self.spawn(
@@ -158,36 +161,53 @@ impl App {
                     let mut state = app.state.borrow_mut();
                     let scrobbler = &mut state.scrobbler;
                     scrobbler.sending = false;
-                    if scrobbler.generation != generation {
-                        return;
-                    }
                     let more = match &result {
+                        // For an earlier account, whose plays are gone; newer
+                        // ones may have waited behind it.
+                        _ if scrobbler.generation != generation => true,
                         Ok(()) => {
                             scrobbler.pending.sent(&batch);
+                            scrobbler.singles = scrobbler.singles.saturating_sub(1);
                             true
                         }
                         // One play spoils a batch; find it, and drop it alone.
                         Err(Error::Rejected(_)) if batch.len() > 1 => {
-                            scrobbler.one_at_a_time = true;
+                            scrobbler.singles = batch.len();
                             true
                         }
+                        // Waits before the next, so a refusal that isn't
+                        // about the play costs a play a minute, not them all.
                         Err(Error::Rejected(e)) => {
                             log::warn!("Last.fm refused a play: {e}");
                             scrobbler.pending.sent(&batch);
-                            scrobbler.one_at_a_time = false;
-                            true
+                            scrobbler.singles = scrobbler.singles.saturating_sub(1);
+                            false
                         }
                         Err(_) => false,
                     };
                     scrobbler.pending.save();
-                    more && !scrobbler.pending.is_empty()
+                    (!scrobbler.pending.is_empty()).then_some(more)
                 };
                 app.lastfm_failed(result, generation);
-                if more {
-                    app.send_scrobbles();
+                match more {
+                    Some(true) => app.send_scrobbles(),
+                    Some(false) => app.send_scrobbles_later(),
+                    None => {}
                 }
             },
         );
+    }
+
+    /// Tries the plays again in a while, as nothing else may send them until
+    /// another song counts.
+    fn send_scrobbles_later(self: &Rc<Self>) {
+        let weak = Rc::downgrade(self);
+        self.scrobble_timer
+            .start(TimerMode::SingleShot, RETRY_AFTER, move || {
+                if let Some(app) = weak.upgrade() {
+                    app.send_scrobbles();
+                }
+            });
     }
 
     /// Forgets an account whose access was revoked, keeping its plays for
@@ -268,12 +288,16 @@ impl App {
     }
 
     /// Forgets the account, or stops waiting for one to connect. Plays not
-    /// yet sent are dropped with it, so none reach the next account.
+    /// yet sent are dropped with an account, so none reach the next one;
+    /// stopping a wait keeps those of an account whose access was revoked.
     pub(super) fn disconnect_lastfm(&self) {
+        let connected = self.state.borrow().scrobbler.session.is_some();
         self.end_lastfm();
-        let pending = &mut self.state.borrow_mut().scrobbler.pending;
-        pending.clear();
-        pending.save();
+        if connected {
+            let pending = &mut self.state.borrow_mut().scrobbler.pending;
+            pending.clear();
+            pending.save();
+        }
     }
 
     /// Forgets the account's session, and any reply on its way for it.
@@ -282,6 +306,7 @@ impl App {
             let scrobbler = &mut self.state.borrow_mut().scrobbler;
             scrobbler.generation += 1;
             scrobbler.session = None;
+            scrobbler.singles = 0;
             scrobbler.playing = None;
         }
         lastfm::remove_session();

@@ -195,6 +195,8 @@ pub struct App {
     update_timer: Timer,
     /// Writes the session and history a moment after they change.
     persist_timer: Timer,
+    /// Sends the scrobbles again after Last.fm could not take them.
+    scrobble_timer: Timer,
 }
 
 fn s(text: impl AsRef<str>) -> SharedString {
@@ -285,6 +287,7 @@ impl App {
             update: RefCell::new(None),
             update_timer: Timer::default(),
             persist_timer: Timer::default(),
+            scrobble_timer: Timer::default(),
         });
         app.bind(ui);
         app.apply_settings_to_ui(ui);
