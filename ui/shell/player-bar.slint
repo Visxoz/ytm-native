@@ -26,6 +26,7 @@ export component PlayerBar inherits Rectangle {
     in property <int> repeat-mode;
     in property <bool> panel-open;
     in property <int> panel-tab;
+    in property <bool> rating-buttons;
 
     callback toggle-play();
     callback next();
@@ -78,7 +79,10 @@ export component PlayerBar inherits Rectangle {
             }
         }
 
+        // At their own widths, so the rating buttons sit just after the
+        // title rather than at the far side of this third of the bar.
         HorizontalLayout {
+            alignment: start;
             spacing: 14px;
             opacity: root.has-track ? 1 : 0;
             animate opacity { duration: Theme.normal; }
@@ -118,7 +122,7 @@ export component PlayerBar inherits Rectangle {
                 }
             }
 
-            if Api.signed-in && root.has-track: HorizontalLayout {
+            if Api.signed-in && root.has-track && root.rating-buttons: HorizontalLayout {
                 cross-axis-alignment: center;
                 IconButton {
                     icon: Api.playing-rating == 2 ? Icons.thumb-down-filled : Icons.thumb-down;

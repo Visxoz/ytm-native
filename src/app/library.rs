@@ -42,8 +42,8 @@ impl App {
     }
 
     /// Likes or dislikes `id`, or takes that back if the playing song
-    /// already had it; `Rating::None` takes back either. Disliking the playing song skips it. The UI offers
-    /// this only when signed in.
+    /// already had it; `Rating::None` takes back either. Disliking the
+    /// playing song skips it. The UI offers this only when signed in.
     pub(super) fn rate(self: &Rc<Self>, id: String, rating: Rating) {
         let ui = self.ui();
         let global = ui.global::<ApiGlobal>();

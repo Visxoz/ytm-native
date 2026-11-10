@@ -168,6 +168,8 @@ impl App {
         on!(on_lastfm_disconnect, |app| app.disconnect_lastfm());
         on!(on_set_youtube_history, |app, value| app
             .update_settings(|s| s.youtube_history = value));
+        on!(on_set_rating_buttons, |app, value| app
+            .update_settings(|s| s.rating_buttons = value));
         on!(on_set_autoplay, |app, value| app
             .update_settings(|s| s.autoplay = value));
         on!(on_set_check_updates, |app, value| {

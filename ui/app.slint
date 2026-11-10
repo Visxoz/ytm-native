@@ -117,6 +117,7 @@ export component AppWindow inherits Window {
     in property <bool> discord;
     in property <bool> autoplay;
     in property <bool> youtube-history;
+    in property <bool> rating-buttons;
     /// 0 low, 1 normal, 2 high.
     in property <int> quality: 2;
     in property <bool> crossfade;
@@ -191,6 +192,7 @@ export component AppWindow inherits Window {
     callback pick-playlist(index: int);
     callback set-autoplay(value: bool);
     callback set-youtube-history(value: bool);
+    callback set-rating-buttons(value: bool);
     callback set-quality(value: int);
     callback set-crossfade(value: bool);
     callback set-look(index: int);
@@ -396,6 +398,7 @@ export component AppWindow inherits Window {
             // Player bar
             PlayerBar {
                 has-track: root.has-track;
+                rating-buttons: root.rating-buttons;
                 np-title: root.np-title;
                 np-artists: root.np-artists;
                 np-art: root.np-art;
@@ -487,6 +490,8 @@ export component AppWindow inherits Window {
             set-autoplay(v) => { root.set-autoplay(v); }
             youtube-history: root.youtube-history;
             set-youtube-history(v) => { root.set-youtube-history(v); }
+            rating-buttons: root.rating-buttons;
+            set-rating-buttons(v) => { root.set-rating-buttons(v); }
             set-discord(v) => { root.set-discord(v); }
             set-check-updates(v) => { root.set-check-updates(v); }
             install-update => { root.install-update(); }

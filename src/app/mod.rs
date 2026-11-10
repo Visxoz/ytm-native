@@ -401,6 +401,7 @@ impl App {
         ui.set_discord(settings.discord);
         ui.set_autoplay(settings.autoplay);
         ui.set_youtube_history(settings.youtube_history);
+        ui.set_rating_buttons(settings.rating_buttons);
         ui.set_quality(settings.quality.index());
         ui.set_crossfade(settings.crossfade);
         ui.set_sidebar_collapsed(settings.sidebar_collapsed);

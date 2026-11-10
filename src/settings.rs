@@ -262,6 +262,8 @@ pub struct Settings {
     pub autoplay: bool,
     /// Report songs played to the signed-in account's YouTube history.
     pub youtube_history: bool,
+    /// Show like and dislike buttons beside the song playing.
+    pub rating_buttons: bool,
     pub shuffle: bool,
     /// Shuffle with recommended tracks mixed in; a kind of shuffle, so it
     /// goes off with it.
@@ -297,6 +299,7 @@ impl Default for Settings {
             discord: true,
             autoplay: true,
             youtube_history: true,
+            rating_buttons: true,
             shuffle: false,
             smart_shuffle: false,
             repeat: 0,
