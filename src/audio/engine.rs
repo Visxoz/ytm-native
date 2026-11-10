@@ -227,6 +227,8 @@ impl Engine {
                     Err(RecvTimeoutError::Disconnected) => return,
                 }
             };
+            // Ahead of the command, so a resume starts the new device.
+            self.reopen_lost_device();
             match command {
                 Some(Command::Load(opening, download)) => self.load(opening, download),
                 Some(Command::Queue(opening, download, crossfade_secs)) => {
@@ -626,9 +628,14 @@ impl Engine {
     /// Opens the device at the track's format; Windows resamples if needed.
     fn ensure_stream(&mut self, rate: u32, channels: usize) -> Result<(), String> {
         // A device open at another format closes before the format changes
-        // under its callback.
-        if !matches!(&self.stream, Some((_, r, c)) if *r == rate && *c == channels) {
+        // under its callback, and a lost one closes to be opened afresh.
+        if self.shared.device_lost.load(Ordering::Relaxed)
+            || !matches!(&self.stream, Some((_, r, c)) if *r == rate && *c == channels)
+        {
             self.stream = None;
+            // Closing waits for the callbacks to end, so nothing of the old
+            // stream can report it lost after this.
+            self.shared.device_lost.store(false, Ordering::Relaxed);
         }
         {
             let mut output = self.shared.output.lock().unwrap();
@@ -652,11 +659,26 @@ impl Engine {
             buffer_size: cpal::BufferSize::Default,
         };
         let shared = Arc::clone(&self.shared);
+        let lost = Arc::clone(&self.shared);
         let stream = device
             .build_output_stream::<f32, _, _>(
                 config,
                 move |data, _| fill(&shared, data),
-                |e| log::warn!("audio output error: {e}"),
+                move |e| {
+                    log::warn!("audio output error: {e}");
+                    // The kinds that say the device went or another became
+                    // the default. The rest cannot be told from a refused
+                    // priority boost, which leaves the stream playing; one
+                    // they ended is found when it next fails to start.
+                    if matches!(
+                        e.kind(),
+                        cpal::ErrorKind::DeviceNotAvailable
+                            | cpal::ErrorKind::StreamInvalidated
+                            | cpal::ErrorKind::HostUnavailable
+                    ) {
+                        lost.device_lost.store(true, Ordering::Relaxed);
+                    }
+                },
                 None,
             )
             .map_err(|e| format!("could not open audio output: {e}"))?;
@@ -667,6 +689,25 @@ impl Engine {
         // A format change reached while paused opens a stream that must not run.
         self.apply_paused();
         Ok(())
+    }
+
+    /// Opens the device again once its stream is lost, as when the output is
+    /// unplugged or another becomes the default, which cpal's stream does
+    /// not follow. The queued samples carry on from where the old one stopped.
+    fn reopen_lost_device(&mut self) {
+        if !self.shared.device_lost.load(Ordering::Relaxed) {
+            return;
+        }
+        let (rate, channels) = {
+            let output = self.shared.output.lock().unwrap();
+            (output.rate, output.channels)
+        };
+        if let Err(e) = self.ensure_stream(rate, channels) {
+            // shortcut: asks again every pass, 50 times a second, while
+            // there is no device to open; time the retries if that shows.
+            log::debug!("{e}");
+            self.shared.device_lost.store(true, Ordering::Relaxed);
+        }
     }
 
     /// Stops the device while paused rather than feeding it silence: a running
@@ -685,6 +726,8 @@ impl Engine {
         self.pause_at = None;
         if let Err(e) = stream.play() {
             log::warn!("could not resume audio output: {e}");
+            // Its thread has ended, whatever the error that ended it.
+            self.shared.device_lost.store(true, Ordering::Relaxed);
         }
     }
 

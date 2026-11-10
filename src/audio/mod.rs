@@ -105,6 +105,8 @@ fn loudness_gain(loudness_db: Option<f32>) -> f32 {
 struct Shared {
     output: Mutex<Output>,
     paused: AtomicBool,
+    /// Set by the device's error callback once its stream needs reopening.
+    device_lost: AtomicBool,
     /// Linear gain as f32 bits: volume curve times loudness correction.
     gain: AtomicU32,
     volume: AtomicU32,
@@ -166,6 +168,7 @@ impl Player {
                 eq: Default::default(),
             }),
             paused: AtomicBool::new(false),
+            device_lost: AtomicBool::new(false),
             gain: AtomicU32::new(1f32.to_bits()),
             volume: AtomicU32::new(1f32.to_bits()),
             normalise: AtomicBool::new(true),
