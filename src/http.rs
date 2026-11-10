@@ -1,9 +1,21 @@
 //! The HTTP clients the app's own requests use, limited to the hosts YouTube
 //! Music needs, and sharing connections per host.
 
-use std::{sync::OnceLock, time::Duration};
+use std::{ptr::null, sync::OnceLock, time::Duration};
 
 use reqwest::{Url, redirect};
+use windows_sys::{
+    Win32::{
+        System::Com::{
+            COINIT_APARTMENTTHREADED, COINIT_DISABLE_OLE1DDE, CoInitializeEx, CoUninitialize,
+        },
+        UI::{
+            Shell::{SEE_MASK_NOASYNC, SHELLEXECUTEINFOW, ShellExecuteExW},
+            WindowsAndMessaging::SW_SHOWNORMAL,
+        },
+    },
+    core::w,
+};
 
 /// Domains the app talks to, with their subdomains: YouTube's API and
 /// player, the audio streams, and artwork.
@@ -24,14 +36,54 @@ const POOL_IDLE: Duration = Duration::from_secs(5 * 60);
 const KEEP_ALIVE_EVERY: Duration = Duration::from_secs(30);
 const KEEP_ALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Hands `url` to the default browser, through explorer.exe.
+/// Opens a web link in the default browser, as the Windows shell does.
 pub fn open_in_browser(url: &Url) {
-    if let Err(e) = std::process::Command::new("explorer")
-        .arg(url.as_str())
-        .spawn()
-    {
-        log::warn!("could not open a link in the browser: {e}");
+    if !browsable(url) {
+        log::warn!("refused to open a link in the browser");
+        return;
     }
+    let wide = |s: &str| s.encode_utf16().chain([0]).collect::<Vec<u16>>();
+    let url = wide(url.as_str());
+    // A browser this starts would otherwise keep the app's folder open as
+    // its working directory, so the folder couldn't be removed.
+    let dir =
+        wide(&std::env::var("SystemRoot").map_or_else(|_| String::new(), |r| r + r"\System32"));
+    // On its own thread, as the shell can wait on the browser to start.
+    std::thread::spawn(move || {
+        let mut info = SHELLEXECUTEINFOW {
+            cbSize: size_of::<SHELLEXECUTEINFOW>() as u32,
+            // Asked for on threads without a message loop, such as this one.
+            fMask: SEE_MASK_NOASYNC,
+            lpVerb: w!("open"),
+            lpFile: url.as_ptr(),
+            lpDirectory: dir.as_ptr(),
+            nShow: SW_SHOWNORMAL,
+            ..Default::default()
+        };
+        let com = (COINIT_APARTMENTTHREADED | COINIT_DISABLE_OLE1DDE) as u32;
+        // SAFETY: COM is set up for this thread around the call, as
+        // ShellExecuteEx asks, and taken down only if that succeeded. `info`
+        // and the NUL-terminated strings it points at outlive the call.
+        let error = unsafe {
+            let started = CoInitializeEx(null(), com) >= 0;
+            let error = (ShellExecuteExW(&mut info) == 0).then(std::io::Error::last_os_error);
+            if started {
+                CoUninitialize();
+            }
+            error
+        };
+        if let Some(e) = error {
+            log::warn!("could not open a link in the browser: {e}");
+        }
+    });
+}
+
+/// Whether `url` may go to the browser. Only web links, as the shell runs
+/// whatever it's given, and none with a `"`, which the url crate keeps in
+/// hosts and which could break out of the quotes the shell puts around the
+/// link in the browser's command line.
+fn browsable(url: &Url) -> bool {
+    matches!(url.scheme(), "http" | "https") && !url.as_str().contains('"')
 }
 
 /// Whether the app may request `url`: HTTPS on an allowed domain. URLs
@@ -132,5 +184,16 @@ mod tests {
         assert!(!allowed("https://accounts.google.com/"));
         assert!(!allowed("file:///C:/Windows/System32/calc.exe"));
         assert!(!allowed("not a url"));
+    }
+
+    #[test]
+    fn opens_only_plain_web_links() {
+        let browsable = |s: &str| browsable(&Url::parse(s).unwrap());
+        assert!(browsable("https://www.last.fm/api/auth/?api_key=k&token=t"));
+        assert!(browsable("http://example.com/a b?q=\"x\""), "escaped");
+        assert!(!browsable("https://a\"b.com/"), "kept in the host");
+        assert!(!browsable("file:///C:/Windows/System32/calc.exe"));
+        assert!(!browsable("ms-settings:privacy"));
+        assert!(!browsable("javascript:alert(1)"));
     }
 }
