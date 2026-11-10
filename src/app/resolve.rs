@@ -247,13 +247,19 @@ impl Resolver {
         if let Some(cookie) = cookie.as_deref().filter(|_| !premium.skipped()) {
             match premium_player(premium).await {
                 Ok(player) => {
-                    match premium::resolve(video_id, Some(cookie), &visitor, &player, false, None)
+                    // An account known to have Premium plays a song without
+                    // a Premium version from the same answer, which saves
+                    // asking the free clients. One not yet known counts the
+                    // song as a miss instead.
+                    let known = premium.status() == PREMIUM_YES;
+                    match premium::resolve(video_id, Some(cookie), &visitor, &player, known, None)
                         .await
                     {
                         Ok(premium::Outcome::Stream(stream)) => {
                             premium.record_premium();
                             log::info!(
-                                "{video_id}: Premium stream resolved in {} ms",
+                                "{video_id}: {} stream resolved in {} ms",
+                                if stream.premium { "Premium" } else { "web" },
                                 started.elapsed().as_millis()
                             );
                             return Ok(stream);
@@ -303,9 +309,11 @@ impl Resolver {
         self.free(&visitor).await
     }
 
-    /// A fresh URL for a stream this resolved, asked for the same way so it
-    /// comes back as the same file. Counts nothing towards the Premium
-    /// path's state, as the song already counted when first resolved.
+    /// A fresh URL for a stream this resolved, asked for so it comes back as
+    /// the same file. A free format the web client gave is asked of the
+    /// plain-URL clients, which serve the same file, so one googlevideo
+    /// refuses still plays. Counts nothing towards the Premium path's state,
+    /// as the song already counted when first resolved.
     async fn refresh(&self, was_premium: bool) -> Result<ResolvedStream, String> {
         let video_id = self.video_id.as_str();
         premium::diag(format!(

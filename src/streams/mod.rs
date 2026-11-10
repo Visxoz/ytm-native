@@ -208,6 +208,38 @@ impl PlayerResponse {
     }
 }
 
+/// Fetches the first bytes of a stream that may play next, so googlevideo
+/// has them to hand: its first answer for a rarely played song can take
+/// over half a second, and later ones under 100 ms.
+pub async fn warm(url: String, headers: Vec<(String, String)>) {
+    if !crate::http::allowed(&url) {
+        return;
+    }
+    if let Err(e) = first_bytes(&url, &headers).await {
+        log::debug!("could not warm the next stream: {e}");
+    }
+}
+
+/// How many of a stream's first 64 KB arrived.
+async fn first_bytes(url: &str, headers: &[(String, String)]) -> Result<usize, String> {
+    let mut request = crate::http::client()
+        .get(url)
+        .header(reqwest::header::RANGE, "bytes=0-65535");
+    for (name, value) in headers {
+        request = request.header(name, value);
+    }
+    let response = request
+        .send()
+        .await
+        .and_then(|r| r.error_for_status())
+        .map_err(|e| e.without_url().to_string())?;
+    let bytes = response
+        .bytes()
+        .await
+        .map_err(|e| e.without_url().to_string())?;
+    Ok(bytes.len())
+}
+
 /// Fetches the player response and picks the best audio stream, from the
 /// first client that gives one. The first client's reason is reported
 /// when none does, as it is the usual one.
@@ -475,19 +507,8 @@ mod tests {
     /// Fetches the first bytes of a stream, as a URL can resolve and still
     /// be refused by the CDN.
     async fn probe(stream: &ResolvedStream) -> Result<(), String> {
-        let mut request = crate::http::client()
-            .get(&stream.url)
-            .header(reqwest::header::RANGE, "bytes=0-1023");
-        for (name, value) in &stream.headers {
-            request = request.header(name, value);
-        }
-        let response = request.send().await.map_err(|e| e.to_string())?;
-        let status = response.status();
-        if !status.is_success() {
-            return Err(format!("the CDN answered {status}"));
-        }
-        let bytes = response.bytes().await.map_err(|e| e.to_string())?;
-        (!bytes.is_empty())
+        let bytes = first_bytes(&stream.url, &stream.headers).await?;
+        (bytes > 0)
             .then_some(())
             .ok_or_else(|| "the CDN sent no bytes".to_owned())
     }

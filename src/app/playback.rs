@@ -209,7 +209,13 @@ impl App {
             let mut state = app.state.borrow_mut();
             state.playback.prefetching.remove(&next.id);
             match result {
-                Ok(stream) => state.playback.store_prefetched(next.id, stream),
+                Ok(stream) => {
+                    app.rt.spawn(crate::streams::warm(
+                        stream.url.clone(),
+                        stream.headers.clone(),
+                    ));
+                    state.playback.store_prefetched(next.id, stream);
+                }
                 Err(e) => log::debug!("prefetch failed: {e}"),
             }
         });
