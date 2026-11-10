@@ -23,6 +23,28 @@ export {
     AccentChoice,
 }
 
+/// Whether a dialog is in the tree: from opening until its closing
+/// animation has played.
+component Linger {
+    in property <bool> open;
+    out property <bool> shown;
+    changed open => {
+        if root.open {
+            root.shown = true;
+        } else {
+            closer.running = true;
+        }
+    }
+    closer := Timer {
+        interval: Theme.normal;
+        running: false;
+        triggered => {
+            self.running = false;
+            root.shown = root.open;
+        }
+    }
+}
+
 export component AppWindow inherits Window {
     title: "YouTube Music";
     icon: @image-url("../app-icon.png");
@@ -58,7 +80,6 @@ export component AppWindow inherits Window {
     in property <float> np-duration;
     in property <float> np-position;
     in property <float> np-buffered;
-    in property <bool> np-playing;
     in property <bool> np-loading;
     in property <bool> np-premium;
     in property <string> np-quality;
@@ -89,7 +110,6 @@ export component AppWindow inherits Window {
     in property <image> account-photo;
     in property <bool> signing-in;
     in property <bool> signing-in-browser;
-    in-out property <string> pasted-cookie;
     in property <string> sign-in-error;
     in-out property <bool> settings-open;
     in-out property <bool> sign-in-open;
@@ -109,7 +129,7 @@ export component AppWindow inherits Window {
     in property <string> lastfm-user;
     in property <bool> lastfm-connecting;
     // The equaliser.
-    in-out property <bool> eq-open;
+    property <bool> eq-open;
     in-out property <bool> equaliser;
     in property <[float]> eq-gains;
     in property <[string]> eq-bands;
@@ -208,38 +228,11 @@ export component AppWindow inherits Window {
         root.sidebar-changed(root.sidebar-collapsed);
     }
 
-    // A dialog stays for its closing animation, then goes.
-    property <bool> settings-shown;
-    changed settings-open => {
-        if root.settings-open {
-            root.settings-shown = true;
-        } else {
-            settings-closer.running = true;
-        }
+    settings-linger := Linger {
+        open: root.settings-open;
     }
-    settings-closer := Timer {
-        interval: Theme.normal;
-        running: false;
-        triggered => {
-            self.running = false;
-            root.settings-shown = root.settings-open;
-        }
-    }
-    property <bool> sign-in-shown;
-    changed sign-in-open => {
-        if root.sign-in-open {
-            root.sign-in-shown = true;
-        } else {
-            sign-in-closer.running = true;
-        }
-    }
-    sign-in-closer := Timer {
-        interval: Theme.normal;
-        running: false;
-        triggered => {
-            self.running = false;
-            root.sign-in-shown = root.sign-in-open;
-        }
+    sign-in-linger := Linger {
+        open: root.sign-in-open;
     }
 
     public function focus-search() {
@@ -409,7 +402,6 @@ export component AppWindow inherits Window {
                 np-duration: root.np-duration;
                 np-position: root.np-position;
                 np-buffered: root.np-buffered;
-                np-playing: root.np-playing;
                 np-loading: root.np-loading;
                 np-premium: root.np-premium;
                 np-quality: root.np-quality;
@@ -463,7 +455,7 @@ export component AppWindow inherits Window {
             }
         }
 
-        if root.settings-shown: SettingsDialog {
+        if settings-linger.shown: SettingsDialog {
             settings-open <=> root.settings-open;
             eq-open <=> root.eq-open;
             sign-in-open <=> root.sign-in-open;
@@ -521,11 +513,10 @@ export component AppWindow inherits Window {
             pick-playlist(index) => { root.pick-playlist(index); }
         }
 
-        if root.sign-in-shown: SignInDialog {
+        if sign-in-linger.shown: SignInDialog {
             signing-in: root.signing-in;
             signing-in-browser: root.signing-in-browser;
             sign-in-error: root.sign-in-error;
-            pasted-cookie <=> root.pasted-cookie;
             sign-in-open <=> root.sign-in-open;
             sign-in(cookie) => { root.sign-in(cookie); }
             sign-in-browser() => { root.sign-in-browser(); }

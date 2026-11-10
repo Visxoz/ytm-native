@@ -206,8 +206,6 @@ export component QueueRow inherits Rectangle {
             remove-button := IconButton {
                 x: parent.width - self.width - 8px;
                 icon: Icons.close;
-                size: 32px;
-                icon-size: 18px;
                 enabled: root.hot && !root.item.current;
                 opacity: self.enabled ? 1 : 0;
                 clicked => { root.remove(); }

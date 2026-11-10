@@ -9,12 +9,14 @@ export component SignInDialog inherits Dialog {
     in property <bool> signing-in;
     in property <bool> signing-in-browser;
     in property <string> sign-in-error;
-    in-out property <string> pasted-cookie;
     in-out property <bool> sign-in-open;
     callback sign-in(cookie: string);
     callback sign-in-browser();
 
     property <bool> pasting;
+    // Kept here, so it goes with the dialog rather than lingering to be
+    // sent again from an empty box after reopening.
+    property <string> pasted-cookie;
     title: "Sign in";
     dialog-width: 600px;
     open: root.sign-in-open;

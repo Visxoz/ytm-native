@@ -77,7 +77,7 @@ export component LibraryRow inherits Rectangle {
     }
     touch := TouchArea {
         mouse-cursor: pointer;
-        clicked => { Api.navigate(root.item.kind, root.item.id, root.item.title); }
+        clicked => { Api.navigate(root.item.kind, root.item.id); }
     }
 }
 

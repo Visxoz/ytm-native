@@ -20,8 +20,8 @@ export component Icon {
 /// A round icon button that shrinks slightly while pressed.
 export component IconButton {
     in property <string> icon;
-    in property <length> size: 36px;
-    in property <length> icon-size: 20px;
+    in property <length> size: 32px;
+    in property <length> icon-size: 18px;
     in property <bool> active;
     in property <bool> enabled: true;
     in property <color> color: Theme.text-secondary;
@@ -146,5 +146,18 @@ export component Pill inherits Rectangle {
     touch := TouchArea {
         mouse-cursor: pointer;
         clicked => { root.clicked(); }
+    }
+}
+
+/// A row of pills, one of them picked.
+export component PillGroup inherits HorizontalLayout {
+    in property <[string]> labels;
+    in property <int> current;
+    callback picked(index: int);
+    spacing: 6px;
+    for label[i] in root.labels: Pill {
+        label: label;
+        active: root.current == i;
+        clicked => { root.picked(i); }
     }
 }

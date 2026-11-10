@@ -14,7 +14,6 @@ export component PlayerBar inherits Rectangle {
     in property <float> np-duration;
     in property <float> np-position;
     in property <float> np-buffered;
-    in property <bool> np-playing;
     in property <bool> np-loading;
     in property <bool> np-premium;
     in property <string> np-quality;
@@ -120,21 +119,16 @@ export component PlayerBar inherits Rectangle {
             }
 
             if Api.signed-in && root.has-track: HorizontalLayout {
+                cross-axis-alignment: center;
                 IconButton {
-                    y: (parent.height - self.height) / 2;
                     icon: Api.playing-rating == 2 ? Icons.thumb-down-filled : Icons.thumb-down;
                     color: Api.playing-rating == 2 ? Theme.text : Theme.text-secondary;
-                    size: 32px;
-                    icon-size: 18px;
                     clicked => { Api.rate(Api.playing-id, 2); }
                 }
 
                 IconButton {
-                    y: (parent.height - self.height) / 2;
                     icon: Api.playing-rating == 1 ? Icons.thumb-up-filled : Icons.thumb-up;
                     color: Api.playing-rating == 1 ? Theme.text : Theme.text-secondary;
-                    size: 32px;
-                    icon-size: 18px;
                     clicked => { Api.rate(Api.playing-id, 1); }
                 }
             }
@@ -149,21 +143,17 @@ export component PlayerBar inherits Rectangle {
         spacing: 4px;
         HorizontalLayout {
             alignment: center;
+            cross-axis-alignment: center;
             spacing: 16px;
             // Off, shuffle, then Smart Shuffle, shown as sparkles.
             IconButton {
-                y: (parent.height - self.height) / 2;
                 icon: root.smart-shuffle ? Icons.sparkle : Icons.shuffle;
-                size: 32px;
-                icon-size: 18px;
                 active: root.shuffle;
                 clicked => { root.toggle-shuffle(); }
             }
 
             IconButton {
-                y: (parent.height - self.height) / 2;
                 icon: Icons.previous;
-                size: 32px;
                 icon-size: 22px;
                 enabled: root.has-track;
                 clicked => { root.previous(); }
@@ -177,7 +167,7 @@ export component PlayerBar inherits Rectangle {
                 }
                 if !root.np-loading: PlayButton {
                     size: 36px;
-                    playing: root.np-playing;
+                    playing: Api.is-playing;
                     color: Theme.text;
                     icon-color: Theme.text-inverse;
                     clicked => { root.toggle-play(); }
@@ -185,19 +175,14 @@ export component PlayerBar inherits Rectangle {
             }
 
             IconButton {
-                y: (parent.height - self.height) / 2;
                 icon: Icons.next;
-                size: 32px;
                 icon-size: 22px;
                 enabled: root.has-track;
                 clicked => { root.next(); }
             }
 
             IconButton {
-                y: (parent.height - self.height) / 2;
                 icon: root.repeat-mode == 2 ? Icons.repeat-one : Icons.repeat;
-                size: 32px;
-                icon-size: 18px;
                 active: root.repeat-mode != 0;
                 clicked => { root.cycle-repeat(); }
             }
@@ -237,9 +222,9 @@ export component PlayerBar inherits Rectangle {
         x: parent.width - self.width - 8px;
         width: self.preferred-width;
         spacing: 4px;
+        cross-axis-alignment: center;
         // Quality badge; Premium streams get a red PREMIUM tag.
         if root.np-quality != "": Rectangle {
-            y: (parent.height - self.height) / 2;
             width: badge.preferred-width;
             height: 20px;
             border-radius: 4px;
@@ -275,33 +260,23 @@ export component PlayerBar inherits Rectangle {
         }
 
         IconButton {
-            y: (parent.height - self.height) / 2;
             icon: Icons.lyrics;
-            size: 32px;
-            icon-size: 18px;
             active: root.panel-open && root.panel-tab == 1;
             clicked => { root.open-panel(1); }
         }
 
         IconButton {
-            y: (parent.height - self.height) / 2;
             icon: Icons.queue;
-            size: 32px;
-            icon-size: 18px;
             active: root.panel-open && root.panel-tab == 0;
             clicked => { root.open-panel(0); }
         }
 
         IconButton {
-            y: (parent.height - self.height) / 2;
             icon: root.muted || root.volume == 0 ? Icons.volume-off : root.volume < 0.5 ? Icons.volume-low : Icons.volume;
-            size: 32px;
-            icon-size: 18px;
             clicked => { root.toggle-mute(); }
         }
 
         Slider {
-            y: (parent.height - self.height) / 2;
             width: 100px;
             value: root.muted ? 0 : root.volume;
             changed(v) => { root.set-volume(v); }

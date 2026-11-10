@@ -36,6 +36,7 @@ export component PageView inherits Rectangle {
 
     content := Rectangle {
         opacity: root.page-loading || root.page-error != "" ? 0 : 1;
+        visible: self.opacity > 0;
         y: root.page-loading ? 16px : 0px;
         animate opacity { duration: 260ms; }
         animate y {

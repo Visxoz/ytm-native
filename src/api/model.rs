@@ -193,7 +193,7 @@ pub enum Route {
     Album(String),
     Playlist(String),
     Artist(String),
-    Genre(String, String),
+    Genre(String),
 }
 
 impl Route {

@@ -14,7 +14,7 @@ export component TopResult inherits Rectangle {
     animate background { duration: Theme.normal; }
     touch := TouchArea {
         mouse-cursor: pointer;
-        clicked => { Api.navigate(root.card.kind, root.card.id, root.card.title); }
+        clicked => { Api.navigate(root.card.kind, root.card.id); }
     }
 
     Art {
@@ -166,20 +166,18 @@ export component PageHeader {
         height: Layout.actions-height;
         spacing: 20px;
         alignment: start;
+        cross-axis-alignment: center;
         if root.data.can-play: PlayButton {
-            y: (parent.height - self.height) / 2;
             size: 56px;
             clicked => { Api.header-action("play"); }
         }
         if root.data.can-shuffle: IconButton {
-            y: (parent.height - self.height) / 2;
             icon: Icons.shuffle;
             size: 48px;
             icon-size: 30px;
             clicked => { Api.header-action("shuffle"); }
         }
         if root.data.can-radio: IconButton {
-            y: (parent.height - self.height) / 2;
             icon: Icons.radio;
             size: 48px;
             icon-size: 28px;

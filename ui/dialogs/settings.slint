@@ -1,6 +1,6 @@
 import { Theme } from "../theme.slint";
 import { AccentChoice, Api } from "../types.slint";
-import { Pill, PillButton } from "../widgets/buttons.slint";
+import { PillButton, PillGroup } from "../widgets/buttons.slint";
 import { Toggle } from "../widgets/toggle.slint";
 import { Dialog, SettingRow, ToggleRow } from "dialog.slint";
 
@@ -85,14 +85,10 @@ export component SettingsDialog inherits Dialog {
     title: "Settings";
     open: root.settings-open;
     close => { root.settings-open = false; }
-    HorizontalLayout {
-        spacing: 6px;
-        alignment: start;
-        for name[i] in ["Playback", "Appearance", "Account", "About"]: Pill {
-            label: name;
-            active: root.tab == i;
-            clicked => { root.tab = i; }
-        }
+    PillGroup {
+        labels: ["Playback", "Appearance", "Account", "About"];
+        current: root.tab;
+        picked(i) => { root.tab = i; }
     }
 
     if root.tab == 0: Tab {
@@ -101,16 +97,11 @@ export component SettingsDialog inherits Dialog {
             detail: root.quality == 0 ? "About 50 kbps, a third of the data of Normal. For a metered connection."
                 : root.quality == 1 ? "About 130 kbps, as YouTube Music plays without Premium."
                 : root.premium-status;
-            VerticalLayout {
-                alignment: center;
-                HorizontalLayout {
-                    spacing: 6px;
-                    for name[i] in ["Low", "Normal", "High"]: Pill {
-                        label: name;
-                        active: root.quality == i;
-                        clicked => { root.set-quality(i); }
-                    }
-                }
+            PillGroup {
+                y: (parent.height - self.height) / 2;
+                labels: ["Low", "Normal", "High"];
+                current: root.quality;
+                picked(i) => { root.set-quality(i); }
             }
         }
 
@@ -153,16 +144,11 @@ export component SettingsDialog inherits Dialog {
     if root.tab == 1: Tab {
         SettingRow {
             label: "Theme";
-            VerticalLayout {
-                alignment: center;
-                HorizontalLayout {
-                    spacing: 6px;
-                    for name[i] in ["Dark", "Light", "Black"]: Pill {
-                        label: name;
-                        active: Theme.look == i;
-                        clicked => { root.set-look(i); }
-                    }
-                }
+            PillGroup {
+                y: (parent.height - self.height) / 2;
+                labels: ["Dark", "Light", "Black"];
+                current: Theme.look;
+                picked(i) => { root.set-look(i); }
             }
         }
 

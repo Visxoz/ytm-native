@@ -195,7 +195,7 @@ impl App {
         );
 
         let api = ui.global::<ApiGlobal>();
-        on!(api.on_navigate, |app, kind, id, title| {
+        on!(api.on_navigate, |app, kind, id| {
             let id = id.to_string();
             if kind == "song" {
                 app.play_song_card(&id);
@@ -205,7 +205,7 @@ impl App {
                 "album" => Route::Album(id),
                 "playlist" => Route::Playlist(id),
                 "artist" => Route::Artist(id),
-                "genre" => Route::Genre(id, title.to_string()),
+                "genre" => Route::Genre(id),
                 _ => return,
             };
             app.navigate(route, true);

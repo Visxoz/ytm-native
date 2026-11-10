@@ -53,7 +53,7 @@ impl Api {
             Route::Album(id) => self.album(id).await,
             Route::Playlist(id) => self.playlist(id).await,
             Route::Artist(id) => self.artist(id).await,
-            Route::Genre(id, _) => self.genre(id).await,
+            Route::Genre(id) => self.genre(id).await,
         }
     }
 

@@ -51,7 +51,7 @@ export component Card {
                     self.dragging = false;
                     root.drag-ended();
                 } else if ev.kind == PointerEventKind.up {
-                    Api.navigate(root.card.kind, root.card.id, root.card.title);
+                    Api.navigate(root.card.kind, root.card.id);
                 }
             }
             moved => {
@@ -141,18 +141,18 @@ export component GenreTile inherits Rectangle {
         width: 64px;
         height: 64px;
         border-radius: 8px;
-        background: #ffffff22;
+        background: Theme.on-colour.with-alpha(0.133);
         transform-rotation: 25deg;
     }
 
     Rectangle {
-        background: touch.has-hover ? #ffffff14 : transparent;
+        background: touch.has-hover ? Theme.on-colour.with-alpha(0.08) : transparent;
         animate background { duration: Theme.fast; }
     }
 
     touch := TouchArea {
         mouse-cursor: pointer;
-        clicked => { Api.navigate(root.card.kind, root.card.id, root.card.title); }
+        clicked => { Api.navigate(root.card.kind, root.card.id); }
     }
 }
 

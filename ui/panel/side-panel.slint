@@ -1,6 +1,6 @@
 import { Icons, Theme } from "../theme.slint";
 import { Api, QueueItem } from "../types.slint";
-import { Icon, IconButton, Pill } from "../widgets/buttons.slint";
+import { Icon, IconButton, PillGroup } from "../widgets/buttons.slint";
 import { ListView } from "../widgets/list.slint";
 import { Spinner } from "../widgets/spinner.slint";
 import { Lyrics } from "lyrics.slint";
@@ -56,23 +56,14 @@ export component SidePanel inherits Rectangle {
                 padding-left: 16px;
                 padding-right: 12px;
                 spacing: 8px;
-                Pill {
-                    y: (parent.height - self.height) / 2;
-                    label: "Up next";
-                    active: root.panel-tab == 0;
-                    clicked => {
-                        root.panel-tab = 0;
-                        root.panel-tab-changed(0);
-                    }
-                }
-
-                Pill {
-                    y: (parent.height - self.height) / 2;
-                    label: "Lyrics";
-                    active: root.panel-tab == 1;
-                    clicked => {
-                        root.panel-tab = 1;
-                        root.panel-tab-changed(1);
+                cross-axis-alignment: center;
+                PillGroup {
+                    spacing: 8px;
+                    labels: ["Up next", "Lyrics"];
+                    current: root.panel-tab;
+                    picked(tab) => {
+                        root.panel-tab = tab;
+                        root.panel-tab-changed(tab);
                     }
                 }
 
@@ -81,10 +72,7 @@ export component SidePanel inherits Rectangle {
                 }
 
                 IconButton {
-                    y: (parent.height - self.height) / 2;
                     icon: Icons.close;
-                    size: 32px;
-                    icon-size: 18px;
                     clicked => { root.panel-open = false; }
                 }
             }

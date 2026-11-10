@@ -77,7 +77,7 @@ export struct PlaylistChoice {
 
 /// Calls from anywhere in the UI into Rust, and state many components read.
 export global Api {
-    callback navigate(kind: string, id: string, title: string);
+    callback navigate(kind: string, id: string);
     callback play-track(section: int, index: int);
     callback track-action(action: string, section: int, index: int);
     callback play-card(kind: string, id: string);
@@ -90,8 +90,8 @@ export global Api {
     in property <bool> signed-in;
     /// How the account rated the playing song: 0 none, 1 like, 2 dislike.
     in property <int> playing-rating;
-    in-out property <string> playing-id;
-    in-out property <bool> is-playing;
+    in property <string> playing-id;
+    in property <bool> is-playing;
     /// Advanced a few times a second while playing; drives the equalisers
     /// without repainting every frame.
     in property <int> eq-phase;

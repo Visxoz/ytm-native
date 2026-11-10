@@ -371,9 +371,7 @@ impl App {
 
     /// Updates the play button and the equalisers on playing rows.
     fn show_playing(&self, playing: bool) {
-        let ui = self.ui();
-        ui.set_np_playing(playing);
-        ui.global::<ApiGlobal>().set_is_playing(playing);
+        self.ui().global::<ApiGlobal>().set_is_playing(playing);
     }
 
     fn toast(self: &Rc<Self>, message: impl Into<String>) {

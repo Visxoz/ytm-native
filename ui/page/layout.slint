@@ -13,9 +13,10 @@ export global Layout {
     out property <length> actions-height: 96px;
     out property <length> top-height: 236px;
 
-    // Card height for a given card width.
+    // Card height for a given card width: the artwork is the width less the
+    // padding either side, and the padding above and below gives that back.
     public pure function card-height(width: length) -> length {
-        return width - 2 * self.card-padding + self.card-text + 2 * self.card-padding;
+        return width + self.card-text;
     }
 
     // How many cards a grid `width` wide fits in a row, and how wide each is
