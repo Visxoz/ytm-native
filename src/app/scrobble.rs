@@ -45,9 +45,14 @@ pub(super) struct Scrobbler {
 
 impl Scrobbler {
     pub(super) fn load() -> Self {
+        let session = lastfm::load_session();
+        let mut pending = lastfm::Pending::load();
+        if let Some(session) = &session {
+            pending.for_account(&session.name);
+        }
         Self {
-            session: lastfm::load_session(),
-            pending: lastfm::Pending::load(),
+            session,
+            pending,
             ..Default::default()
         }
     }
@@ -262,7 +267,12 @@ impl App {
                     Ok(session) => {
                         lastfm::save_session(&session);
                         app.toast(format!("Scrobbling to Last.fm as {}", session.name));
-                        app.state.borrow_mut().scrobbler.session = Some(session);
+                        {
+                            let scrobbler = &mut app.state.borrow_mut().scrobbler;
+                            scrobbler.pending.for_account(&session.name);
+                            scrobbler.pending.save();
+                            scrobbler.session = Some(session);
+                        }
                         app.ui().set_lastfm_connecting(false);
                         app.show_lastfm();
                         app.send_scrobbles();

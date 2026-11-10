@@ -233,6 +233,10 @@ fn pending_path() -> PathBuf {
 #[derive(Default, Serialize, Deserialize)]
 pub struct Pending {
     plays: VecDeque<Play>,
+    /// The account the plays were heard under, so they never go to another
+    /// that connects after its access was revoked.
+    #[serde(default)]
+    account: Option<String>,
     #[serde(skip)]
     changed: bool,
 }
@@ -258,6 +262,18 @@ impl Pending {
     pub fn clear(&mut self) {
         self.changed |= !self.plays.is_empty();
         self.plays.clear();
+    }
+
+    /// Holds the plays for `account`, dropping any heard under another.
+    pub fn for_account(&mut self, account: &str) {
+        if self.account.as_deref() == Some(account) {
+            return;
+        }
+        if self.account.is_some() {
+            self.clear();
+        }
+        self.account = Some(account.to_owned());
+        self.changed = true;
     }
 
     /// The oldest plays, as many as go in one request, or just the oldest.
@@ -343,5 +359,15 @@ mod tests {
         );
         // The pushed-out play was one of the batch, so one fewer goes.
         assert_eq!(pending.plays.len(), PENDING_LIMIT - BATCH + 1);
+
+        pending.for_account("a");
+        assert!(
+            !pending.is_empty(),
+            "untagged plays from before go to the account"
+        );
+        pending.for_account("a");
+        assert!(!pending.is_empty(), "the same account keeps its plays");
+        pending.for_account("b");
+        assert!(pending.is_empty(), "another account gets none of them");
     }
 }
