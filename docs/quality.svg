@@ -1,0 +1,38 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="640" height="400" viewBox="0 0 640 400">
+  <title>Audio quality: Low about 50 kbps, Normal about 130 kbps, High 256 kbps with Premium, otherwise the same as Normal.</title>
+  <style>
+    text { font-family: 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, Inter, 'Helvetica Neue', Arial, sans-serif; }
+    .h1 { font-size: 28px; font-weight: 700; fill: #f4f4f5; }
+    .sub { font-size: 16px; fill: #a1a1aa; }
+    .name { font-size: 18px; font-weight: 700; fill: #f4f4f5; }
+    .note { font-size: 14px; fill: #8b8b94; }
+    .val { font-size: 18px; font-weight: 700; fill: #f4f4f5; }
+    .bar { fill: #6b6b76; }
+    .hi { fill: #ff0033; }
+    .track { fill: #ffffff; fill-opacity: 0.05; }
+  </style>
+  <rect width="640" height="400" rx="28" fill="#0c0c0f"/>
+  <rect x="0.5" y="0.5" width="639" height="399" rx="27.5" fill="none" stroke="#ffffff" stroke-opacity="0.08"/>
+
+  <text class="h1" x="40" y="62">Pick your quality</text>
+  <text class="sub" x="40" y="90">Settings ▸ Playback ▸ Audio quality, in kbps</text>
+
+  <g transform="translate(40 136)">
+    <text class="name" x="0" y="0">Low</text><text class="val" x="560" y="0" text-anchor="end">~50</text>
+    <text class="note" x="0" y="22">under half the data, for metered connections</text>
+    <rect class="track" x="0" y="34" width="560" height="16" rx="4"/>
+    <rect class="bar" x="0" y="34" width="109" height="16" rx="4"/>
+  </g>
+  <g transform="translate(40 226)">
+    <text class="name" x="0" y="0">Normal</text><text class="val" x="560" y="0" text-anchor="end">~130</text>
+    <text class="note" x="0" y="22">as YouTube Music plays without Premium</text>
+    <rect class="track" x="0" y="34" width="560" height="16" rx="4"/>
+    <rect class="bar" x="0" y="34" width="284" height="16" rx="4"/>
+  </g>
+  <g transform="translate(40 316)">
+    <text class="name" x="0" y="0">High</text><text class="val" x="560" y="0" text-anchor="end">256</text>
+    <text class="note" x="0" y="22">with Premium; without it, the same as Normal</text>
+    <rect class="track" x="0" y="34" width="560" height="16" rx="4"/>
+    <rect class="hi" x="0" y="34" width="560" height="16" rx="4"/>
+  </g>
+</svg>

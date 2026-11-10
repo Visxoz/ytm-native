@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="190" viewBox="0 0 1280 190">
+  <title>24 MB, one exe. 0.1% CPU while a song plays. 0 MB of GPU memory when minimised. 256 kbps Opus with Premium.</title>
+  <style>
+    text { font-family: 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, Inter, 'Helvetica Neue', Arial, sans-serif; }
+    .tile { fill: #121216; stroke: #ffffff; stroke-opacity: 0.08; }
+    .big { font-size: 54px; font-weight: 700; fill: #f4f4f5; letter-spacing: -1px; }
+    .unit { font-size: 24px; font-weight: 600; fill: #a1a1aa; }
+    .cap { font-size: 17px; fill: #a1a1aa; }
+    .tick { fill: #ff0033; }
+  </style>
+  <g>
+    <rect class="tile" x="0.5" y="0.5" width="305" height="189" rx="22"/>
+    <rect class="tick" x="32" y="36" width="28" height="5" rx="2.5"/>
+    <text x="32" y="112"><tspan class="big">24</tspan><tspan class="unit" dx="8">MB</tspan></text>
+    <text class="cap" x="32" y="148">one exe, nothing else to install</text>
+  </g>
+  <g transform="translate(324 0)">
+    <rect class="tile" x="0.5" y="0.5" width="305" height="189" rx="22"/>
+    <rect class="tick" x="32" y="36" width="28" height="5" rx="2.5"/>
+    <text x="32" y="112"><tspan class="big">0.1</tspan><tspan class="unit" dx="6">% CPU</tspan></text>
+    <text class="cap" x="32" y="148">while a song plays</text>
+  </g>
+  <g transform="translate(648 0)">
+    <rect class="tile" x="0.5" y="0.5" width="305" height="189" rx="22"/>
+    <rect class="tick" x="32" y="36" width="28" height="5" rx="2.5"/>
+    <text x="32" y="112"><tspan class="big">0</tspan><tspan class="unit" dx="8">MB GPU</tspan></text>
+    <text class="cap" x="32" y="148">once it's minimised</text>
+  </g>
+  <g transform="translate(972 0)">
+    <rect class="tile" x="0.5" y="0.5" width="307" height="189" rx="22"/>
+    <rect class="tick" x="32" y="36" width="28" height="5" rx="2.5"/>
+    <text x="32" y="112"><tspan class="big">256</tspan><tspan class="unit" dx="8">kbps</tspan></text>
+    <text class="cap" x="32" y="148">Opus, with YouTube Premium</text>
+  </g>
+</svg>

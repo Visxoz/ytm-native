@@ -1,0 +1,23 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="360" height="76" viewBox="0 0 360 76">
+  <title>Download for Windows</title>
+  <style>
+    text { font-family: 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, Inter, 'Helvetica Neue', Arial, sans-serif; }
+  </style>
+  <rect x="0.5" y="0.5" width="359" height="75" rx="18" fill="#121216" stroke="#ffffff" stroke-opacity="0.12"/>
+
+  <!-- Windows logo, in the accent -->
+  <g fill="#ff0033" transform="translate(26 24)">
+    <rect x="0" y="0" width="13" height="13" rx="1.5"/>
+    <rect x="15" y="0" width="13" height="13" rx="1.5"/>
+    <rect x="0" y="15" width="13" height="13" rx="1.5"/>
+    <rect x="15" y="15" width="13" height="13" rx="1.5"/>
+  </g>
+
+  <text x="72" y="36" font-size="20" font-weight="700" fill="#f4f4f5">Download for Windows</text>
+  <text x="72" y="57" font-size="14" fill="#a1a1aa">Windows 10 and 11 · 64-bit · free</text>
+
+  <!-- Download arrow -->
+  <g fill="none" stroke="#a1a1aa" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" transform="translate(318 26)">
+    <path d="M8 0 V16 M2 10 L8 16 L14 10 M1 22 H15"/>
+  </g>
+</svg>
