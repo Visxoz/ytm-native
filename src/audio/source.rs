@@ -75,7 +75,12 @@ impl Download {
 
     /// Stops the download and fails any blocked read.
     pub fn cancel(&self) {
-        self.state.lock().unwrap().cancelled = true;
+        let mut state = self.state.lock().unwrap();
+        state.cancelled = true;
+        // Nothing reads a cancelled download, though a slot or a thread
+        // waiting on the network may hold it a while yet.
+        state.data = Vec::new();
+        drop(state);
         self.changed.notify_all();
     }
 
@@ -180,6 +185,11 @@ impl Download {
             .send()
             .and_then(|r| r.error_for_status())
             .map_err(reqwest::Error::without_url)?;
+        // Anything but a partial answer starts at the file's first byte,
+        // which must not follow the bytes already held.
+        if offset > 0 && response.status() != reqwest::StatusCode::PARTIAL_CONTENT {
+            return Err("the answer does not follow the bytes held".into());
+        }
         if total == 0 {
             let length = response.content_length().unwrap_or(0);
             let mut state = self.state.lock().unwrap();
@@ -267,10 +277,9 @@ impl Read for StreamReader {
         let mut state = self.download.state.lock().unwrap();
         loop {
             if state.cancelled {
-                return Err(io::Error::new(
-                    io::ErrorKind::Interrupted,
-                    "download cancelled",
-                ));
+                // Not `Interrupted`, which Symphonia's exact reads retry
+                // for ever, hanging the engine on a skip.
+                return Err(io::Error::other("download cancelled"));
             }
             let available = state.data.len() as u64;
             if self.pos < available {
@@ -295,17 +304,12 @@ impl Seek for StreamReader {
     fn seek(&mut self, from: SeekFrom) -> io::Result<u64> {
         let total = self.download.state.lock().unwrap().total;
         let target = match from {
-            SeekFrom::Start(n) => n as i64,
-            SeekFrom::Current(n) => self.pos as i64 + n,
-            SeekFrom::End(n) => total as i64 + n,
+            SeekFrom::Start(n) => Some(n),
+            SeekFrom::Current(n) => self.pos.checked_add_signed(n),
+            SeekFrom::End(n) => total.checked_add_signed(n),
         };
-        if target < 0 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "seek before start",
-            ));
-        }
-        self.pos = target as u64;
+        self.pos = target
+            .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "seek out of range"))?;
         Ok(self.pos)
     }
 }
@@ -392,6 +396,31 @@ mod tests {
         assert!(!is_refused(&answer(503)));
         let other: Box<dyn std::error::Error> = "the server sent no bytes".into();
         assert!(!is_refused(&*other), "not an HTTP error");
+    }
+
+    #[test]
+    fn a_cancelled_read_fails_for_good() {
+        let download = Arc::new(Download::default());
+        download.state.lock().unwrap().data = vec![1; 8];
+        download.cancel();
+        let kind = download.reader().read(&mut [0; 4]).unwrap_err().kind();
+        assert_ne!(kind, io::ErrorKind::Interrupted, "Symphonia would retry");
+        assert_ne!(kind, io::ErrorKind::UnexpectedEof, "not the stream's end");
+        assert_eq!(download.state.lock().unwrap().data.capacity(), 0);
+    }
+
+    #[test]
+    fn seeks_within_range_only() {
+        let mut reader = Arc::new(Download::default()).reader();
+        assert_eq!(reader.seek(SeekFrom::Current(1)).unwrap(), 1);
+        assert!(reader.seek(SeekFrom::Current(-2)).is_err(), "before start");
+        assert!(reader.seek(SeekFrom::End(-1)).is_err(), "no length yet");
+        assert_eq!(reader.seek(SeekFrom::Current(i64::MAX)).unwrap(), 1 << 63);
+        assert!(reader.seek(SeekFrom::Current(i64::MAX)).is_ok());
+        assert!(
+            reader.seek(SeekFrom::Current(i64::MAX)).is_err(),
+            "overflow"
+        );
     }
 
     #[test]
