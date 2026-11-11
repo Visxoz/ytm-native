@@ -9,7 +9,7 @@ use std::{
 use slint::SharedString;
 
 use super::{
-    App,
+    App, State,
     resolve::{PREMIUM_NO, PREMIUM_YES, premium_dry_run},
 };
 use crate::{
@@ -83,21 +83,40 @@ impl App {
         // A Premium stream that will not play gets one retry on the free one.
         let retry_free = {
             let mut state = self.state.borrow_mut();
-            let id = state.queue.current().map(|t| t.id.clone());
-            if state.playback.current_premium && state.playback.force_free != id {
-                state.playback.current_premium = false;
-                state.playback.force_free.clone_from(&id);
-                state.playback.prefetched.clear();
-                id
-            } else {
-                None
+            let State {
+                queue, playback, ..
+            } = &mut *state;
+            match queue.current().map(|t| t.id.clone()) {
+                Some(id)
+                    if playback.current_premium && playback.force_free.as_ref() != Some(&id) =>
+                {
+                    playback.current_premium = false;
+                    playback.force_free = Some(id.clone());
+                    playback.prefetched.clear();
+                    // Failing mid-song, it carries on from where the sound
+                    // got to, before `start_current` stops the player; at
+                    // the very end, as when the next track fails to open,
+                    // there is nothing left to carry on, so it starts over.
+                    let position = self.player.position();
+                    let carry_on = playback.started
+                        && (playback.duration <= 0.0 || position < playback.duration - 1.0);
+                    if carry_on {
+                        playback.resume = Some((id.clone(), position));
+                    }
+                    Some((id, carry_on))
+                }
+                _ => None,
             }
         };
-        if let Some(id) = retry_free {
+        if let Some((id, carry_on)) = retry_free {
             premium::diag(format!(
                 "{id}: Premium stream failed to play ({error}); retrying the free stream"
             ));
             self.start_current();
+            if carry_on {
+                let playback = &mut self.state.borrow_mut().playback;
+                playback.play_recorded = Some(playback.generation);
+            }
             return;
         }
         let failures = {
@@ -118,14 +137,18 @@ impl App {
     pub(super) fn on_player_event(self: &Rc<Self>, kind: &str, message: &str) {
         match kind {
             "started" => {
-                let (waited, premium_stream) = {
+                let (waited, premium_stream, recorded) = {
                     let mut state = self.state.borrow_mut();
-                    state.playback.started = true;
-                    state.playback.failures = 0;
-                    let waited = state.playback.requested_at.take().map(|t| t.elapsed());
-                    (waited, state.playback.current_premium)
+                    let playback = &mut state.playback;
+                    playback.started = true;
+                    playback.failures = 0;
+                    let waited = playback.requested_at.take().map(|t| t.elapsed());
+                    let recorded = playback.play_recorded.take() == Some(playback.generation);
+                    (waited, playback.current_premium, recorded)
                 };
-                self.record_play();
+                if !recorded {
+                    self.record_play();
+                }
                 if let Some(waited) = waited {
                     let line = format!(
                         "first sound after {} ms ({}, {})",

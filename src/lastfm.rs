@@ -107,7 +107,7 @@ async fn call<T: DeserializeOwned>(method: &str, mut params: Params) -> Result<T
     sign(&mut params, secret);
     // Unsigned, as Last.fm leaves it out of the signature.
     params.push(("format".into(), "json".into()));
-    let text = crate::http::client()
+    let response = crate::http::client()
         .post(API_URL)
         .header(
             reqwest::header::USER_AGENT,
@@ -117,22 +117,31 @@ async fn call<T: DeserializeOwned>(method: &str, mut params: Params) -> Result<T
         .timeout(TIMEOUT)
         .send()
         .await
-        .map_err(failed)?
-        .text()
-        .await
         .map_err(failed)?;
-    // Errors come as `{"error": code, "message": ...}`, whatever the status.
+    let status = response.status();
+    let text = response.text().await.map_err(failed)?;
+    // Errors come as `{"error": code, "message": ...}`, usually on a 4xx
+    // status but not always, so the body is read before the status.
     if let Ok(failure) = serde_json::from_str::<Failure>(&text) {
         let message = format!("Last.fm error {}: {}", failure.error, failure.message);
         return Err(match failure.error {
-            // Authentication failed, invalid parameters, expired token.
-            4 | 6 | 15 => Error::Rejected(message),
+            // An invalid or expired token: connecting has to start again.
+            4 | 15 if method.starts_with("auth.") => Error::Rejected(message),
+            // Invalid parameters.
+            6 => Error::Rejected(message),
             // Invalid session key.
             9 => Error::SignedOut,
             // Unauthorised token.
             14 => Error::NotYetAllowed,
+            // Anything else, 4 on a scrobble among them, is about the account
+            // or Last.fm rather than the play, so the plays wait for later.
             _ => Error::Failed(message),
         });
+    }
+    // Something other than Last.fm answering, as a gateway's JSON error,
+    // which would otherwise pass for a scrobble taken.
+    if !status.is_success() {
+        return Err(failed(format!("Last.fm answered {status}")));
     }
     serde_json::from_str(&text).map_err(failed)
 }
@@ -191,9 +200,36 @@ pub async fn scrobble(session: &Session, plays: &[Play]) -> Result<(), Error> {
         push_play(&mut params, play, &suffix);
         params.push((format!("timestamp{suffix}"), play.timestamp.to_string()));
     }
-    call::<serde::de::IgnoredAny>("track.scrobble", params)
-        .await
-        .map(drop)
+    let reply: serde_json::Value = call("track.scrobble", params).await?;
+    // Ignored plays will never be taken, so they go like the others, but
+    // are logged so missing scrobbles can be explained.
+    for reason in ignored(&reply) {
+        log::warn!("Last.fm ignored a play: {reason}");
+    }
+    Ok(())
+}
+
+/// Why Last.fm ignored each play in a `track.scrobble` reply it ignored:
+/// an artist or track it filters, a timestamp too old or new, the daily
+/// limit. One play comes back as an object and more as a list, with the
+/// codes as strings.
+fn ignored(reply: &serde_json::Value) -> Vec<String> {
+    let plays = &reply["scrobbles"]["scrobble"];
+    let plays = plays
+        .as_array()
+        .map_or(std::slice::from_ref(plays), Vec::as_slice);
+    plays
+        .iter()
+        .filter_map(|play| {
+            let message = &play["ignoredMessage"];
+            let code = match &message["code"] {
+                serde_json::Value::String(code) => code.parse().ok(),
+                code => code.as_u64(),
+            }?;
+            let text = message["#text"].as_str().unwrap_or_default();
+            (code != 0).then(|| format!("code {code}: {text}"))
+        })
+        .collect()
 }
 
 /// Whether a play heard for `heard` of a track `length` long counts: the
@@ -318,6 +354,23 @@ mod tests {
             )),
             "md5 of api_keykeymethodauth.getSessiontokentok\u{e9}secret"
         );
+    }
+
+    #[test]
+    fn reads_why_plays_were_ignored() {
+        let one: serde_json::Value = serde_json::from_str(
+            r##"{"scrobbles":{"scrobble":{"ignoredMessage":{"code":"5","#text":"Daily scrobble limit exceeded"}},"@attr":{"accepted":0,"ignored":1}}}"##,
+        )
+        .unwrap();
+        assert_eq!(ignored(&one), ["code 5: Daily scrobble limit exceeded"]);
+
+        let many: serde_json::Value = serde_json::from_str(
+            r##"{"scrobbles":{"scrobble":[{"ignoredMessage":{"code":"0","#text":""}},{"ignoredMessage":{"code":"3","#text":"Timestamp too old"}}]}}"##,
+        )
+        .unwrap();
+        assert_eq!(ignored(&many), ["code 3: Timestamp too old"]);
+
+        assert!(ignored(&serde_json::json!({})).is_empty(), "an odd reply");
     }
 
     #[test]

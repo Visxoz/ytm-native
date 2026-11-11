@@ -12,9 +12,10 @@ use super::{App, TICK};
 use crate::lastfm::{self, Error, Play};
 
 /// How often to ask whether the user has allowed access in the browser,
-/// and for how long before giving up.
+/// and for how long before giving up. The token lasts an hour, and someone
+/// who first has to sign up or reset a password can take a while.
 const POLL_EVERY: Duration = Duration::from_secs(3);
-const POLL_FOR: Duration = Duration::from_secs(5 * 60);
+const POLL_FOR: Duration = Duration::from_secs(20 * 60);
 /// How long to wait before sending again after Last.fm could not take the
 /// plays, or refused one.
 const RETRY_AFTER: Duration = Duration::from_secs(60);
@@ -23,9 +24,21 @@ const RETRY_AFTER: Duration = Duration::from_secs(60);
 struct Listening {
     play: Play,
     heard: Duration,
-    /// The position at the last tick, so only time played through counts,
-    /// not stalls or seeks.
-    position: Option<f64>,
+    /// The position at the last tick, and when that was, so only time
+    /// played through counts, not stalls or seeks.
+    last_tick: Option<(f64, Instant)>,
+}
+
+/// What a tick adds to the time heard, the position having `moved` in the
+/// `elapsed` since the last: forward by no more than that time allows, so a
+/// seek adds nothing, while a tick held up by the UI thread (a title-bar
+/// menu, say) loses nothing, as the sound plays on its own thread.
+fn played_through(moved: f64, elapsed: Duration) -> Duration {
+    if moved > 0.0 && moved <= (elapsed + TICK).as_secs_f64() {
+        Duration::from_secs_f64(moved)
+    } else {
+        Duration::ZERO
+    }
 }
 
 #[derive(Default)]
@@ -104,7 +117,7 @@ impl App {
             state.scrobbler.playing = Some(Listening {
                 play: play.clone(),
                 heard: Duration::ZERO,
-                position: None,
+                last_tick: None,
             });
             (session, play, state.scrobbler.generation)
         };
@@ -124,10 +137,9 @@ impl App {
             let Some(listening) = scrobbler.playing.as_mut() else {
                 return;
             };
-            // Forward by about a tick: a seek, or a stall, adds nothing.
-            let moved = position - listening.position.replace(position).unwrap_or(position);
-            if moved > 0.0 && moved < 2.0 * TICK.as_secs_f64() {
-                listening.heard += Duration::from_secs_f64(moved);
+            let now = Instant::now();
+            if let Some((last, at)) = listening.last_tick.replace((position, now)) {
+                listening.heard += played_through(position - last, now - at);
             }
             if !lastfm::counts(listening.heard, length) {
                 return;
@@ -322,5 +334,24 @@ impl App {
         lastfm::remove_session();
         self.ui().set_lastfm_connecting(false);
         self.show_lastfm();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn counts_only_time_played_through() {
+        let ms = Duration::from_millis;
+        assert_eq!(played_through(0.25, ms(250)), ms(250), "a tick");
+        assert_eq!(
+            played_through(5.0, ms(5000)),
+            ms(5000),
+            "a tick held up by the UI thread"
+        );
+        assert_eq!(played_through(30.0, ms(250)), Duration::ZERO, "a seek");
+        assert_eq!(played_through(-30.0, ms(250)), Duration::ZERO, "back");
+        assert_eq!(played_through(0.0, ms(250)), Duration::ZERO, "paused");
     }
 }

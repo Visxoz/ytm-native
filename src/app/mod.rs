@@ -80,6 +80,9 @@ struct Playback {
     force_free: Option<String>,
     /// Track and position restored from the last run, used on its first play.
     resume: Option<(String, f64)>,
+    /// The generation whose play is already recorded: a free-stream retry
+    /// carrying on a song, so its start is not a second play.
+    play_recorded: Option<u64>,
     /// The next track, queued in the player to follow without a gap.
     queued: Option<(String, ResolvedStream)>,
     /// The track last tried for queueing, so a failure is not retried
