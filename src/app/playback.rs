@@ -9,7 +9,7 @@ use std::{
 use slint::SharedString;
 
 use super::{
-    App, State,
+    App, SongVersion, State,
     resolve::{PREMIUM_NO, PREMIUM_YES, premium_dry_run},
 };
 use crate::{
@@ -38,7 +38,18 @@ impl App {
             playback.started = false;
             playback.duration = track.seconds();
             playback.requested_at = Some(Instant::now());
-            playback.forget_queued();
+            // A skip to the track queued in the player plays its stream,
+            // unless that is a Premium one being retried on the free path.
+            if playback
+                .queued
+                .as_ref()
+                .is_some_and(|(id, ..)| *id == track.id)
+                && playback.force_free.as_ref() != Some(&track.id)
+            {
+                playback.unqueue();
+            } else {
+                playback.forget_queued();
+            }
             playback.generation
         };
         self.player.stop();
@@ -54,8 +65,8 @@ impl App {
         ui.set_np_quality(SharedString::new());
         ui.set_np_premium(false);
 
-        let prefetched = self.take_prefetched(&track.id);
-        let resolve = self.resolve_future(track.id.clone(), prefetched);
+        let prefetched = self.state.borrow_mut().playback.take_prefetched(&track.id);
+        let resolve = self.resolve_future(track.id.clone(), prefetched.map(|(stream, _)| stream));
         self.spawn(resolve, move |app, result| {
             if app.state.borrow().playback.generation != generation {
                 return;
@@ -65,11 +76,6 @@ impl App {
                 Err(e) => app.playback_failed(&track.title, &e),
             }
         });
-    }
-
-    /// A stream resolved ahead of time for `id`, if still fresh.
-    pub(super) fn take_prefetched(&self, id: &str) -> Option<ResolvedStream> {
-        self.state.borrow_mut().playback.take_prefetched(id)
     }
 
     fn load_stream(self: &Rc<Self>, id: &str, stream: ResolvedStream) {
@@ -168,7 +174,8 @@ impl App {
                 self.prefetch_next();
             }
             "advanced" => self.advance_gapless(),
-            "next-dropped" => self.state.borrow_mut().playback.forget_queued(),
+            "next-dropped" => self.state.borrow_mut().playback.unqueue(),
+            "next-failed" => self.state.borrow_mut().playback.queued_failed = true,
             "ended" => self.next(false),
             "error" => {
                 let title = self
@@ -201,21 +208,29 @@ impl App {
         if let Some(video) = video {
             self.swap_in_song_version(&video);
         }
-        // The player bar shows this artwork the moment the track starts, and
-        // the queue panel only loads it while open.
+        // At the player bar's size, which `present` shows the moment the
+        // track starts; the queue panel loads its own while open.
         let art = self
             .state
             .borrow()
             .queue
             .peek_next()
             .and_then(|t| t.thumb.clone());
-        self.load_image(art, images::ROW, |_, _| {});
+        self.load_image(art, images::PLAYER, |_, _| {});
         let next = {
             let state = self.state.borrow();
             let Some(next) = state.queue.peek_next().cloned() else {
                 return;
             };
-            if state.playback.has_prefetched(&next.id)
+            // A video whose song version is known has that resolving in its
+            // place, unless it is playing, as on repeat, and stays. One still
+            // being looked up resolves too, for a quick skip.
+            let replaced = matches!(
+                state.song_versions.get(&next.id),
+                Some(SongVersion::Known(Some(_)))
+            ) && state.queue.current().is_none_or(|t| t.id != next.id);
+            if replaced
+                || state.playback.has_prefetched(&next.id)
                 || state.playback.prefetching.contains(&next.id)
             {
                 return;
@@ -233,10 +248,7 @@ impl App {
             state.playback.prefetching.remove(&next.id);
             match result {
                 Ok(stream) => {
-                    app.rt.spawn(crate::streams::warm(
-                        stream.url.clone(),
-                        stream.headers.clone(),
-                    ));
+                    app.warm_stream(&stream);
                     state.playback.store_prefetched(next.id, stream);
                 }
                 Err(e) => log::debug!("prefetch failed: {e}"),
@@ -244,9 +256,17 @@ impl App {
         });
     }
 
+    /// Fetches a prefetched stream's first bytes on Tokio's blocking pool,
+    /// as the download's blocking client must never run on its workers.
+    pub(super) fn warm_stream(&self, stream: &ResolvedStream) {
+        let (url, headers) = (stream.url.clone(), stream.headers.clone());
+        self.rt
+            .spawn_blocking(move || crate::streams::warm(&url, &headers));
+    }
+
     /// Queues a radio when the last track starts, so playback carries on.
     pub(super) fn extend_with_radio_if_ending(self: &Rc<Self>) {
-        let seed = {
+        let (seed, revision, generation) = {
             let state = self.state.borrow();
             if !state.settings.autoplay
                 || state.queue.repeat != Repeat::Off
@@ -258,15 +278,27 @@ impl App {
             let Some(current) = state.queue.current() else {
                 return;
             };
-            current.id.clone()
+            (
+                current.id.clone(),
+                state.queue.revision(),
+                state.playback.generation,
+            )
         };
         self.state.borrow_mut().playback.extending = true;
         let api = self.api.clone();
         self.spawn(
             async move { api.track_radio(&seed).await },
-            |app, result| {
+            move |app, result| {
                 app.state.borrow_mut().playback.extending = false;
+                // Both changing means another queue was started, which the
+                // radio is not for; should that one end, `next` asks again.
+                // One alone is an edit, or a skip, in the same queue.
+                let replaced = {
+                    let state = app.state.borrow();
+                    state.queue.revision() != revision && state.playback.generation != generation
+                };
                 match result {
+                    Ok(_) if replaced => {}
                     Ok(tracks) => app.append_unique(tracks),
                     Err(e) => log::warn!("autoplay radio failed: {e}"),
                 }
@@ -282,18 +314,33 @@ impl App {
         }
         if self.state.borrow().settings.autoplay && !self.state.borrow().queue.is_empty() {
             // The radio may still be loading; queue it and move on.
-            let seed = self.state.borrow().queue.current().map(|t| t.id.clone());
+            let (seed, generation) = {
+                let state = self.state.borrow();
+                (
+                    state.queue.current().map(|t| t.id.clone()),
+                    state.playback.generation,
+                )
+            };
             if let Some(seed) = seed {
                 let api = self.api.clone();
                 self.spawn(
                     async move { api.track_radio(&seed).await },
-                    |app, result| {
-                        if let Ok(tracks) = result {
-                            app.append_unique(tracks);
-                            if app.state.borrow_mut().queue.advance(true).is_some() {
-                                app.start_current();
-                                return;
-                            }
+                    move |app, result| {
+                        // Something else started playing meanwhile, such as
+                        // another queue, and plays on as it is. Not the
+                        // queue's revision: the radio queued as the last
+                        // track started may have just extended it.
+                        if app.state.borrow().playback.generation != generation {
+                            return;
+                        }
+                        // Failed, it may still move on to what that radio added.
+                        match result {
+                            Ok(tracks) => app.append_unique(tracks),
+                            Err(e) => log::warn!("autoplay radio failed: {e}"),
+                        }
+                        if app.state.borrow_mut().queue.advance(true).is_some() {
+                            app.start_current();
+                            return;
                         }
                         app.stop();
                     },
@@ -444,13 +491,18 @@ impl App {
                 }
                 .into(),
             );
-            // Remembered across restarts, and forgotten once a subscription
-            // has lapsed.
-            let known = status == PREMIUM_YES;
-            if (known || status == PREMIUM_NO)
-                && known != self.state.borrow().settings.premium_account
-            {
-                self.update_settings(|s| s.premium_account = known);
+            // Remembered across restarts either way, so neither answer is
+            // asked for again on the first songs.
+            let (known, none) = (status == PREMIUM_YES, status == PREMIUM_NO);
+            let saved = {
+                let settings = &self.state.borrow().settings;
+                (settings.premium_account, settings.no_premium)
+            };
+            if (known || none) && saved != (known, none) {
+                self.update_settings(|s| {
+                    s.premium_account = known;
+                    s.no_premium = none;
+                });
             }
         }
         if !ui.get_has_track() {

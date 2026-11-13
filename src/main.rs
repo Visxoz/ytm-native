@@ -166,6 +166,14 @@ fn main() {
             return;
         }
     };
+    // Every YouTube request waits for a visitor ID; fetching one now does it
+    // while the window is made, and the first page's requests share it.
+    let warm = api.clone();
+    runtime.spawn(async move {
+        if let Err(e) = warm.visitor_data(false).await {
+            log::debug!("could not fetch a visitor ID ahead: {e}");
+        }
+    });
 
     let settings = settings::Settings::load();
     // winit puts the system's theme back on the title bar at every

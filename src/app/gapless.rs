@@ -1,7 +1,7 @@
 //! Queues the next track in the player to follow the current one without a
 //! gap or fading into it, and moves the app on once it is heard.
 
-use std::rc::Rc;
+use std::{rc::Rc, time::Instant};
 
 use super::App;
 use crate::{api::Track, audio::SILENCE_TRIM_SECS};
@@ -52,7 +52,7 @@ impl App {
             let stale = playback
                 .queued
                 .as_ref()
-                .is_some_and(|(id, _)| next != Some(id.as_str()));
+                .is_some_and(|(id, ..)| next != Some(id.as_str()));
             let near_end = playback.started
                 && playback.duration > 0.0
                 && playback.duration - position <= lead
@@ -63,15 +63,20 @@ impl App {
             (stale, due, playback.generation)
         };
         if stale {
-            self.state.borrow_mut().playback.queued = None;
+            self.state.borrow_mut().playback.unqueue();
             self.player.clear_next();
         }
         let Some((next_id, crossfade)) = due else {
             return;
         };
-        self.state.borrow_mut().playback.queue_tried = Some(next_id.clone());
-        let prefetched = self.take_prefetched(&next_id);
-        let resolve = self.resolve_future(next_id.clone(), prefetched);
+        let prefetched = {
+            let playback = &mut self.state.borrow_mut().playback;
+            playback.queue_tried = Some(next_id.clone());
+            playback.take_prefetched(&next_id)
+        };
+        // Kept with the stream, so one put back stays only as fresh as it was.
+        let resolved_at = prefetched.as_ref().map_or_else(Instant::now, |(_, at)| *at);
+        let resolve = self.resolve_future(next_id.clone(), prefetched.map(|(stream, _)| stream));
         self.spawn(resolve, move |app, result| {
             let still_next = {
                 let state = app.state.borrow();
@@ -82,7 +87,9 @@ impl App {
                 Ok(stream) if still_next => {
                     app.player
                         .queue_next(app.stream_spec(&next_id, stream.clone(), 0.0), crossfade);
-                    app.state.borrow_mut().playback.queued = Some((next_id, stream));
+                    let playback = &mut app.state.borrow_mut().playback;
+                    playback.queued = Some((next_id, stream, resolved_at));
+                    playback.queued_failed = false;
                 }
                 Ok(_) => {}
                 Err(e) => log::debug!("could not queue the next track: {e}"),
@@ -93,7 +100,7 @@ impl App {
     /// The queued track became audible: move the queue on and show it,
     /// without loading anything.
     pub(super) fn advance_gapless(self: &Rc<Self>) {
-        let Some((id, stream)) = self.state.borrow_mut().playback.queued.take() else {
+        let Some((id, stream, _)) = self.state.borrow_mut().playback.queued.take() else {
             return;
         };
         let current = self.state.borrow_mut().queue.advance(false).cloned();

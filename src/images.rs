@@ -10,7 +10,7 @@ use std::{
 use slint::{Color, Image, Rgba8Pixel, SharedPixelBuffer};
 use tokio::{
     runtime::Handle,
-    sync::{Semaphore, oneshot},
+    sync::{OwnedSemaphorePermit, Semaphore, oneshot},
 };
 
 // Logical sizes artwork is drawn at.
@@ -109,8 +109,15 @@ fn physical(edge: u32) -> u32 {
 }
 
 /// Fetches `url` and scales it to `edge` logical pixels. Call on the UI thread.
-/// Requests for an image already on its way wait for that one.
-pub async fn load(rt: &Handle, url: &str, edge: u32) -> Option<Image> {
+/// Requests for an image already on its way wait for that one. Once its
+/// turn in the download queue comes, an image no longer `wanted` that no one
+/// else waits for is skipped, as a page's art is once the page is left.
+pub async fn load(
+    rt: &Handle,
+    url: &str,
+    edge: u32,
+    wanted: impl FnOnce() -> bool,
+) -> Option<Image> {
     let key = key(url, edge);
     if let Some(image) = cached_key(&key) {
         return Some(image);
@@ -134,20 +141,33 @@ pub async fn load(rt: &Handle, url: &str, edge: u32) -> Option<Image> {
     }
 
     // Only artwork with something drawn behind it needs a colour picked.
+    // That is one image at a time, shown large, so it skips the queue
+    // rather than wait behind a page of thumbnails.
     let with_accent = matches!(edge, PLAYER | HEADER | BANNER);
-    let image = fetch(rt, url.to_owned(), edge, with_accent)
-        .await
-        .map(|(buffer, accent)| {
-            let image = Image::from_rgba8(buffer);
-            CACHE.with(|c| {
-                let mut cache = c.borrow_mut();
-                if let Some(accent) = accent {
-                    cache.accents.insert(key.clone(), accent);
-                }
-                cache.insert(key.clone(), image.clone());
-            });
-            image
+    // Taken here rather than in the fetch, so what is left once its turn
+    // comes is known before anything is downloaded.
+    let permit = if with_accent {
+        None
+    } else {
+        Arc::clone(permits()).acquire_owned().await.ok()
+    };
+    let alone = PENDING.with(|p| p.borrow().get(&key).is_some_and(Vec::is_empty));
+    let fetched = if alone && !wanted() {
+        None
+    } else {
+        fetch(rt, url.to_owned(), edge, with_accent, permit).await
+    };
+    let image = fetched.map(|(buffer, accent)| {
+        let image = Image::from_rgba8(buffer);
+        CACHE.with(|c| {
+            let mut cache = c.borrow_mut();
+            if let Some(accent) = accent {
+                cache.accents.insert(key.clone(), accent);
+            }
+            cache.insert(key.clone(), image.clone());
         });
+        image
+    });
     let waiters = PENDING.with(|p| p.borrow_mut().remove(&key));
     for tx in waiters.into_iter().flatten() {
         let _ = tx.send(image.clone());
@@ -161,6 +181,7 @@ async fn fetch(
     url: String,
     edge: u32,
     with_accent: bool,
+    permit: Option<OwnedSemaphorePermit>,
 ) -> Option<(SharedPixelBuffer<Rgba8Pixel>, Option<Color>)> {
     if !crate::http::allowed(&url) {
         log::debug!("skipped artwork from a host YouTube does not use");
@@ -176,7 +197,7 @@ async fn fetch(
         crate::api::resize_thumb(&url, pixels)
     };
     rt.spawn(async move {
-        let _permit = permits().acquire().await.ok()?;
+        let _permit = permit;
         let bytes = crate::http::client()
             .get(&url)
             .timeout(Duration::from_secs(20))

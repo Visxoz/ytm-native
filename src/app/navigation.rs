@@ -10,7 +10,7 @@ use slint::{ModelRc, SharedString, TimerMode, VecModel};
 use super::{App, HistoryEntry, s};
 use crate::{
     AppWindow,
-    api::{self, Page, Route},
+    api::{self, Api, Page, Route},
     settings,
 };
 
@@ -18,6 +18,15 @@ use crate::{
 const PAGE_CACHE_FOR: Duration = Duration::from_secs(5 * 60);
 const PAGE_CACHE_SIZE: usize = 12;
 const SUGGEST_DELAY: Duration = Duration::from_millis(150);
+/// The wait after the signed-in feed's first try failed, before the retries.
+const HOME_RETRY_AFTER: Duration = Duration::from_millis(300);
+
+/// The signed-in feed, with its retries, after a pause: refusals come in
+/// bursts, so asking again at once would likely be refused too.
+async fn retry_home(api: Api) -> api::Result<Page> {
+    tokio::time::sleep(HOME_RETRY_AFTER).await;
+    api.page(&Route::Home, true).await
+}
 
 impl App {
     pub(super) fn navigate(self: &Rc<Self>, route: Route, push: bool) {
@@ -176,31 +185,26 @@ impl App {
 
     /// With nothing saved to show, waits out the retries, then the charts.
     fn retry_personal_home(self: &Rc<Self>, generation: u64) {
-        let api = self.api.clone();
-        self.spawn(
-            async move { api.page(&Route::Home, true).await },
-            move |app, result| {
-                if app.state.borrow().page_generation != generation {
-                    return;
+        self.spawn(retry_home(self.api.clone()), move |app, result| {
+            if app.state.borrow().page_generation != generation {
+                return;
+            }
+            match result {
+                Ok(page) => app.show_personal_home(page),
+                Err(e) => {
+                    log::warn!("could not load the personal home feed: {e}");
+                    app.show_public_home(generation);
                 }
-                match result {
-                    Ok(page) => app.show_personal_home(page),
-                    Err(e) => {
-                        log::warn!("could not load the personal home feed: {e}");
-                        app.show_public_home(generation);
-                    }
-                }
-            },
-        );
+            }
+        });
     }
 
     /// Fetches the feed behind the saved one, for the next visit. Kept
     /// whole by the next `show_page`, which also completes and saves it.
     fn refresh_personal_home(self: &Rc<Self>) {
-        let api = self.api.clone();
         let account = self.state.borrow().account;
         self.spawn(
-            async move { api.page(&Route::Home, true).await },
+            retry_home(self.api.clone()),
             move |app, result| match result {
                 Ok(page) if app.state.borrow().account == account => {
                     if page.more.is_none() {

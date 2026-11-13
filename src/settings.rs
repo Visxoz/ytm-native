@@ -278,6 +278,9 @@ pub struct Settings {
     /// The signed-in account has been served Premium formats, so songs
     /// without them, such as music videos, never mark it as not Premium.
     pub premium_account: bool,
+    /// The signed-in account was taken as without Premium, so songs start
+    /// on the free stream at once while a background check confirms it.
+    pub no_premium: bool,
     /// Fade each track into the next, rather than playing them gaplessly.
     pub crossfade: bool,
     /// Look for a newer version on GitHub now and then.
@@ -307,6 +310,7 @@ impl Default for Settings {
             quality: Quality::High,
             premium_audio: true,
             premium_account: false,
+            no_premium: false,
             crossfade: false,
             check_updates: true,
             equaliser: false,

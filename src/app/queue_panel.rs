@@ -235,9 +235,9 @@ impl App {
             let stale = playback
                 .queued
                 .as_ref()
-                .is_some_and(|(id, _)| Some(id.as_str()) != next);
+                .is_some_and(|(id, ..)| Some(id.as_str()) != next);
             if stale {
-                playback.forget_queued();
+                playback.unqueue();
             }
             (queue.revision(), queue.current_index(), stale)
         };

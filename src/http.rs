@@ -143,10 +143,13 @@ pub fn client() -> &'static reqwest::Client {
 
 /// For the audio download thread. Audio is fetched in byte ranges, whose
 /// lengths must be the bytes on the wire, so it asks for no compression.
+/// Idle connections are kept as long as the async client's, so one the
+/// next stream's warm-up opened is still there when it plays.
 pub fn blocking_client() -> &'static reqwest::blocking::Client {
     static CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
         reqwest::blocking::Client::builder()
+            .pool_idle_timeout(POOL_IDLE)
             .timeout(Duration::from_secs(30))
             .no_gzip()
             .no_brotli()

@@ -19,6 +19,12 @@ use crate::{
 
 type CardArt = (Rc<VecModel<CardItem>>, Vec<Option<String>>, u32);
 
+/// Whether the page shown is still the one loaded as `generation`, so art
+/// for a page left behind is neither downloaded nor put in its rows.
+fn on_page(generation: u64) -> impl Fn(&Rc<App>) -> bool + Copy {
+    move |app| app.state.borrow().page_generation == generation
+}
+
 /// Rows built from sections, with the artwork they still need.
 struct Built {
     /// Model index of the first row, so artwork finds its row once shown.
@@ -207,7 +213,7 @@ impl App {
         for (model, urls, edge) in card_art {
             for (i, url) in urls.into_iter().enumerate() {
                 let model = Rc::clone(&model);
-                self.load_image(url, edge, move |_, image| {
+                self.load_image_while(url, edge, on_page(generation), move |_, image| {
                     if let Some(mut card) = model.row_data(i) {
                         card.art = image;
                         model.set_row_data(i, card);
@@ -218,8 +224,9 @@ impl App {
     }
 
     fn load_row_art(self: &Rc<Self>, row_index: usize, url: Option<String>, generation: u64) {
-        self.load_image(url, images::ROW, move |app, image| {
-            if app.state.borrow().page_generation != generation {
+        let on_page = on_page(generation);
+        self.load_image_while(url, images::ROW, on_page, move |app, image| {
+            if !on_page(app) {
                 return;
             }
             if let Some(mut row) = app.rows.row_data(row_index) {

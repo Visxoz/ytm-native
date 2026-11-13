@@ -133,7 +133,7 @@ impl App {
         on!(on_set_crossfade, |app, value| {
             app.update_settings(|s| s.crossfade = value);
             // A track queued with the old setting is queued again.
-            app.state.borrow_mut().playback.forget_queued();
+            app.state.borrow_mut().playback.unqueue();
             app.player.clear_next();
         });
         on!(on_set_equaliser, |app, on| app

@@ -55,12 +55,20 @@ pub(super) struct PremiumShared {
 }
 
 impl PremiumShared {
-    /// `known` says the account has been served Premium formats before.
-    pub(super) fn new(cookie: Option<String>, known: bool) -> Self {
+    /// `known` says the account has been served Premium formats before, and
+    /// `none` that it was last taken as without Premium. A remembered "no"
+    /// is checked in the background on the first song, as `recheck_at`
+    /// starts unset.
+    pub(super) fn new(cookie: Option<String>, known: bool, none: bool) -> Self {
+        let status = match (known, none) {
+            (true, _) => PREMIUM_YES,
+            (false, true) => PREMIUM_NO,
+            (false, false) => PREMIUM_UNKNOWN,
+        };
         Self {
             player: tokio::sync::Mutex::new(None),
             cookie: RwLock::new(cookie),
-            status: AtomicU8::new(if known { PREMIUM_YES } else { PREMIUM_UNKNOWN }),
+            status: AtomicU8::new(status),
             misses: AtomicU8::new(0),
             errors: AtomicU8::new(0),
             load_failed: Mutex::new(None),
@@ -477,7 +485,7 @@ mod tests {
 
     #[test]
     fn only_a_long_run_of_misses_turns_off_a_known_premium_account() {
-        let shared = PremiumShared::new(Some("SID=a".into()), true);
+        let shared = PremiumShared::new(Some("SID=a".into()), true, false);
         for _ in 1..LAPSED_AFTER {
             shared.record_miss();
         }
@@ -500,7 +508,7 @@ mod tests {
 
     #[test]
     fn checks_again_in_the_background_after_taking_an_account_as_without_premium() {
-        let shared = PremiumShared::new(Some("SID=a".into()), false);
+        let shared = PremiumShared::new(Some("SID=a".into()), false, false);
         shared.record_miss();
         shared.record_miss();
         assert!(!shared.skipped(), "two songs say nothing yet");
@@ -524,12 +532,23 @@ mod tests {
 
     #[test]
     fn a_new_sign_in_starts_unknown() {
-        let shared = PremiumShared::new(Some("SID=a".into()), false);
+        let shared = PremiumShared::new(Some("SID=a".into()), false, false);
         for _ in 0..3 {
             shared.record_miss();
         }
         shared.set_cookie(Some("SID=b".into()));
         assert_eq!(shared.status(), PREMIUM_UNKNOWN);
         assert!(!shared.skipped());
+    }
+
+    #[test]
+    fn a_remembered_no_plays_free_and_is_checked_at_once() {
+        let shared = PremiumShared::new(Some("SID=a".into()), false, true);
+        assert!(shared.skipped(), "no Premium request before the first song");
+        assert!(
+            shared.take_recheck(),
+            "checked in the background straight away"
+        );
+        assert!(!shared.take_recheck());
     }
 }

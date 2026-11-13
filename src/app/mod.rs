@@ -83,8 +83,13 @@ struct Playback {
     /// The generation whose play is already recorded: a free-stream retry
     /// carrying on a song, so its start is not a second play.
     play_recorded: Option<u64>,
-    /// The next track, queued in the player to follow without a gap.
-    queued: Option<(String, ResolvedStream)>,
+    /// The next track, queued in the player to follow without a gap, and
+    /// when its stream was resolved.
+    queued: Option<(String, ResolvedStream, Instant)>,
+    /// The player could not open the queued stream, so `unqueue` drops it.
+    /// Only a flag, as the event may be late for a track queued since,
+    /// which then just resolves again.
+    queued_failed: bool,
     /// The track last tried for queueing, so a failure is not retried
     /// every tick; it then loads as usual when the current one ends.
     queue_tried: Option<String>,
@@ -95,7 +100,21 @@ impl Playback {
     /// afresh. The player's own copy is dropped with `Player::clear_next`.
     fn forget_queued(&mut self) {
         self.queued = None;
+        self.queued_failed = false;
         self.queue_tried = None;
+    }
+
+    /// Forgets the track queued in the player as `forget_queued` does, but
+    /// keeps its stream as prefetched, with the time it was resolved, so
+    /// queueing or playing it again asks for nothing. Not for a quality
+    /// change or a Premium retry, which must drop it.
+    fn unqueue(&mut self) {
+        if let Some((id, stream, at)) = self.queued.take()
+            && !self.queued_failed
+        {
+            self.prefetched.insert(id, (stream, at));
+        }
+        self.forget_queued();
     }
 
     /// Whether a stream for `id` was resolved ahead and is still fresh.
@@ -106,11 +125,10 @@ impl Playback {
     }
 
     /// Takes the stream resolved ahead for `id`, if still fresh.
-    fn take_prefetched(&mut self, id: &str) -> Option<ResolvedStream> {
+    fn take_prefetched(&mut self, id: &str) -> Option<(ResolvedStream, Instant)> {
         self.prefetched
             .remove(id)
             .filter(|(_, at)| at.elapsed() < playback::PREFETCH_FRESH)
-            .map(|(stream, _)| stream)
     }
 
     /// Keeps a stream resolved ahead for `id`, dropping stale ones, such as
@@ -227,6 +245,7 @@ impl App {
                 PlayerEvent::Started => ("started", String::new()),
                 PlayerEvent::Advanced => ("advanced", String::new()),
                 PlayerEvent::NextDropped => ("next-dropped", String::new()),
+                PlayerEvent::NextFailed => ("next-failed", String::new()),
                 PlayerEvent::Ended => ("ended", String::new()),
                 PlayerEvent::Error(e) => ("error", e),
             };
@@ -238,7 +257,11 @@ impl App {
         player.set_normalise(settings.normalise);
         player.set_equaliser(settings.equaliser());
 
-        let premium = PremiumShared::new(settings::load_cookie(), settings.premium_account);
+        let premium = PremiumShared::new(
+            settings::load_cookie(),
+            settings.premium_account,
+            settings.no_premium,
+        );
         let presence = PresenceHandle::spawn().expect("presence thread spawns");
         let mut queue = Queue::new();
         queue.repeat = Repeat::from_index(settings.repeat);
@@ -358,6 +381,18 @@ impl App {
         edge: u32,
         apply: impl FnOnce(&Rc<Self>, Image) + 'static,
     ) {
+        self.load_image_while(url, edge, |_| true, apply);
+    }
+
+    /// `load_image` for an image skipped if, once its turn to download
+    /// comes, it is no longer `wanted`.
+    fn load_image_while(
+        self: &Rc<Self>,
+        url: Option<String>,
+        edge: u32,
+        wanted: impl FnOnce(&Rc<Self>) -> bool + 'static,
+        apply: impl FnOnce(&Rc<Self>, Image) + 'static,
+    ) {
         let Some(url) = url else { return };
         if let Some(image) = images::cached(&url, edge) {
             apply(self, image);
@@ -366,7 +401,7 @@ impl App {
         let app = Rc::clone(self);
         let rt = self.rt.clone();
         let _ = slint::spawn_local(async move {
-            if let Some(image) = images::load(&rt, &url, edge).await {
+            if let Some(image) = images::load(&rt, &url, edge, || wanted(&app)).await {
                 apply(&app, image);
             }
         });

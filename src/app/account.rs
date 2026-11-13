@@ -42,7 +42,10 @@ impl App {
                         app.load_account_photo(true);
                         settings::save_cookie(&header);
                         app.premium.set_cookie(Some(header));
-                        app.update_settings(|s| s.premium_account = false);
+                        app.update_settings(|s| {
+                            s.premium_account = false;
+                            s.no_premium = false;
+                        });
                         app.warm_premium();
                         ui.global::<ApiGlobal>().set_signed_in(true);
                         ui.set_sign_in_open(false);
@@ -252,7 +255,10 @@ impl App {
             app.show_signed_out();
             settings::remove_cookie();
             app.premium.set_cookie(None);
-            app.update_settings(|s| s.premium_account = false);
+            app.update_settings(|s| {
+                s.premium_account = false;
+                s.no_premium = false;
+            });
             app.ui().set_settings_open(false);
             app.toast("Signed out");
             app.show_fresh(Route::Home);

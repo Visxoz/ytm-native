@@ -71,6 +71,9 @@ pub enum PlayerEvent {
     Advanced,
     /// The queued track was dropped, as a seek kept the current one going.
     NextDropped,
+    /// The queued track's stream failed to open, so it is not worth
+    /// reusing; the track loads afresh once the current one ends.
+    NextFailed,
     /// The track played to the end, with nothing queued.
     Ended,
     Error(String),

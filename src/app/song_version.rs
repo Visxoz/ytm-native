@@ -86,20 +86,24 @@ impl App {
         }
         let resolve = self.resolve_future(song.id.clone(), None);
         self.spawn(resolve, move |app, result| {
-            {
-                let mut state = app.state.borrow_mut();
-                let playback = &mut state.playback;
-                playback.prefetching.remove(&song.id);
-                match result {
-                    Ok(stream) => playback.store_prefetched(song.id.clone(), stream),
-                    Err(e) => {
-                        log::debug!("{}: the song version did not resolve: {e}", song.id);
-                        return;
-                    }
+            app.state.borrow_mut().playback.prefetching.remove(&song.id);
+            let stream = match result {
+                Ok(stream) => stream,
+                // Tried again at the next track start, not from here; until
+                // then the video resolves as it is queued or starts.
+                Err(e) => {
+                    log::debug!("{}: the song version did not resolve: {e}", song.id);
+                    return;
                 }
-            }
-            if !app.put_song_version(&video_id, &song) {
-                app.state.borrow_mut().playback.prefetched.remove(&song.id);
+            };
+            // Kept only once the song is in the queue, which the video may
+            // have left, or started playing, meanwhile.
+            if app.put_song_version(&video_id, &song) {
+                app.warm_stream(&stream);
+                app.state
+                    .borrow_mut()
+                    .playback
+                    .store_prefetched(song.id.clone(), stream);
             }
         });
     }

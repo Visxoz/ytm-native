@@ -344,21 +344,22 @@ impl Engine {
         if next.ready.is_some() {
             return;
         }
-        match next.opened.try_recv() {
+        let error = match next.opened.try_recv() {
             Ok(Ok(opened)) => {
                 if !same_format(&opened.decoder, &self.shared.output.lock().unwrap()) {
                     next.hold = 0;
                 }
                 next.ready = Some(opened);
+                return;
             }
-            // The track then loads as usual once the current one ends.
-            Ok(Err(e)) => {
-                log::debug!("the next track did not open: {e}");
-                self.next = None;
-            }
-            Err(mpsc::TryRecvError::Empty) => {}
-            Err(mpsc::TryRecvError::Disconnected) => self.next = None,
-        }
+            Ok(Err(e)) => e,
+            Err(mpsc::TryRecvError::Empty) => return,
+            Err(mpsc::TryRecvError::Disconnected) => "its opener stopped".to_owned(),
+        };
+        // The track then loads as usual once the current one ends.
+        log::debug!("the next track did not open: {error}");
+        self.next = None;
+        (self.on_event)(PlayerEvent::NextFailed);
     }
 
     /// Moves decoding on to the queued track once the current one is fully
