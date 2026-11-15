@@ -121,6 +121,14 @@ pub enum Section {
     },
 }
 
+impl Section {
+    pub fn title(&self) -> &str {
+        match self {
+            Self::Tracks { title, .. } | Self::Cards { title, .. } => title,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct Header {
     /// "Album", "Playlist", "Artist"…, shown above the title.
@@ -162,23 +170,13 @@ pub enum More {
     /// The rest of a long playlist's tracks.
     Tracks(MoreTracks),
     /// The home feed's further shelves.
-    Shelves(MoreShelves),
+    Shelves(super::home_feed::Feed),
 }
 
 #[derive(Debug, Clone)]
 pub struct MoreTracks {
     pub(super) tracks: Paginator<TrackItem>,
     pub(super) count: Option<u64>,
-}
-
-#[derive(Debug, Clone)]
-pub struct MoreShelves {
-    /// Continuation token of the next page.
-    pub(super) token: String,
-    /// Pages still to fetch.
-    pub(super) pages_left: usize,
-    /// Sections shown after the last shelf, such as the genre chips.
-    pub(super) trailing: Vec<Section>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

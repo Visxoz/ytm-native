@@ -10,14 +10,29 @@ use serde_json::value::RawValue;
 
 use super::{
     ArtistRef, Card, CardKind, CardLayout, QueueMode, Section, Track,
-    convert::{CARD_THUMB, ROW_THUMB, card_section, fit_thumb, track_section},
+    convert::{CARD_THUMB, ROW_THUMB, card_section, fit_thumb, resize_thumb, track_section},
 };
 
 /// Longest list shelf shown, such as Quick picks.
 const LIST_LIMIT: usize = 10;
-/// Pages fetched: the first and this many continuations, as YouTube Music
-/// loads while scrolling.
-pub const CONTINUATIONS: usize = 2;
+/// Continuations fetched at most after the first page; the whole feed is
+/// five or six pages.
+const CONTINUATIONS: usize = 8;
+/// The shelves Home shows, in this order: those made from the account's own
+/// listening. The rest, such as charts, community playlists, new releases
+/// and recaps, are left out. Titles are in English, rustypipe's language.
+const SHELVES: [&str; 6] = [
+    "Listen again",
+    "Quick picks",
+    "Forgotten favorites",
+    "Trending songs for you",
+    "Mixed for you",
+    "Fresh finds, old favorites",
+];
+const LISTEN_AGAIN: &str = SHELVES[0];
+/// Songs played lately that lead Listen again, which YouTube fills with
+/// older favourites and seldom the latest plays.
+const RECENT: usize = 10;
 
 // Every struct defaults its missing fields, as YouTube leaves out what a
 // renderer does not have. Shelves and their items are kept as raw text and
@@ -469,7 +484,7 @@ impl SectionList {
 type Shelves = Result<(Vec<Section>, Option<String>), String>;
 
 /// Shelves from the first page and the token for the next one.
-pub fn first_page(json: &str) -> Shelves {
+fn first_page(json: &str) -> Shelves {
     let response: Response = serde_json::from_str(json).map_err(|e| e.to_string())?;
     let list = response
         .contents
@@ -483,14 +498,14 @@ pub fn first_page(json: &str) -> Shelves {
 }
 
 /// Shelves from a continuation page and the token for the next one.
-pub fn next_page(json: &str) -> Shelves {
+fn next_page(json: &str) -> Shelves {
     let response: Response = serde_json::from_str(json).map_err(|e| e.to_string())?;
     let list = response.continuation_contents.section_list_continuation;
     Ok((list.shelves(), list.continuation()))
 }
 
 /// Requests made for one page of the feed before giving up.
-pub const ATTEMPTS: u32 = 4;
+const ATTEMPTS: u32 = 4;
 
 /// YouTube refuses a share of requests for the signed-in feed, in bursts,
 /// with "400: Request contains an invalid argument", and answers the same
@@ -520,18 +535,142 @@ async fn browse(
     }
 }
 
-/// The feed's first page, with the token of the next, in up to `attempts`
-/// requests. `q` must send the sign-in cookie: the feed is personal.
-pub async fn first(q: &RustyPipeQuery, attempts: u32) -> Shelves {
-    let body = serde_json::json!({ "browseId": "FEmusic_home" });
-    let json = browse(q, &body, attempts).await?;
-    first_page(&json)
+/// The feed still to show. YouTube orders the shelves differently on every
+/// load, so those read are held back until every shelf ranked above them in
+/// `SHELVES` has arrived: Home fills from the top down, always in one order,
+/// and never moves what is already on screen.
+#[derive(Debug, Clone)]
+pub struct Feed {
+    held: Vec<Section>,
+    /// The next page's, until the last page or `CONTINUATIONS` are read.
+    token: Option<String>,
+    pages_left: usize,
+    /// The place in `SHELVES` of the next shelf to show.
+    next: usize,
 }
 
-/// The page `token` continues with, and the token of the one after.
-pub async fn next(q: &RustyPipeQuery, token: &str) -> Shelves {
-    let json = browse(q, &serde_json::json!({ "continuation": token }), ATTEMPTS).await?;
-    next_page(&json)
+impl Feed {
+    /// The first page. `q` must send the sign-in cookie: the feed is personal.
+    pub async fn first(q: &RustyPipeQuery) -> Result<Self, String> {
+        let body = serde_json::json!({ "browseId": "FEmusic_home" });
+        let (held, token) = first_page(&browse(q, &body, ATTEMPTS).await?)?;
+        Ok(Self {
+            held,
+            token,
+            pages_left: CONTINUATIONS,
+            next: 0,
+        })
+    }
+
+    pub fn done(&self) -> bool {
+        self.token.is_none()
+    }
+
+    /// Reads the next page. Should it fail, the feed ends with what was read.
+    pub async fn next(&mut self, q: &RustyPipeQuery) -> Result<(), String> {
+        let Some(token) = self.token.take() else {
+            return Ok(());
+        };
+        let body = serde_json::json!({ "continuation": token });
+        let (more, token) = next_page(&browse(q, &body, ATTEMPTS).await?)?;
+        self.held.extend(more);
+        self.pages_left -= 1;
+        self.token = token.filter(|_| self.pages_left > 0);
+        Ok(())
+    }
+
+    /// The shelves to show next: those in `SHELVES` whose betters are all
+    /// in, in its order and once each, and once the feed has ended, all that
+    /// is left of them. Should none of them come, as when YouTube renames
+    /// them, the feed is kept whole rather than left empty. Songs from a list
+    /// shelf such as Quick picks play with a radio after them, as YouTube
+    /// Music does, rather than the shelf's ten on their own.
+    pub fn release(&mut self) -> Vec<Section> {
+        let done = self.done();
+        let wanted = |s: &Section| SHELVES.contains(&s.title());
+        let mut out = if done && self.next == 0 && !self.held.iter().any(wanted) {
+            std::mem::take(&mut self.held)
+        } else {
+            let mut out = Vec::new();
+            while let Some(name) = SHELVES.get(self.next) {
+                match self.held.iter().position(|s| s.title() == *name) {
+                    Some(i) => out.push(self.held.remove(i)),
+                    None if !done => break,
+                    None => {}
+                }
+                self.next += 1;
+            }
+            out
+        };
+        // Once one has shown the feed is not kept whole, so only the shelves
+        // still to come are worth holding, and with all of them shown, no
+        // further page.
+        if self.next > 0 {
+            let rest = &SHELVES[self.next..];
+            self.held.retain(|s| rest.contains(&s.title()));
+            if rest.is_empty() {
+                self.token = None;
+            }
+        }
+        for section in &mut out {
+            if let Section::Tracks { mode, .. } = section {
+                *mode = QueueMode::Radio;
+            }
+        }
+        out
+    }
+}
+
+/// A whole feed, such as the saved one, as `Feed::release` shows it.
+pub fn arrange(sections: Vec<Section>) -> Vec<Section> {
+    let mut feed = Feed {
+        held: sections,
+        token: None,
+        pages_left: 0,
+        next: 0,
+    };
+    feed.release()
+}
+
+/// Puts the latest of `recent`, songs played newest first, at the start of
+/// Listen again, keeping its length, or makes the shelf of them when the
+/// feed has none.
+pub fn recent_first<'a>(sections: &mut Vec<Section>, recent: impl Iterator<Item = &'a Track>) {
+    let fresh: Vec<Card> = recent
+        .take(RECENT)
+        .map(|track| Card {
+            kind: CardKind::Song,
+            id: track.id.clone(),
+            title: track.title.clone(),
+            subtitle: track.artist_names(),
+            thumb: track
+                .thumb
+                .as_deref()
+                .map(|url| resize_thumb(url, CARD_THUMB)),
+            color: None,
+            track: Some(track.clone()),
+        })
+        .collect();
+    if fresh.is_empty() {
+        return;
+    }
+    match sections.iter_mut().find(|s| s.title() == LISTEN_AGAIN) {
+        Some(Section::Cards { cards, .. }) => {
+            let len = cards.len().max(fresh.len());
+            cards.retain(|c| !fresh.iter().any(|f| f.id == c.id));
+            cards.splice(0..0, fresh);
+            cards.truncate(len);
+        }
+        Some(Section::Tracks { .. }) => {}
+        None => sections.insert(
+            0,
+            Section::Cards {
+                title: LISTEN_AGAIN.to_owned(),
+                cards: fresh,
+                layout: CardLayout::Carousel,
+            },
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -605,6 +744,173 @@ mod tests {
         assert!(first_page("{}").is_err());
         assert!(next_page("{}").unwrap().0.is_empty());
         assert!(first_page("not json").is_err());
+    }
+
+    fn track(id: &str) -> Track {
+        Track {
+            id: id.to_owned(),
+            title: id.to_owned(),
+            ..Track::default()
+        }
+    }
+
+    fn shelf(title: &str, ids: &[&str]) -> Section {
+        Section::Cards {
+            title: title.to_owned(),
+            cards: ids
+                .iter()
+                .map(|id| Card {
+                    kind: CardKind::Song,
+                    id: (*id).to_owned(),
+                    title: (*id).to_owned(),
+                    subtitle: String::new(),
+                    thumb: None,
+                    color: None,
+                    track: Some(track(id)),
+                })
+                .collect(),
+            layout: CardLayout::Carousel,
+        }
+    }
+
+    fn ids(section: &Section) -> Vec<&str> {
+        match section {
+            Section::Cards { cards, .. } => cards.iter().map(|c| c.id.as_str()).collect(),
+            Section::Tracks { tracks, .. } => tracks.iter().map(|t| t.id.as_str()).collect(),
+        }
+    }
+
+    fn titles(sections: &[Section]) -> Vec<&str> {
+        sections.iter().map(Section::title).collect()
+    }
+
+    fn feed(held: Vec<Section>) -> Feed {
+        Feed {
+            held,
+            token: Some("next".to_owned()),
+            pages_left: 3,
+            next: 0,
+        }
+    }
+
+    #[test]
+    fn releases_shelves_from_the_top_down() {
+        let mut feed = feed(vec![
+            shelf("Forgotten favorites", &["f"]),
+            shelf("Recaps", &["r"]),
+            shelf("Listen again", &["a"]),
+        ]);
+        let mut shown = feed.release();
+        assert_eq!(
+            titles(&shown),
+            ["Listen again"],
+            "Forgotten favorites waits for Quick picks"
+        );
+        assert_eq!(
+            titles(&feed.held),
+            ["Forgotten favorites"],
+            "a shelf Home will not show is let go once one has shown"
+        );
+
+        let quick_picks = Section::Tracks {
+            title: "Quick picks".to_owned(),
+            tracks: vec![track("q")],
+            mode: QueueMode::Section,
+            numbered: false,
+        };
+        feed.held.extend([
+            shelf("Mixed for you", &["m"]),
+            quick_picks,
+            shelf("Listen again", &["b"]),
+        ]);
+        shown.extend(feed.release());
+        assert_eq!(
+            titles(&shown),
+            ["Listen again", "Quick picks", "Forgotten favorites"],
+            "Mixed for you waits for Trending songs for you, which may yet come"
+        );
+        assert!(
+            matches!(
+                shown[1],
+                Section::Tracks {
+                    mode: QueueMode::Radio,
+                    ..
+                }
+            ),
+            "a Quick pick plays with a radio after it"
+        );
+
+        feed.token = None;
+        shown.extend(feed.release());
+        assert_eq!(
+            titles(&shown),
+            [
+                "Listen again",
+                "Quick picks",
+                "Forgotten favorites",
+                "Mixed for you"
+            ],
+            "the rest once the feed ends"
+        );
+        assert_eq!(ids(&shown[0]), ["a"], "the first of two with one title");
+    }
+
+    #[test]
+    fn keeps_a_renamed_feed_whole_once_it_ends() {
+        let mut feed = feed(vec![shelf("Neu", &["n"]), shelf("Alt", &["o"])]);
+        assert!(!feed.done());
+        assert!(
+            feed.release().is_empty(),
+            "nothing yet: Listen again may come"
+        );
+        feed.token = None;
+        assert_eq!(titles(&feed.release()), ["Neu", "Alt"]);
+    }
+
+    #[test]
+    fn stops_reading_once_every_shelf_has_shown() {
+        let mut feed = feed(SHELVES.iter().map(|name| shelf(name, &["x"])).collect());
+        assert_eq!(feed.release().len(), SHELVES.len());
+        assert!(feed.done(), "no page could add a shelf");
+    }
+
+    #[test]
+    fn arranges_a_whole_feed() {
+        let arranged = arrange(vec![
+            shelf("Quick picks", &["q"]),
+            shelf("Recaps", &["r"]),
+            shelf("Listen again", &["a"]),
+        ]);
+        assert_eq!(titles(&arranged), ["Listen again", "Quick picks"]);
+    }
+
+    #[test]
+    fn listen_again_leads_with_recent_plays() {
+        let mut sections = vec![
+            shelf("Listen again", &["a", "b", "c"]),
+            shelf("Mixed for you", &["m"]),
+        ];
+        let recent = [track("c"), track("d")];
+        recent_first(&mut sections, recent.iter());
+        assert_eq!(
+            ids(&sections[0]),
+            ["c", "d", "a"],
+            "newest first, length kept"
+        );
+        assert_eq!(ids(&sections[1]), ["m"]);
+
+        let mut sections = vec![shelf("Quick picks", &["q"])];
+        recent_first(&mut sections, recent.iter());
+        assert_eq!(
+            sections[0].title(),
+            "Listen again",
+            "made when the feed has none"
+        );
+        assert_eq!(ids(&sections[0]), ["c", "d"]);
+
+        let mut sections = vec![shelf("Listen again", &["a"])];
+        recent_first(&mut sections, std::iter::empty());
+        assert_eq!(ids(&sections[0]), ["a"], "unchanged with nothing played");
     }
 
     #[test]

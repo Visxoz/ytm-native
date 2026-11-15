@@ -1,6 +1,6 @@
 //! Turns a loaded page into rows, and fills in its artwork and what the
-//! page has still to fetch, such as the rest of a long playlist or the
-//! home feed's further shelves, as they arrive.
+//! page has still to fetch, such as the rest of a long playlist, as they
+//! arrive.
 
 use std::rc::Rc;
 
@@ -13,7 +13,7 @@ use super::{
 };
 use crate::{
     CardItem, RowItem, RowKind,
-    api::{CardLayout, Page, Route, Section},
+    api::{self, CardLayout, Page, Route, Section},
     images,
 };
 
@@ -47,9 +47,7 @@ impl Built {
     }
 
     fn section(&mut self, section_index: usize, section: &Section) {
-        let title = match section {
-            Section::Tracks { title, .. } | Section::Cards { title, .. } => title,
-        };
+        let title = section.title();
         if !title.is_empty() {
             self.rows.push(RowItem {
                 kind: RowKind::Title,
@@ -110,9 +108,14 @@ impl Built {
 }
 
 impl App {
-    pub(super) fn show_page(self: &Rc<Self>, page: Page) {
+    pub(super) fn show_page(self: &Rc<Self>, mut page: Page) {
         let (generation, route) = {
             let state = self.state.borrow();
+            // Applied as it shows rather than as it loads, so a cached Home
+            // also leads with what played since.
+            if state.route == Route::Home && state.signed_in {
+                api::recent_first(&mut page.sections, state.history.tracks());
+            }
             (state.page_generation, state.route.clone())
         };
         let mut built = Built::new(0);
@@ -243,23 +246,55 @@ impl App {
             let state = self.state.borrow();
             (state.page.clone(), state.account)
         };
+        let shown = page.sections.len();
         let api = self.api.clone();
-        self.spawn(async move { api.complete(page).await }, move |app, page| {
-            // Signed in or out meanwhile: the page belongs to the last account.
-            if app.state.borrow().account != account {
+        self.spawn(
+            async move { api.complete(page).await },
+            move |app, (page, whole)| {
+                // Signed in or out meanwhile: the page belongs to the last account.
+                if app.state.borrow().account != account {
+                    return;
+                }
+                let current = app.state.borrow().page_generation == generation;
+                if route == Route::Home {
+                    if current {
+                        app.complete_home(&page, shown, whole);
+                    }
+                } else if let Some((cached, _)) = app.state.borrow_mut().page_cache.get_mut(&route)
+                {
+                    *cached = page.clone();
+                }
+                if current {
+                    app.extend_page(page, route, generation);
+                }
+            },
+        );
+    }
+
+    /// Adds the shelves after the first `shown` of `page` to the cached
+    /// Home, which, unlike the page on screen, has Listen again as YouTube
+    /// sent it, and saves it once whole. Should a request have failed, Home
+    /// is neither cached nor saved without the shelves it missed, so the next
+    /// visit asks again.
+    fn complete_home(self: &Rc<Self>, page: &Page, shown: usize, whole: bool) {
+        let saved = {
+            let mut state = self.state.borrow_mut();
+            if !whole {
+                state.page_cache.remove(&Route::Home);
                 return;
             }
-            if let Some((cached, _)) = app.state.borrow_mut().page_cache.get_mut(&route) {
-                *cached = page.clone();
-            }
-            // Only the signed-in feed continues on Home; the charts arrive whole.
-            if route == Route::Home && page.more.is_none() {
-                app.save_home(&page);
-            }
-            if app.state.borrow().page_generation == generation {
-                app.extend_page(page, route, generation);
-            }
-        });
+            let Some((cached, _)) = state.page_cache.get_mut(&Route::Home) else {
+                return;
+            };
+            cached
+                .sections
+                .extend(page.sections.iter().skip(shown).cloned());
+            cached.more.clone_from(&page.more);
+            cached.more.is_none().then(|| cached.sections.clone())
+        };
+        if let Some(saved) = saved {
+            self.save_home(saved);
+        }
     }
 
     /// Shows what `page` has beyond the page on screen: tracks added to its

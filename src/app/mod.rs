@@ -221,7 +221,11 @@ pub struct App {
     persist_timer: Timer,
     /// Sends the scrobbles again after Last.fm could not take them.
     scrobble_timer: Timer,
+    /// The signed-in Home, asked for as the app starts, for the first visit.
+    home_ahead: RefCell<Option<HomeAhead>>,
 }
+
+pub type HomeAhead = tokio::task::JoinHandle<api::Result<Page>>;
 
 fn s(text: impl AsRef<str>) -> SharedString {
     SharedString::from(text.as_ref())
@@ -238,7 +242,13 @@ fn local_now() -> time::OffsetDateTime {
 }
 
 impl App {
-    pub fn new(ui: &AppWindow, rt: Handle, api: Api, settings: Settings) -> Rc<Self> {
+    pub fn new(
+        ui: &AppWindow,
+        rt: Handle,
+        api: Api,
+        settings: Settings,
+        home_ahead: Option<HomeAhead>,
+    ) -> Rc<Self> {
         let weak = ui.as_weak();
         let player = Player::spawn(move |event| {
             let (kind, message) = match event {
@@ -318,6 +328,7 @@ impl App {
             update_timer: Timer::default(),
             persist_timer: Timer::default(),
             scrobble_timer: Timer::default(),
+            home_ahead: RefCell::new(home_ahead),
         });
         app.bind(ui);
         app.apply_settings_to_ui(ui);

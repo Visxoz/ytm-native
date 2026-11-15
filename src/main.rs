@@ -175,6 +175,13 @@ fn main() {
         }
     });
 
+    // YouTube takes most of a second to build the signed-in Home, so it is
+    // asked for now, while the window is made, rather than once it shows.
+    let home_ahead = api.has_cookie().then(|| {
+        let api = api.clone();
+        runtime.spawn(async move { api.page(&api::Route::Home, true).await })
+    });
+
     let settings = settings::Settings::load();
     // winit puts the system's theme back on the title bar at every
     // WM_SETTINGCHANGE unless the window was created with one, which
@@ -207,7 +214,7 @@ fn main() {
     let ui = AppWindow::new().expect("window opens");
     restore_geometry(&ui, settings.window);
 
-    let app = App::new(&ui, runtime.handle().clone(), api, settings);
+    let app = App::new(&ui, runtime.handle().clone(), api, settings, home_ahead);
 
     let close_app = Rc::clone(&app);
     let weak = ui.as_weak();

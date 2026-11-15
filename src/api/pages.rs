@@ -1,15 +1,13 @@
 //! The pages behind each route.
 
-use std::future::Future;
-
 use rustypipe::{
     model::{AlbumType, MusicGenreItem, MusicItem},
     param::AlbumOrder,
 };
 
 use super::{
-    Api, Card, CardKind, CardLayout, Header, More, MoreShelves, MoreTracks, PLAYLIST_LIMIT, Page,
-    QueueMode, Result, Route, Section,
+    Api, Card, CardKind, CardLayout, Header, More, MoreTracks, PLAYLIST_LIMIT, Page, QueueMode,
+    Result, Route, Section,
     convert::{
         CARD_THUMB, HEADER_THUMB, ROW_THUMB, album_card, album_type, artist_card, artist_refs,
         card_section, genre_card, join_artists, pick_thumb, playlist_card, track_section, tracks,
@@ -45,7 +43,7 @@ fn sections_page(sections: Vec<Section>) -> Page {
 impl Api {
     pub async fn page(&self, route: &Route, signed_in: bool) -> Result<Page> {
         match route {
-            Route::Home => self.home(signed_in, home_feed::ATTEMPTS).await,
+            Route::Home => self.home(signed_in).await,
             Route::Explore => self.explore().await,
             Route::Library => self.library().await,
             Route::History => self.history().await,
@@ -66,45 +64,34 @@ impl Api {
             .cloned()
     }
 
-    /// The signed-in feed in one request, so the app can show the saved
-    /// feed at once when YouTube refuses it rather than wait out retries.
-    pub async fn home_first_try(&self) -> Result<Page> {
-        self.home(true, 1).await
-    }
-
     /// Home: the personal feed when signed in, otherwise the charts. The
-    /// feed's first page shows at once, and `complete` adds the next ones.
-    /// Should the feed fail, the app decides what stands in for it.
-    async fn home(&self, signed_in: bool, attempts: u32) -> Result<Page> {
-        let genres = async { genre_section(self.genres().await.unwrap_or_default()) };
+    /// feed shows from its first shelf, usually on the first page, and
+    /// `complete` adds the rest below it. Should the feed fail before then,
+    /// the app decides what stands in for it.
+    async fn home(&self, signed_in: bool) -> Result<Page> {
         if !signed_in {
-            return self.public_home(genres).await;
+            return self.public_home().await;
         }
-        let user = self.user_q();
-        let (feed, genres) = tokio::join!(home_feed::first(&user, attempts), genres);
-        let (mut sections, token) = feed?;
+        let q = self.user_q();
+        let mut feed = home_feed::Feed::first(&q).await?;
+        let mut sections = feed.release();
+        while sections.is_empty() && !feed.done() {
+            feed.next(&q).await?;
+            sections = feed.release();
+        }
         if sections.is_empty() {
             return Err("the personal home feed was empty".into());
-        }
-        let more = token.map(|token| {
-            More::Shelves(MoreShelves {
-                token,
-                pages_left: home_feed::CONTINUATIONS,
-                trailing: genres.clone().into_iter().collect(),
-            })
-        });
-        if more.is_none() {
-            sections.extend(genres);
         }
         Ok(Page {
             header: None,
             sections,
-            more,
+            more: (!feed.done()).then_some(More::Shelves(feed)),
         })
     }
 
     /// Home for everyone: the charts and new releases.
-    async fn public_home(&self, genres: impl Future<Output = Option<Section>>) -> Result<Page> {
+    async fn public_home(&self) -> Result<Page> {
+        let genres = async { genre_section(self.genres().await.unwrap_or_default()) };
         let q = self.q();
         let (charts, new_albums, genres) =
             tokio::join!(q.music_charts(None), q.music_new_albums(), genres);
@@ -447,14 +434,15 @@ impl Api {
 
     /// Fetches the next step of what `page` has still to show, and leaves
     /// `more` set while there is another. Keeps what arrived should a
-    /// request fail.
-    pub async fn complete(&self, mut page: Page) -> Page {
+    /// request fail, and says whether one did.
+    pub async fn complete(&self, mut page: Page) -> (Page, bool) {
+        let mut whole = true;
         match page.more.take() {
             None => {}
             // The rest of a playlist's tracks, up to `PLAYLIST_LIMIT`, in one go.
             Some(More::Tracks(MoreTracks { mut tracks, count })) => {
                 let shown = tracks.items.len();
-                let _ = tracks.extend_limit(self.q(), PLAYLIST_LIMIT).await;
+                whole = tracks.extend_limit(self.q(), PLAYLIST_LIMIT).await.is_ok();
                 let extra = super::convert::tracks(tracks.items.split_off(shown));
                 if let Some(Section::Tracks { tracks, .. }) = page.sections.first_mut() {
                     tracks.extend(extra);
@@ -464,30 +452,20 @@ impl Api {
                     header.meta = meta;
                 }
             }
-            // One page of home feed shelves at a time, so each shows as it
-            // arrives.
-            Some(More::Shelves(more)) => match home_feed::next(&self.user_q(), &more.token).await {
-                Ok((sections, token)) => {
-                    page.sections.extend(sections);
-                    let pages_left = more.pages_left - 1;
-                    match token.filter(|_| pages_left > 0) {
-                        Some(token) => {
-                            page.more = Some(More::Shelves(MoreShelves {
-                                token,
-                                pages_left,
-                                trailing: more.trailing,
-                            }));
-                        }
-                        None => page.sections.extend(more.trailing),
-                    }
-                }
-                Err(e) => {
+            // One page of shelves at a time, each shown as soon as those
+            // above it are.
+            Some(More::Shelves(mut feed)) => {
+                if let Err(e) = feed.next(&self.user_q()).await {
                     log::warn!("could not load more of the home feed: {e}");
-                    page.sections.extend(more.trailing);
+                    whole = false;
                 }
-            },
+                page.sections.extend(feed.release());
+                if !feed.done() {
+                    page.more = Some(More::Shelves(feed));
+                }
+            }
         }
-        page
+        (page, whole)
     }
 
     async fn artist(&self, id: &str) -> Result<Page> {
