@@ -112,9 +112,9 @@ impl App {
         let (generation, route) = {
             let state = self.state.borrow();
             // Applied as it shows rather than as it loads, so a cached Home
-            // also leads with what played since.
+            // also has what played since.
             if state.route == Route::Home && state.signed_in {
-                api::recent_first(&mut page.sections, state.history.tracks());
+                api::add_recent(&mut page.sections, state.history.tracks());
             }
             (state.page_generation, state.route.clone())
         };

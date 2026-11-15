@@ -21,7 +21,7 @@ use tokio::sync::OnceCell;
 pub use convert::resize_thumb;
 use convert::tracks;
 pub use format::{format_duration, songs};
-pub use home_feed::{arrange as arrange_home, recent_first};
+pub use home_feed::{add_recent, arrange as arrange_home};
 pub use library::{PlaylistOption, Rating};
 pub use lyrics::Lyrics;
 pub use model::*;

@@ -30,9 +30,11 @@ const SHELVES: [&str; 6] = [
     "Fresh finds, old favorites",
 ];
 const LISTEN_AGAIN: &str = SHELVES[0];
-/// Songs played lately that lead Listen again, which YouTube fills with
-/// older favourites and seldom the latest plays.
-const RECENT: usize = 10;
+/// Songs played lately that join Listen again, which YouTube fills with
+/// older favourites and seldom the latest plays, one after every
+/// `RECENT_EVERY` of YouTube's own, so they never lead it.
+const RECENT: usize = 5;
+const RECENT_EVERY: usize = 3;
 
 // Every struct defaults its missing fields, as YouTube leaves out what a
 // renderer does not have. Shelves and their items are kept as raw text and
@@ -632,13 +634,12 @@ pub fn arrange(sections: Vec<Section>) -> Vec<Section> {
     feed.release()
 }
 
-/// Puts the latest of `recent`, songs played newest first, at the start of
-/// Listen again, keeping its length, or makes the shelf of them when the
-/// feed has none.
-pub fn recent_first<'a>(sections: &mut Vec<Section>, recent: impl Iterator<Item = &'a Track>) {
-    let fresh: Vec<Card> = recent
-        .take(RECENT)
-        .map(|track| Card {
+/// Mixes the latest of `recent`, songs played newest first, into Listen
+/// again, keeping its length, or makes the shelf of them when the feed has
+/// none. A song YouTube shows already stays where it is.
+pub fn add_recent<'a>(sections: &mut Vec<Section>, recent: impl Iterator<Item = &'a Track>) {
+    fn card(track: &Track) -> Card {
+        Card {
             kind: CardKind::Song,
             id: track.id.clone(),
             title: track.title.clone(),
@@ -649,27 +650,36 @@ pub fn recent_first<'a>(sections: &mut Vec<Section>, recent: impl Iterator<Item 
                 .map(|url| resize_thumb(url, CARD_THUMB)),
             color: None,
             track: Some(track.clone()),
-        })
-        .collect();
-    if fresh.is_empty() {
-        return;
+        }
     }
     match sections.iter_mut().find(|s| s.title() == LISTEN_AGAIN) {
         Some(Section::Cards { cards, .. }) => {
-            let len = cards.len().max(fresh.len());
-            cards.retain(|c| !fresh.iter().any(|f| f.id == c.id));
-            cards.splice(0..0, fresh);
+            let len = cards.len();
+            // Slots first, so a card is made only for a slot within the shelf.
+            let slots = (RECENT_EVERY..len).step_by(RECENT_EVERY + 1).take(RECENT);
+            let fresh: Vec<(usize, Card)> = slots
+                .zip(recent.filter(|t| !cards.iter().any(|c| c.id == t.id)))
+                .map(|(slot, track)| (slot, card(track)))
+                .collect();
+            for (slot, card) in fresh {
+                cards.insert(slot, card);
+            }
             cards.truncate(len);
         }
         Some(Section::Tracks { .. }) => {}
-        None => sections.insert(
-            0,
-            Section::Cards {
-                title: LISTEN_AGAIN.to_owned(),
-                cards: fresh,
-                layout: CardLayout::Carousel,
-            },
-        ),
+        None => {
+            let cards: Vec<Card> = recent.take(RECENT).map(card).collect();
+            if !cards.is_empty() {
+                sections.insert(
+                    0,
+                    Section::Cards {
+                        title: LISTEN_AGAIN.to_owned(),
+                        cards,
+                        layout: CardLayout::Carousel,
+                    },
+                );
+            }
+        }
     }
 }
 
@@ -885,22 +895,33 @@ mod tests {
     }
 
     #[test]
-    fn listen_again_leads_with_recent_plays() {
+    fn listen_again_mixes_in_recent_plays() {
         let mut sections = vec![
-            shelf("Listen again", &["a", "b", "c"]),
+            shelf("Listen again", &["a", "b", "c", "d", "e", "f", "g"]),
             shelf("Mixed for you", &["m"]),
         ];
-        let recent = [track("c"), track("d")];
-        recent_first(&mut sections, recent.iter());
+        let recent = [track("c"), track("x"), track("y"), track("z")];
+        add_recent(&mut sections, recent.iter());
         assert_eq!(
             ids(&sections[0]),
-            ["c", "d", "a"],
-            "newest first, length kept"
+            ["a", "b", "c", "x", "d", "e", "f"],
+            "YouTube's lead, one recent play after every three, c left where it was, length kept"
         );
         assert_eq!(ids(&sections[1]), ["m"]);
 
+        let youtube: Vec<String> = (0..19).map(|i| i.to_string()).collect();
+        let youtube: Vec<&str> = youtube.iter().map(String::as_str).collect();
+        let mut sections = vec![shelf("Listen again", &youtube)];
+        let recent: Vec<Track> = ["r1", "r2", "r3", "r4", "r5"].map(track).into();
+        add_recent(&mut sections, recent.iter());
+        let shown = ids(&sections[0]);
+        assert_eq!(shown.len(), 19);
+        let at: Vec<usize> = (0..19).filter(|&i| shown[i].starts_with('r')).collect();
+        assert_eq!(at, [3, 7, 11, 15], "as many as fit, never first");
+
         let mut sections = vec![shelf("Quick picks", &["q"])];
-        recent_first(&mut sections, recent.iter());
+        let recent = [track("c"), track("d")];
+        add_recent(&mut sections, recent.iter());
         assert_eq!(
             sections[0].title(),
             "Listen again",
@@ -909,7 +930,7 @@ mod tests {
         assert_eq!(ids(&sections[0]), ["c", "d"]);
 
         let mut sections = vec![shelf("Listen again", &["a"])];
-        recent_first(&mut sections, std::iter::empty());
+        add_recent(&mut sections, std::iter::empty());
         assert_eq!(ids(&sections[0]), ["a"], "unchanged with nothing played");
     }
 
