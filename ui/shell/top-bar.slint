@@ -3,26 +3,21 @@ import { Api } from "../types.slint";
 import { Art } from "../widgets/art.slint";
 import { Icon, IconButton } from "../widgets/buttons.slint";
 
+/// The app icon, drawn from `icons/icon.svg`.
 export component Logo {
     width: 32px;
     height: 32px;
     Rectangle {
-        border-radius: self.width / 2;
-        background: #ff0000;
+        border-radius: self.width * 225 / 1024;
+        background: @linear-gradient(180deg, #ff1440 0%, #e5000e 100%);
     }
 
-    Rectangle {
-        width: 60%;
-        height: 60%;
-        border-radius: self.width / 2;
-        border-width: 1.6px;
-        border-color: Theme.on-colour;
-    }
-
-    Icon {
-        path: Icons.play;
-        size: 12px;
-        color: Theme.on-colour;
+    Path {
+        viewbox-width: 1024;
+        viewbox-height: 1024;
+        fill: Theme.on-colour;
+        fill-rule: evenodd;
+        commands: "M196,512 A316,316 0 1 1 828,512 A316,316 0 1 1 196,512 Z M266,512 A246,246 0 1 0 758,512 A246,246 0 1 0 266,512 Z M474.63,389.18 L633.37,480.82 A36,36 0 0 1 633.37,543.18 L474.63,634.82 A36,36 0 0 1 420.63,603.65 L420.63,420.35 A36,36 0 0 1 474.63,389.18 Z";
     }
 }
 
