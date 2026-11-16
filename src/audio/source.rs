@@ -14,15 +14,13 @@ use symphonia::core::io::MediaSource;
 /// ranges no bigger than this.
 const CHUNK: u64 = 1024 * 1024;
 const READ_BUF: usize = 64 * 1024;
-/// Upper bound on the up-front allocation, should a reported size be wrong.
-/// High enough for a long mix, which past it would grow by doubling.
+/// Caps the up-front allocation should a reported size be wrong; enough for a long mix.
 const MAX_RESERVE: u64 = 1024 * 1024 * 1024;
 const MAX_RETRIES: u32 = 4;
 const RETRY_DELAY: Duration = Duration::from_millis(500);
 /// Fresh URLs asked for in a row without a whole range arriving from them.
 const MAX_REFRESHES: u32 = 2;
 
-/// Where a stream's bytes come from.
 pub struct Source {
     pub url: String,
     /// Length YouTube reports up front, or 0 if it did not.
@@ -30,10 +28,8 @@ pub struct Source {
     pub headers: Vec<(String, String)>,
 }
 
-/// Asks YouTube again for the stream being downloaded. It sometimes hands
-/// out a URL that serves the first megabyte or so and refuses the rest,
-/// while a fresh one for the same file serves it whole. Runs on the
-/// download's own thread, so it may block.
+/// Asks YouTube again for the stream, as googlevideo sometimes serves a URL's
+/// first megabyte and refuses the rest. Runs on the download thread, so may block.
 pub type Refresh = Box<dyn FnMut() -> Result<Source, String> + Send>;
 
 #[derive(Default)]
@@ -52,8 +48,6 @@ pub struct Download {
 }
 
 impl Download {
-    /// Starts fetching `source`, asking `refresh` for a fresh URL should
-    /// googlevideo refuse it.
     pub fn start(source: Source, refresh: Refresh) -> Arc<Self> {
         let download = Arc::new(Self::default());
         {
@@ -84,7 +78,6 @@ impl Download {
         self.changed.notify_all();
     }
 
-    /// Fraction of the file downloaded so far.
     pub fn progress(&self) -> f32 {
         let state = self.state.lock().unwrap();
         if state.done {
@@ -231,7 +224,6 @@ impl Download {
     }
 }
 
-/// Refuses a stream from a host YouTube does not use.
 fn check_host(url: &str) -> Result<(), String> {
     if crate::http::allowed(url) {
         return Ok(());

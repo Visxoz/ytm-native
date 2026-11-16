@@ -20,7 +20,6 @@ const DOMAINS: &[&str] = &["api.github.com", "github.com", "githubusercontent.co
 const SUMS: &str = "SHA256SUMS";
 pub const CURRENT: &str = env!("CARGO_PKG_VERSION");
 
-/// How this copy was installed, which decides what an update replaces.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Kind {
     Installed,
@@ -152,8 +151,7 @@ fn expected_hash(sums: &str, name: &str) -> Option<String> {
     })
 }
 
-/// Downloads the update and checks it against the release's checksum and
-/// size. `progress` gets the fraction done.
+/// `progress` gets the fraction done.
 pub async fn download(update: &Update, progress: impl Fn(f32)) -> Result<PathBuf, String> {
     let fail = |e: reqwest::Error| format!("the download failed: {e}");
     let sums = client()
@@ -196,7 +194,6 @@ pub async fn download(update: &Update, progress: impl Fn(f32)) -> Result<PathBuf
     Ok(path)
 }
 
-/// Readies a downloaded update to take over once the app closes.
 pub fn stage(update: &Update, downloaded: PathBuf) -> Result<(), String> {
     let command = match update.kind {
         Kind::Installed => {

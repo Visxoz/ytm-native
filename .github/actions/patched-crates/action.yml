@@ -9,11 +9,9 @@ description: >
 runs:
   using: composite
   steps:
-    # The folder is named after the patches, the script and the versions
-    # they apply to. Cargo's build IDs depend on it, so builds of other
-    # patches never pass for these, and the sources can be dated back safely
-    # below. Not after the whole lockfile: it changes with every version
-    # bump, and a new folder rebuilt all of Slint and rustypipe each time.
+    # Named after the patches, the script and their versions, which Cargo's
+    # build IDs then depend on, so the sources can be dated back safely below.
+    # Not the whole lockfile: each version bump would rebuild all of Slint.
     - name: Name the patched crates' folder
       id: dir
       shell: pwsh

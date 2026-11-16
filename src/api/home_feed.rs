@@ -1,8 +1,5 @@
-//! Parses YouTube Music's personal home feed (`FEmusic_home`): shelves such
-//! as Listen again, Quick picks and Mixed for you. rustypipe has no model
-//! for it, so this reads the renderer JSON directly, through types naming
-//! only the fields used: serde skips the rest without allocating, where a
-//! generic JSON tree would build every object and string of the response.
+//! The personal home feed (`FEmusic_home`), which rustypipe has no model for.
+//! Types name only the fields used, so serde skips the rest without allocating.
 
 use rustypipe::client::{ClientType, RustyPipeQuery};
 use serde::Deserialize;
@@ -18,9 +15,8 @@ const LIST_LIMIT: usize = 10;
 /// Continuations fetched at most after the first page; the whole feed is
 /// five or six pages.
 const CONTINUATIONS: usize = 8;
-/// The shelves Home shows, in this order: those made from the account's own
-/// listening. The rest, such as charts, community playlists, new releases
-/// and recaps, are left out. Titles are in English, rustypipe's language.
+/// The shelves Home shows, in order: those made from the account's own
+/// listening. Titles are in English, rustypipe's language.
 const SHELVES: [&str; 6] = [
     "Listen again",
     "Quick picks",
@@ -36,10 +32,8 @@ const LISTEN_AGAIN: &str = SHELVES[0];
 const RECENT: usize = 5;
 const RECENT_EVERY: usize = 3;
 
-// Every struct defaults its missing fields, as YouTube leaves out what a
-// renderer does not have. Shelves and their items are kept as raw text and
-// parsed one by one, so one in an unexpected shape is skipped rather than
-// failing the page.
+// YouTube leaves out fields a renderer lacks, so every struct defaults. Shelves
+// and items are parsed one by one, so one in an odd shape is skipped, not fatal.
 
 #[derive(Deserialize, Default)]
 #[serde(default, rename_all = "camelCase")]
@@ -256,7 +250,6 @@ struct ThumbnailRenderer {
 }
 
 impl ThumbnailRenderer {
-    /// The smallest rendition at least `edge` wide, sized to `edge`.
     fn pick(&self, edge: u32) -> Option<String> {
         let thumbs = &self.music_thumbnail_renderer.thumbnail.thumbnails;
         fit_thumb(thumbs.iter().map(|t| (t.width, t.url.as_str())), edge)
@@ -485,7 +478,6 @@ impl SectionList {
 /// A page's shelves and the continuation token of the next page.
 type Shelves = Result<(Vec<Section>, Option<String>), String>;
 
-/// Shelves from the first page and the token for the next one.
 fn first_page(json: &str) -> Shelves {
     let response: Response = serde_json::from_str(json).map_err(|e| e.to_string())?;
     let list = response
@@ -499,20 +491,16 @@ fn first_page(json: &str) -> Shelves {
     Ok((list.shelves(), list.continuation()))
 }
 
-/// Shelves from a continuation page and the token for the next one.
 fn next_page(json: &str) -> Shelves {
     let response: Response = serde_json::from_str(json).map_err(|e| e.to_string())?;
     let list = response.continuation_contents.section_list_continuation;
     Ok((list.shelves(), list.continuation()))
 }
 
-/// Requests made for one page of the feed before giving up.
 const ATTEMPTS: u32 = 4;
 
-/// YouTube refuses a share of requests for the signed-in feed, in bursts,
-/// with "400: Request contains an invalid argument", and answers the same
-/// request a moment later. The rest of the account, and the feed signed
-/// out, are unaffected, so it is YouTube building the feed that fails.
+/// YouTube refuses a share of signed-in feed requests, in bursts, with "400:
+/// Request contains an invalid argument", and answers the same one moments later.
 fn refused(e: &rustypipe::error::Error) -> bool {
     matches!(e, rustypipe::error::Error::HttpStatus(400, _))
 }
@@ -537,10 +525,8 @@ async fn browse(
     }
 }
 
-/// The feed still to show. YouTube orders the shelves differently on every
-/// load, so those read are held back until every shelf ranked above them in
-/// `SHELVES` has arrived: Home fills from the top down, always in one order,
-/// and never moves what is already on screen.
+/// YouTube orders the shelves differently on every load, so each is held back
+/// until every one above it in `SHELVES` has arrived, and nothing shown moves.
 #[derive(Debug, Clone)]
 pub struct Feed {
     held: Vec<Section>,
@@ -581,12 +567,8 @@ impl Feed {
         Ok(())
     }
 
-    /// The shelves to show next: those in `SHELVES` whose betters are all
-    /// in, in its order and once each, and once the feed has ended, all that
-    /// is left of them. Should none of them come, as when YouTube renames
-    /// them, the feed is kept whole rather than left empty. Songs from a list
-    /// shelf such as Quick picks play with a radio after them, as YouTube
-    /// Music does, rather than the shelf's ten on their own.
+    /// The shelves whose betters in `SHELVES` are all in. Should none come, as
+    /// when YouTube renames them, the feed is kept whole rather than left empty.
     pub fn release(&mut self) -> Vec<Section> {
         let done = self.done();
         let wanted = |s: &Section| SHELVES.contains(&s.title());
@@ -604,9 +586,8 @@ impl Feed {
             }
             out
         };
-        // Once one has shown the feed is not kept whole, so only the shelves
-        // still to come are worth holding, and with all of them shown, no
-        // further page.
+        // Once one has shown the feed won't be kept whole, so hold only the
+        // shelves still to come, and read no further page once all have.
         if self.next > 0 {
             let rest = &SHELVES[self.next..];
             self.held.retain(|s| rest.contains(&s.title()));
@@ -614,6 +595,8 @@ impl Feed {
                 self.token = None;
             }
         }
+        // List shelves such as Quick picks play with a radio after them, as
+        // YouTube Music does, rather than the shelf's ten on their own.
         for section in &mut out {
             if let Section::Tracks { mode, .. } = section {
                 *mode = QueueMode::Radio;

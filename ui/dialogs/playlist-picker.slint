@@ -5,8 +5,6 @@ import { ListView } from "../widgets/list.slint";
 import { Spinner } from "../widgets/spinner.slint";
 import { Dialog } from "dialog.slint";
 
-/// Picks one of the user's own playlists to save a song to, ticking those
-/// that already have it.
 export component PlaylistPicker inherits Dialog {
     in-out property <bool> picker-open;
     in property <bool> picker-loading;

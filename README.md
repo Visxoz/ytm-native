@@ -60,7 +60,7 @@ Radio, autoplay, Smart Shuffle, repeat, history and search with recent searches.
 <td width="33%" valign="top">
 
 ### Lyrics and queue
-Synced lyrics you can click to jump to. A queue you drag into order, edit several songs at a time, and save as a playlist.
+Synced lyrics you can click to jump to, beside the page or full screen. A queue you drag into order, edit several songs at a time, and save as a playlist.
 
 </td>
 <td width="33%" valign="top">
@@ -71,6 +71,12 @@ Media keys, the Windows media overlay, Discord, Last.fm. Reopens on the song you
 </td>
 </tr>
 </table>
+
+## Full screen
+
+<img src="docs/fullscreen.png" width="100%" alt="The full-screen player: the artwork, its title and the next song beside large synced lyrics, over the artwork's colours">
+
+The button beside the queue's takes the window full screen: the artwork and its lyrics over the artwork's own colours, with the queue a click away in a drawer. <kbd>Esc</kbd> leaves.
 
 ## Make it yours
 
@@ -174,7 +180,7 @@ Both keep themselves up to date. When a new version is out, a dot appears on the
 | <kbd>Ctrl</kbd> <kbd>B</kbd> | Collapse or expand the library sidebar |
 | <kbd>Alt</kbd> <kbd>←</kbd> / <kbd>Alt</kbd> <kbd>→</kbd> | Back or forward |
 | <kbd>Delete</kbd> | Remove the songs picked in the queue |
-| <kbd>Esc</kbd> | Close a dialog, or clear the queue's selection |
+| <kbd>Esc</kbd> | Close a dialog, clear the queue's selection, or leave full screen |
 
 Right-click a song to play it next, add it to the queue, start a radio, like it, save it to a playlist, or go to its artist or album. In the queue, <kbd>Ctrl</kbd>-click and <kbd>Shift</kbd>-click pick several songs at once.
 

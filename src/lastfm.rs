@@ -1,9 +1,5 @@
-//! Scrobbling to Last.fm: connecting an account through the browser, then
-//! telling Last.fm what is playing and what has been played.
-//!
-//! The API key and secret are built in from the `LASTFM_API_KEY` and
-//! `LASTFM_API_SECRET` environment variables; a build without them hides
-//! the feature.
+//! Scrobbling to Last.fm. The key and secret are built in from
+//! `LASTFM_API_KEY` and `LASTFM_API_SECRET`; a build without them hides it.
 
 use std::{collections::VecDeque, path::PathBuf, time::Duration};
 
@@ -26,7 +22,6 @@ fn keys() -> Option<(&'static str, &'static str)> {
     (!key.is_empty() && !secret.is_empty()).then_some((key, secret))
 }
 
-/// Whether this build can talk to Last.fm.
 pub fn available() -> bool {
     keys().is_some()
 }
@@ -39,7 +34,6 @@ pub struct Session {
     key: String,
 }
 
-/// One play, as Last.fm records it.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Play {
     pub artist: String,
@@ -183,7 +177,6 @@ fn push_play(params: &mut Params, play: &Play, suffix: &str) {
     }
 }
 
-/// Shows `play` as what the account is listening to now.
 pub async fn now_playing(session: &Session, play: &Play) -> Result<(), Error> {
     let mut params = vec![("sk".into(), session.key.clone())];
     push_play(&mut params, play, "");
@@ -326,7 +319,6 @@ impl Pending {
         self.changed = true;
     }
 
-    /// Writes the plays, if they changed since the last save.
     pub fn save(&mut self) {
         if self.changed && crate::settings::save_json(&pending_path(), self, "the scrobbles") {
             self.changed = false;

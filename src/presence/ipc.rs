@@ -1,8 +1,5 @@
-//! Discord's IPC pipe, with every wait for a reply bounded. The pipe is
-//! opened for synchronous I/O, where a read waits for as long as Discord
-//! takes to answer, so one reply that never comes would freeze the worker on
-//! the activity it last sent. Replies are polled for instead, and a silent
-//! Discord counts as a lost connection.
+//! Discord's IPC pipe. A synchronous read would wait forever on a reply that
+//! never comes, so replies are polled for and a silent Discord counts as lost.
 
 use std::{
     fs::{File, OpenOptions},
@@ -139,8 +136,7 @@ impl Ipc {
         }
     }
 
-    /// Fills `buf` once that much has arrived, never blocking past
-    /// `deadline`.
+    /// Fills `buf` once that much has arrived, never blocking past `deadline`.
     fn read_by(&mut self, buf: &mut [u8], deadline: Instant) -> io::Result<()> {
         while self.available()? < buf.len() {
             if Instant::now() >= deadline {

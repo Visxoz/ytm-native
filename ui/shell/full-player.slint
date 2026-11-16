@@ -1,0 +1,104 @@
+import { Theme } from "../theme.slint";
+import { Lyrics } from "../panel/lyrics.slint";
+import { Art } from "../widgets/art.slint";
+import { Spinner } from "../widgets/spinner.slint";
+
+export component FullPlayer inherits Rectangle {
+    in property <image> art;
+    in property <image> backdrop;
+    in property <string> title;
+    in property <string> artists;
+    in property <string> next;
+    in property <[string]> lyrics;
+    in property <bool> lyrics-synced;
+    in property <int> lyrics-current;
+    in property <string> lyrics-source;
+    in property <bool> lyrics-loading;
+    in property <length> drawer-width;
+    callback lyric-clicked(index: int);
+    property <length> margin: 64px;
+    property <length> art-size: clamp(min((root.width - root.drawer-width - 3 * root.margin) / 2, root.height - Theme.player-bar - 2 * root.margin - 140px), 0px, 560px);
+    background: Theme.panel;
+
+    Image {
+        width: 100%;
+        height: 100%;
+        source: root.backdrop;
+        image-fit: fill;
+    }
+
+    // Pales the colours in the light look, as `Theme.tint` does.
+    if Theme.light: Rectangle {
+        background: Theme.panel.with-alpha(0.7);
+    }
+
+    // Two halves, each centring its part, so space shares out at any width.
+    HorizontalLayout {
+        width: root.width - root.drawer-width;
+        height: root.height - Theme.player-bar;
+        padding: root.margin;
+        spacing: root.margin;
+        Rectangle {
+            horizontal-stretch: 1;
+            VerticalLayout {
+                x: (parent.width - self.width) / 2;
+                width: root.art-size;
+                height: 100%;
+                alignment: center;
+                spacing: 6px;
+                Art {
+                    height: root.art-size;
+                    radius: 8px;
+                    source: root.art;
+                    drop-shadow-blur: 32px;
+                    drop-shadow-color: #00000080;
+                }
+
+                Rectangle {
+                    height: 18px;
+                }
+
+                Text {
+                    text: root.title;
+                    overflow: elide;
+                    font-family: Theme.display-font;
+                    font-size: 28px;
+                    font-weight: 700;
+                    color: Theme.text;
+                }
+
+                Text {
+                    text: root.artists;
+                    overflow: elide;
+                    font-size: 16px;
+                    color: Theme.text-secondary;
+                }
+
+                if root.next != "": Text {
+                    text: root.next;
+                    overflow: elide;
+                    font-size: 13px;
+                    color: Theme.text-secondary;
+                }
+            }
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+            if root.lyrics-loading: Spinner {
+                size: 32px;
+            }
+            // Lines much wider than this are hard to follow.
+            if !root.lyrics-loading: Lyrics {
+                x: (parent.width - self.width) / 2;
+                width: min(parent.width, 800px);
+                line-size: 34px;
+                lines: root.lyrics;
+                synced: root.lyrics-synced;
+                current: root.lyrics-current;
+                source: root.lyrics-source;
+                line-clicked(i) => { root.lyric-clicked(i); }
+            }
+        }
+    }
+}

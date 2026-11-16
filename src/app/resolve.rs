@@ -48,17 +48,14 @@ pub(super) struct PremiumShared {
     load_failed: Mutex<Option<Instant>>,
     /// The Premium path is skipped until then, after repeated errors.
     paused_until: Mutex<Option<Instant>>,
-    /// When an account taken as without Premium is next checked, in the
-    /// background. A run of music videos, which never have Premium formats,
-    /// can mistake a Premium account for one.
+    /// When an account taken as without Premium is next checked in the
+    /// background, as a run of music videos can make a Premium one look so.
     recheck_at: Mutex<Option<Instant>>,
 }
 
 impl PremiumShared {
-    /// `known` says the account has been served Premium formats before, and
-    /// `none` that it was last taken as without Premium. A remembered "no"
-    /// is checked in the background on the first song, as `recheck_at`
-    /// starts unset.
+    /// `known`: served Premium formats before; `none`: last taken as without
+    /// Premium, which is rechecked on the first song as `recheck_at` starts unset.
     pub(super) fn new(cookie: Option<String>, known: bool, none: bool) -> Self {
         let status = match (known, none) {
             (true, _) => PREMIUM_YES,
@@ -226,7 +223,6 @@ async fn web_fallback(
     Ok(stream)
 }
 
-/// The download's part of a stream.
 fn source(stream: ResolvedStream) -> Source {
     Source {
         url: stream.url,
@@ -263,10 +259,8 @@ impl Resolver {
         if let Some(cookie) = cookie.as_deref().filter(|_| !premium.skipped()) {
             match premium_player(premium).await {
                 Ok(player) => {
-                    // An account known to have Premium plays a song without
-                    // a Premium version from the same answer, which saves
-                    // asking the free clients. One not yet known counts the
-                    // song as a miss instead.
+                    // A known Premium account plays a non-Premium song from this
+                    // answer, saving the free clients; an unknown one counts a miss.
                     let known = premium.status() == PREMIUM_YES;
                     match premium::resolve(video_id, Some(cookie), &visitor, &player, known, None)
                         .await
@@ -329,11 +323,9 @@ impl Resolver {
         self.free(&visitor).await
     }
 
-    /// A fresh URL for a stream this resolved, asked for so it comes back as
-    /// the same file. A free format the web client gave is asked of the
-    /// plain-URL clients, which serve the same file, so one googlevideo
-    /// refuses still plays. Counts nothing towards the Premium path's state,
-    /// as the song already counted when first resolved.
+    /// A fresh URL for the same file. A free web-client format is asked of the
+    /// plain-URL clients, so one googlevideo refuses still plays. Counts
+    /// nothing towards the Premium state, as the song already counted.
     async fn refresh(&self, was_premium: bool) -> Result<ResolvedStream, String> {
         let video_id = self.video_id.as_str();
         premium::diag(format!(
@@ -380,9 +372,8 @@ impl Resolver {
         );
         match result {
             Ok(stream) => Ok(stream),
-            // Signed in, the web client's scrambled URLs are a last
-            // resort, read by the Premium path's solver whether or not
-            // the account has Premium.
+            // Signed in, the web client's scrambled URLs are a last resort,
+            // read by the Premium solver whether or not the account has Premium.
             Err(e) => match premium.cookie() {
                 Some(cookie) => web_fallback(premium, video_id, &cookie, visitor, max_kbps)
                     .await
@@ -411,7 +402,6 @@ impl App {
         }
     }
 
-    /// Resolves a stream, or reuses a prefetched one.
     pub(super) fn resolve_future(
         &self,
         video_id: String,
@@ -438,10 +428,8 @@ impl App {
         let (rt, was_premium) = (self.rt.clone(), stream.premium);
         let refresh = Box::new(move || {
             let resolver = Arc::clone(&resolver);
-            // Spawned and its handle waited on, rather than run here: a
-            // runtime shutting down as the app closes drops the task, which
-            // ends the wait with an error, where driving its requests from
-            // here would panic.
+            // Spawned rather than driven here: a runtime shutting down on
+            // exit drops the task and the wait errors, where this would panic.
             let task = rt.spawn(async move { resolver.refresh(was_premium).await });
             rt.block_on(task)
                 .map_err(|_| "the refresh did not finish".to_owned())?

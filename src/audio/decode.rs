@@ -111,7 +111,6 @@ impl Decoder {
         })
     }
 
-    /// Decodes the next packet, appending its samples to `out`.
     pub fn decode_next(&mut self, out: &mut Vec<f32>) -> Result<Decoded, String> {
         loop {
             let packet = match self.format.next_packet() {
@@ -206,7 +205,6 @@ impl Decoder {
     }
 }
 
-/// Reads the pre-skip field of an OpusHead header.
 fn opus_pre_skip(head: &[u8]) -> Option<usize> {
     if head.len() < 12 || &head[..8] != b"OpusHead" {
         return None;

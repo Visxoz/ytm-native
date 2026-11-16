@@ -1,7 +1,6 @@
 import { Theme } from "../theme.slint";
 import { Api } from "../types.slint";
 
-/// A Material-style spinner: an arc that grows and shrinks as it turns.
 export component Spinner {
     in property <length> size: 32px;
     in property <color> color: Theme.accent;
@@ -15,7 +14,6 @@ export component Spinner {
     property <float> end-x: 12 + 10 * sin(root.sweep);
     property <float> end-y: 12 - 10 * cos(root.sweep);
 
-    // Faint track on the same circle as the arc.
     Path {
         width: 100%;
         height: 100%;

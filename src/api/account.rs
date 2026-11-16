@@ -1,5 +1,3 @@
-//! Signing in and out, and what YouTube says about the account.
-
 use rustypipe::client::ClientType;
 
 use super::{Api, Result, err};
@@ -19,9 +17,8 @@ impl Api {
         let _ = self.rp.user_auth_remove_cookie().await;
     }
 
-    /// The signed-in account's profile picture. YouTube's guide has the
-    /// current one, while the account menu has been seen to keep serving the
-    /// one before a change, so the menu is asked only when the guide has none.
+    /// The guide has the current picture, while the account menu can keep
+    /// serving the one before a change, so the menu is only a fallback.
     pub async fn account_photo(&self) -> Result<Option<String>> {
         let ask = async |client, endpoint: &str| {
             self.q()
@@ -61,7 +58,6 @@ impl Api {
     }
 }
 
-/// Where the profile pictures sit in the guide and account menu responses.
 const GUIDE_PHOTO: &str = "/userProfile/accountPhoto/thumbnails";
 const MENU_PHOTO: &str = "/actions/0/openPopupAction/popup/multiPageMenuRenderer/header/activeAccountHeaderRenderer/accountPhoto/thumbnails";
 

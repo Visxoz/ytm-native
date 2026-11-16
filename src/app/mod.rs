@@ -1,6 +1,5 @@
-//! Ties the UI to the API, the queue and the audio engine. Everything here
-//! runs on the UI thread; network and disk work is spawned on Tokio and its
-//! results are picked up again through `slint::spawn_local`.
+//! Everything here runs on the UI thread; network and disk work runs on
+//! Tokio and comes back through `slint::spawn_local`.
 
 mod account;
 mod actions;
@@ -74,7 +73,6 @@ struct Playback {
     extending: bool,
     /// When the current track was asked for, to time the first sound.
     requested_at: Option<Instant>,
-    /// The current stream came from the Premium path.
     current_premium: bool,
     /// A track whose Premium stream failed and plays the free one instead.
     force_free: Option<String>,
@@ -83,12 +81,11 @@ struct Playback {
     /// The generation whose play is already recorded: a free-stream retry
     /// carrying on a song, so its start is not a second play.
     play_recorded: Option<u64>,
-    /// The next track, queued in the player to follow without a gap, and
-    /// when its stream was resolved.
+    /// The next track, queued in the player for gapless playback, and when
+    /// its stream was resolved.
     queued: Option<(String, ResolvedStream, Instant)>,
-    /// The player could not open the queued stream, so `unqueue` drops it.
-    /// Only a flag, as the event may be late for a track queued since,
-    /// which then just resolves again.
+    /// The player could not open the queued stream, so `unqueue` drops it. Only
+    /// a flag: the event may be late, and a track queued since just resolves again.
     queued_failed: bool,
     /// The track last tried for queueing, so a failure is not retried
     /// every tick; it then loads as usual when the current one ends.
@@ -104,10 +101,8 @@ impl Playback {
         self.queue_tried = None;
     }
 
-    /// Forgets the track queued in the player as `forget_queued` does, but
-    /// keeps its stream as prefetched, with the time it was resolved, so
-    /// queueing or playing it again asks for nothing. Not for a quality
-    /// change or a Premium retry, which must drop it.
+    /// `forget_queued`, but keeps the stream as prefetched so it isn't asked for
+    /// again. Not for a quality change or a Premium retry, which must drop it.
     fn unqueue(&mut self) {
         if let Some((id, stream, at)) = self.queued.take()
             && !self.queued_failed
@@ -117,22 +112,19 @@ impl Playback {
         self.forget_queued();
     }
 
-    /// Whether a stream for `id` was resolved ahead and is still fresh.
     fn has_prefetched(&self, id: &str) -> bool {
         self.prefetched
             .get(id)
             .is_some_and(|(_, at)| at.elapsed() < playback::PREFETCH_FRESH)
     }
 
-    /// Takes the stream resolved ahead for `id`, if still fresh.
     fn take_prefetched(&mut self, id: &str) -> Option<(ResolvedStream, Instant)> {
         self.prefetched
             .remove(id)
             .filter(|(_, at)| at.elapsed() < playback::PREFETCH_FRESH)
     }
 
-    /// Keeps a stream resolved ahead for `id`, dropping stale ones, such as
-    /// those of tracks skipped past.
+    /// Keeps the stream for `id`, dropping stale ones such as tracks skipped past.
     fn store_prefetched(&mut self, id: String, stream: ResolvedStream) {
         self.prefetched
             .retain(|_, (_, at)| at.elapsed() < playback::PREFETCH_FRESH);
@@ -158,13 +150,10 @@ struct State {
     /// Each lyric line's start in seconds, when the lyrics shown are synced.
     lyric_starts: Vec<f64>,
     suggest_generation: u64,
-    /// Recently loaded pages, so going back does not fetch them again.
     page_cache: HashMap<Route, (Page, Instant)>,
     /// Music videos looked up for a song version, by video ID.
     song_versions: HashMap<String, SongVersion>,
-    /// The songs played, saved between runs.
     history: settings::History,
-    /// The last few searches, offered in the search box until the user types.
     searches: settings::Searches,
     smart: smart_shuffle::Smart,
     /// Bumped as the playing song changes or is rated, so a rating fetched
@@ -172,7 +161,6 @@ struct State {
     rating_generation: u64,
     /// The song being saved to a playlist, and the playlists offered.
     saving: Option<(String, Vec<api::PlaylistOption>)>,
-    /// The accent taken from the playing song's artwork, once it loaded.
     artwork_accent: Option<slint::Color>,
     scrobbler: scrobble::Scrobbler,
     /// Whether the stored cookie has been checked this run, which the first
@@ -199,7 +187,6 @@ pub struct App {
     rows: Rc<VecModel<RowItem>>,
     library: Rc<VecModel<CardItem>>,
     queue_model: Rc<VecModel<QueueItem>>,
-    /// Each equaliser band's gain in dB, for its slider.
     eq_gains: Rc<VecModel<f32>>,
     /// Queue revision the queue model shows.
     queue_shown: Cell<Option<u64>>,
@@ -214,12 +201,10 @@ pub struct App {
     suggest_timer: Timer,
     google_sign_in: RefCell<Option<GoogleSignIn>>,
     sign_in_timer: Timer,
-    /// A newer release found on GitHub.
     update: RefCell<Option<update::Update>>,
     update_timer: Timer,
-    /// Writes the session and history a moment after they change.
     persist_timer: Timer,
-    /// Sends the scrobbles again after Last.fm could not take them.
+    /// Retries scrobbles Last.fm could not take.
     scrobble_timer: Timer,
     /// The signed-in Home, asked for as the app starts, for the first visit.
     home_ahead: RefCell<Option<HomeAhead>>,
@@ -418,7 +403,6 @@ impl App {
         });
     }
 
-    /// Updates the play button and the equalisers on playing rows.
     fn show_playing(&self, playing: bool) {
         self.ui().global::<ApiGlobal>().set_is_playing(playing);
     }
@@ -468,12 +452,9 @@ impl App {
         ui.set_accent_choice(settings.accent.index());
     }
 
-    /// Colours the window, and its title bar, in the chosen look and
-    /// accent, made readable in that look. With the accent taken from the
-    /// artwork, YouTube Music's red stands in until a song's has loaded, and
-    /// for greyish artwork. Run where the look changes, not with every
-    /// setting or song, as it makes Windows restyle the window; the accent
-    /// alone goes through `apply_accent`.
+    /// Colours the window and its title bar. Run only where the look changes,
+    /// as it makes Windows restyle the window; the accent alone goes through
+    /// `apply_accent`.
     fn apply_theme(&self, ui: &AppWindow) {
         let look = self.state.borrow().settings.look;
         ui.global::<Theme>().set_look(look.index());
@@ -528,8 +509,6 @@ impl App {
         self.apply_settings_to_ui(&self.ui());
     }
 
-    /// Changes the equaliser's settings and plays with them, saving them
-    /// to disk if `save`.
     fn change_equaliser(&self, save: bool, change: impl FnOnce(&mut Settings)) {
         if save {
             self.update_settings(change);

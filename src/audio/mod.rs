@@ -1,18 +1,7 @@
-//! Audio engine: one thread decodes the current stream into a sample queue
-//! that the output device drains.
-//!
-//! Gapless playback: the app queues the next track shortly before the
-//! current one ends. Its download starts at once and its decoder opens on a
-//! side thread, so the engine never waits on the network. When the current
-//! track runs out, the next one's samples follow in the same queue, and the
-//! device callback marks the sample where it becomes audible; only then does
-//! the app hear that the track changed.
-//!
-//! Crossfade: with a queued track to fade into, the engine holds the end of
-//! the current one back from the device. Once it is decoded to the end, its
-//! trailing silence is cut, and its last seconds are mixed under the next
-//! track's first, whose leading silence was cut as it opened. The mix sits
-//! in the queue like any samples, so the device callback does no more work.
+//! Audio engine: one thread decodes into a sample queue the device drains.
+//! The queued track's samples follow in the same queue, mixed over the held
+//! tail for a crossfade, and the app hears of the change only once the
+//! device callback reaches them.
 
 mod decode;
 mod engine;
@@ -47,17 +36,14 @@ pub struct StreamSpec {
     pub opening: Opening,
 }
 
-/// What the engine opens a stream with, once the download has its source.
 pub struct Opening {
     pub mime: String,
     /// Integrated loudness YouTube measured, used to even out volume.
     pub loudness_db: Option<f32>,
-    /// Where to start, in seconds, when resuming a track.
     pub start_at: f64,
 }
 
 impl StreamSpec {
-    /// Starts the download, handing it the source rather than a copy.
     fn start(self) -> (Arc<Download>, Opening) {
         (Download::start(self.source, self.refresh), self.opening)
     }
@@ -132,8 +118,6 @@ impl Shared {
         cancel(&self.next_download);
     }
 
-    /// The correction applied to a track of loudness gain `gain`: that gain
-    /// while normalising, else none.
     fn correction(&self, gain: f32) -> f32 {
         if self.normalise.load(Ordering::Relaxed) {
             gain
@@ -142,12 +126,10 @@ impl Shared {
         }
     }
 
-    /// The audible track's loudness correction.
     fn loudness(&self) -> f32 {
         self.correction(f32::from_bits(self.loudness_gain.load(Ordering::Relaxed)))
     }
 
-    /// Linear gain: volume curve times loudness correction.
     fn gain(&self) -> f32 {
         let volume = f32::from_bits(self.volume.load(Ordering::Relaxed));
         // Squared so the slider feels even to the ear.
@@ -236,7 +218,6 @@ impl Player {
         self.shared.paused.load(Ordering::Relaxed)
     }
 
-    /// Sets the volume from 0 to 1.
     pub fn set_volume(&self, volume: f32) {
         self.shared
             .volume
@@ -252,12 +233,10 @@ impl Player {
         self.shared.normalise.store(normalise, Ordering::Relaxed);
     }
 
-    /// Current position in seconds.
     pub fn position(&self) -> f64 {
         self.shared.output.lock().unwrap().position()
     }
 
-    /// Whether playback is waiting on the network.
     pub fn is_buffering(&self) -> bool {
         self.shared.output.lock().unwrap().underrun
     }

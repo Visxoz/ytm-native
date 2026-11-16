@@ -20,6 +20,7 @@ pub const TOP: u32 = 96;
 pub const CARD: u32 = 176;
 pub const HEADER: u32 = 232;
 pub const BANNER: u32 = 360;
+pub const COVER: u32 = 560;
 pub const AVATAR: u32 = 26;
 
 /// Decoded artwork kept for reuse, in bytes. Images still on screen stay
@@ -46,6 +47,7 @@ pub fn set_scale(scale: f32) {
 struct Cache {
     images: HashMap<String, Image>,
     accents: HashMap<String, Color>,
+    backdrops: HashMap<String, Image>,
     order: VecDeque<String>,
     bytes: usize,
 }
@@ -71,6 +73,7 @@ impl Cache {
                 self.bytes -= byte_size(&old);
             }
             self.accents.remove(&oldest);
+            self.backdrops.remove(&oldest);
         }
     }
 }
@@ -100,6 +103,11 @@ pub fn accent(url: &str, edge: u32) -> Option<Color> {
     CACHE.with(|c| c.borrow().accents.get(&key(url, edge)).copied())
 }
 
+/// The player artwork's colours where they sit in it, once loaded.
+pub fn backdrop(url: &str) -> Option<Image> {
+    CACHE.with(|c| c.borrow().backdrops.get(&key(url, PLAYER)).cloned())
+}
+
 fn key(url: &str, edge: u32) -> String {
     format!("{}:{url}", physical(edge))
 }
@@ -108,10 +116,9 @@ fn physical(edge: u32) -> u32 {
     (edge as f32 * SCALE.with(Cell::get)).round() as u32
 }
 
-/// Fetches `url` and scales it to `edge` logical pixels. Call on the UI thread.
-/// Requests for an image already on its way wait for that one. Once its
-/// turn in the download queue comes, an image no longer `wanted` that no one
-/// else waits for is skipped, as a page's art is once the page is left.
+/// Fetches `url` at `edge` logical pixels, on the UI thread. Requests for an
+/// image already on its way share it; one no longer `wanted` by anyone is
+/// skipped when its turn comes, as a page's art is once the page is left.
 pub async fn load(
     rt: &Handle,
     url: &str,
@@ -140,13 +147,9 @@ pub async fn load(
         return rx.await.ok().flatten();
     }
 
-    // Only artwork with something drawn behind it needs a colour picked.
-    // That is one image at a time, shown large, so it skips the queue
-    // rather than wait behind a page of thumbnails.
-    let with_accent = matches!(edge, PLAYER | HEADER | BANNER);
-    // Taken here rather than in the fetch, so what is left once its turn
-    // comes is known before anything is downloaded.
-    let permit = if with_accent {
+    // Large single images skip the queue rather than wait behind thumbnails.
+    // The permit is taken here so `wanted` is checked before downloading.
+    let permit = if matches!(edge, PLAYER | HEADER | BANNER | COVER) {
         None
     } else {
         Arc::clone(permits()).acquire_owned().await.ok()
@@ -155,14 +158,19 @@ pub async fn load(
     let fetched = if alone && !wanted() {
         None
     } else {
-        fetch(rt, url.to_owned(), edge, with_accent, permit).await
+        fetch(rt, url.to_owned(), edge, permit).await
     };
-    let image = fetched.map(|(buffer, accent)| {
+    let image = fetched.map(|(buffer, accent, backdrop)| {
         let image = Image::from_rgba8(buffer);
         CACHE.with(|c| {
             let mut cache = c.borrow_mut();
             if let Some(accent) = accent {
                 cache.accents.insert(key.clone(), accent);
+            }
+            if let Some(backdrop) = backdrop {
+                cache
+                    .backdrops
+                    .insert(key.clone(), Image::from_rgba8(backdrop));
             }
             cache.insert(key.clone(), image.clone());
         });
@@ -175,14 +183,12 @@ pub async fn load(
     image
 }
 
-/// Fetches `url` and decodes it at `edge` logical pixels.
 async fn fetch(
     rt: &Handle,
     url: String,
     edge: u32,
-    with_accent: bool,
     permit: Option<OwnedSemaphorePermit>,
-) -> Option<(SharedPixelBuffer<Rgba8Pixel>, Option<Color>)> {
+) -> Option<Decoded> {
     if !crate::http::allowed(&url) {
         log::debug!("skipped artwork from a host YouTube does not use");
         return None;
@@ -208,7 +214,7 @@ async fn fetch(
             .bytes()
             .await
             .ok()?;
-        tokio::task::spawn_blocking(move || decode(&bytes, pixels, with_accent))
+        tokio::task::spawn_blocking(move || decode(&bytes, pixels, edge))
             .await
             .ok()?
     })
@@ -216,17 +222,18 @@ async fn fetch(
     .ok()?
 }
 
-fn decode(
-    bytes: &[u8],
-    edge: u32,
-    with_accent: bool,
-) -> Option<(SharedPixelBuffer<Rgba8Pixel>, Option<Color>)> {
+type Pixels = SharedPixelBuffer<Rgba8Pixel>;
+/// The artwork, and its accent and backdrop where `edge` needs them.
+type Decoded = (Pixels, Option<Color>, Option<Pixels>);
+
+/// Decodes artwork at `pixels`, drawn at `edge` logical pixels.
+fn decode(bytes: &[u8], pixels: u32, edge: u32) -> Option<Decoded> {
     let image = image::load_from_memory(bytes)
         .map_err(|e| log::debug!("undecodable artwork: {e}"))
         .ok()?;
-    // Scale so the shorter side is `edge`; the UI crops to fill.
+    // Scale so the shorter side is `pixels`; the UI crops to fill.
     let (w, h) = (image.width(), image.height());
-    let scale = edge as f32 / w.min(h).max(1) as f32;
+    let scale = pixels as f32 / w.min(h).max(1) as f32;
     let image = if scale < 1.0 {
         image.resize(
             ((w as f32 * scale).round() as u32).max(1),
@@ -236,19 +243,30 @@ fn decode(
     } else {
         image
     };
-    let accent = with_accent.then(|| accent_of(&image));
+    // Only artwork with something drawn behind it needs a colour picked.
+    let small = matches!(edge, PLAYER | HEADER | BANNER).then(|| sample(&image));
+    let accent = small.as_ref().map(accent_of);
+    let backdrop = small.as_ref().filter(|_| edge == PLAYER).map(backdrop_of);
     // Consumes the image, so one already in RGBA is not copied first.
     let rgba = image.into_rgba8();
     let buffer = SharedPixelBuffer::clone_from_slice(rgba.as_raw(), rgba.width(), rgba.height());
-    Some((buffer, accent))
+    Some((buffer, accent, backdrop))
+}
+
+const SAMPLE: u32 = 16;
+const MESH: usize = 4;
+/// Enough pixels that the GPU's bilinear stretch shows no creases.
+const BACKDROP: usize = 24;
+
+fn sample(image: &image::DynamicImage) -> image::RgbImage {
+    image
+        .resize_exact(SAMPLE, SAMPLE, image::imageops::FilterType::Triangle)
+        .to_rgb8()
 }
 
 /// The artwork's strongest colour, darkened enough for white text, as
 /// Spotify tints its page headers.
-fn accent_of(image: &image::DynamicImage) -> Color {
-    let small = image
-        .resize_exact(16, 16, image::imageops::FilterType::Triangle)
-        .to_rgb8();
+fn accent_of(small: &image::RgbImage) -> Color {
     // Pixels are pooled by hue, so artwork of several colours gives its
     // strongest one rather than their average, which tends to grey.
     const HUES: usize = 12;
@@ -293,6 +311,67 @@ fn accent_of(image: &image::DynamicImage) -> Color {
     // Bright hues such as yellow are darkened further to keep white text
     // at 4.5:1.
     readable(from_hsl(h, s, 0.32), true)
+}
+
+/// The artwork's colours where they sit in it, as a blurred copy would show
+/// them without the cost of blurring: a grid of them, each readable behind
+/// white text and each row darker, blended smoothly.
+fn backdrop_of(small: &image::RgbImage) -> Pixels {
+    let block = SAMPLE as usize / MESH;
+    let mesh: [[f32; 3]; MESH * MESH] = std::array::from_fn(|cell| {
+        let (row, column) = (cell / MESH, cell % MESH);
+        let mut sum = [0.0f32; 3];
+        for y in row * block..(row + 1) * block {
+            for x in column * block..(column + 1) * block {
+                let pixel = small.get_pixel(x as u32, y as u32).0;
+                for (total, c) in sum.iter_mut().zip(pixel) {
+                    *total += f32::from(c) / 255.0;
+                }
+            }
+        }
+        let [r, g, b] = sum.map(|c| c / (block * block) as f32);
+        let (h, _, l) = rgb_to_hsl(r, g, b);
+        // Chroma rather than saturation, which runs high for near-black
+        // with a cast.
+        let chroma = r.max(g).max(b) - r.min(g).min(b);
+        let (r, g, b) = channels(readable(
+            from_hsl(h, (chroma * 1.5).min(0.8), 0.25 + l * 0.1),
+            true,
+        ));
+        let dim = 1.0 + row as f32 / (2 * (MESH - 1)) as f32;
+        [r, g, b].map(|c| c / dim)
+    });
+    // Each grid row's or column's weight along an axis: a cubic B-spline,
+    // never negative, so no pixel is brighter than the cells it mixes.
+    let axis: [[f32; MESH]; BACKDROP] = std::array::from_fn(|v| {
+        let u = v as f32 / (BACKDROP - 1) as f32 * (MESH - 1) as f32;
+        let mut weights = [0.0; MESH];
+        for k in -1..=MESH as i32 {
+            let x = (u - k as f32).abs();
+            let weight = if x < 1.0 {
+                (4.0 - 6.0 * x * x + 3.0 * x * x * x) / 6.0
+            } else {
+                (2.0 - x).max(0.0).powi(3) / 6.0
+            };
+            weights[k.clamp(0, MESH as i32 - 1) as usize] += weight;
+        }
+        weights
+    });
+    let mut pixels = Pixels::new(BACKDROP as u32, BACKDROP as u32);
+    for (i, pixel) in pixels.make_mut_slice().iter_mut().enumerate() {
+        let (rows, columns) = (axis[i / BACKDROP], axis[i % BACKDROP]);
+        let mut mixed = [0.0f32; 3];
+        for (cell, colour) in mesh.iter().enumerate() {
+            let weight = rows[cell / MESH] * columns[cell % MESH];
+            for (sum, c) in mixed.iter_mut().zip(colour) {
+                *sum += weight * c;
+            }
+        }
+        let [r, g, b] = mixed;
+        let byte = |c: f32| (c * 255.0).round() as u8;
+        *pixel = Rgba8Pixel::new(byte(r), byte(g), byte(b), 255);
+    }
+    pixels
 }
 
 /// The least saturation `accent_of` gives, which greyish artwork gets.
@@ -425,7 +504,7 @@ mod tests {
             8,
             image::Rgb([230, 20, 20]),
         ));
-        let accent = accent_of(&red);
+        let accent = accent_of(&sample(&red));
         assert!(accent.red() > accent.green() && accent.red() > accent.blue());
         assert!(accent.red() < 180, "dark enough for white text");
 
@@ -441,7 +520,7 @@ mod tests {
             8,
             image::Rgb([128, 128, 128]),
         ));
-        assert_eq!(vivid(accent_of(&grey)), None, "no hue to follow");
+        assert_eq!(vivid(accent_of(&sample(&grey))), None, "no hue to follow");
     }
 
     #[test]
@@ -451,7 +530,7 @@ mod tests {
             8,
             image::Rgb([90, 100, 130]),
         ));
-        let blue = vivid(accent_of(&muted)).expect("a bluish photo has a hue");
+        let blue = vivid(accent_of(&sample(&muted))).expect("a bluish photo has a hue");
         assert!(blue.blue() > blue.red() && blue.blue() > blue.green());
 
         // Red and cyan halves, which average to grey.
@@ -462,7 +541,8 @@ mod tests {
                 image::Rgb([20, 230, 230])
             }
         }));
-        let (r, g, b) = channels(vivid(accent_of(&halves)).expect("one of the two colours"));
+        let (r, g, b) =
+            channels(vivid(accent_of(&sample(&halves))).expect("one of the two colours"));
         let (h, _, _) = rgb_to_hsl(r, g, b);
         assert!(
             !(15.0..165.0).contains(&h) && !(195.0..345.0).contains(&h),
@@ -477,7 +557,7 @@ mod tests {
                 image::Rgb([200, 170, 130])
             }
         }));
-        let blue = vivid(accent_of(&sky)).expect("the sky's colour");
+        let blue = vivid(accent_of(&sample(&sky))).expect("the sky's colour");
         assert!(blue.blue() > blue.red(), "the sky, not the beige");
 
         let near_black = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
@@ -485,14 +565,18 @@ mod tests {
             8,
             image::Rgb([40, 36, 32]),
         ));
-        assert_eq!(vivid(accent_of(&near_black)), None, "a cast isn't a colour");
+        assert_eq!(
+            vivid(accent_of(&sample(&near_black))),
+            None,
+            "a cast isn't a colour"
+        );
 
         let yellow = image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
             8,
             8,
             image::Rgb([240, 220, 20]),
         ));
-        let (r, g, b) = channels(accent_of(&yellow));
+        let (r, g, b) = channels(accent_of(&sample(&yellow)));
         assert!(luminance(r, g, b) <= 0.18, "white text still reads on it");
     }
 
@@ -512,5 +596,34 @@ mod tests {
         let fixed = readable(yellow, false);
         assert!(lum(fixed) <= 0.3, "dark enough behind white icons");
         assert!(fixed.red() > fixed.blue(), "keeps its hue");
+    }
+
+    #[test]
+    fn backdrop_keeps_colours_where_they_sit() {
+        let halves = image::DynamicImage::ImageRgb8(image::RgbImage::from_fn(8, 8, |x, _| {
+            image::Rgb(if x < 4 { [240, 220, 20] } else { [20, 60, 220] })
+        }));
+        let pixels = backdrop_of(&sample(&halves));
+        let at = |x: usize, y: usize| {
+            let p = pixels.as_slice()[y * BACKDROP + x];
+            (
+                f32::from(p.r) / 255.0,
+                f32::from(p.g) / 255.0,
+                f32::from(p.b) / 255.0,
+            )
+        };
+        let (r, _, b) = at(0, 0);
+        assert!(r > b, "yellow at the left");
+        let (r, _, b) = at(BACKDROP - 1, 0);
+        assert!(b > r, "blue at the right");
+        for p in pixels.as_slice() {
+            let [r, g, b] = [p.r, p.g, p.b].map(|c| f32::from(c) / 255.0);
+            assert!(luminance(r, g, b) <= 0.18, "white text reads on it");
+        }
+        let lum = |(r, g, b)| luminance(r, g, b);
+        assert!(
+            lum(at(0, BACKDROP - 1)) < lum(at(0, 0)),
+            "darker at the bottom"
+        );
     }
 }

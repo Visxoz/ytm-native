@@ -11,13 +11,10 @@ use slint::{Timer, TimerMode};
 use super::{App, TICK};
 use crate::lastfm::{self, Error, Play};
 
-/// How often to ask whether the user has allowed access in the browser,
-/// and for how long before giving up. The token lasts an hour, and someone
-/// who first has to sign up or reset a password can take a while.
+/// Polling for access allowed in the browser. The token lasts an hour, and
+/// someone who first has to sign up or reset a password can take a while.
 const POLL_EVERY: Duration = Duration::from_secs(3);
 const POLL_FOR: Duration = Duration::from_secs(20 * 60);
-/// How long to wait before sending again after Last.fm could not take the
-/// plays, or refused one.
 const RETRY_AFTER: Duration = Duration::from_secs(60);
 
 /// The song playing, until enough of it has been heard to count.
@@ -29,10 +26,9 @@ struct Listening {
     last_tick: Option<(f64, Instant)>,
 }
 
-/// What a tick adds to the time heard, the position having `moved` in the
-/// `elapsed` since the last: forward by no more than that time allows, so a
-/// seek adds nothing, while a tick held up by the UI thread (a title-bar
-/// menu, say) loses nothing, as the sound plays on its own thread.
+/// What a tick adds to the time heard: forward movement no greater than the
+/// time elapsed, so a seek adds nothing while a tick held up by the UI thread
+/// loses nothing, as the sound plays on its own thread.
 fn played_through(moved: f64, elapsed: Duration) -> Duration {
     if moved > 0.0 && moved <= (elapsed + TICK).as_secs_f64() {
         Duration::from_secs_f64(moved)
@@ -46,7 +42,6 @@ pub(super) struct Scrobbler {
     session: Option<lastfm::Session>,
     pending: lastfm::Pending,
     playing: Option<Listening>,
-    /// A batch is on its way to Last.fm.
     sending: bool,
     /// Last.fm refused a batch as invalid, so this many of its plays go one
     /// at a time, to find the one it refuses and drop it alone.
@@ -76,7 +71,6 @@ impl Scrobbler {
 }
 
 impl App {
-    /// Shows the Last.fm account, or how to connect one.
     pub(super) fn show_lastfm(&self) {
         let ui = self.ui();
         ui.set_lastfm_available(lastfm::available());
@@ -85,8 +79,7 @@ impl App {
         ui.set_lastfm_user(name.unwrap_or_default().into());
     }
 
-    /// Starts logging the song that just started playing, and shows it on
-    /// the profile as playing now.
+    /// Starts logging the song just started, and sends it as playing now.
     pub(super) fn scrobble_started(self: &Rc<Self>) {
         let (session, play, generation) = {
             let mut state = self.state.borrow_mut();
@@ -127,8 +120,8 @@ impl App {
         );
     }
 
-    /// Counts what was heard of the playing song since the last tick, now at
-    /// `position`, and logs it once that is half of it or four minutes.
+    /// Counts what was heard since the last tick, and logs the song once that
+    /// is half of it or four minutes.
     pub(super) fn scrobble_heard(self: &Rc<Self>, position: f64) {
         {
             let mut state = self.state.borrow_mut();
@@ -152,8 +145,8 @@ impl App {
         self.send_scrobbles();
     }
 
-    /// Sends the oldest plays Last.fm has yet to take, then the rest. The
-    /// plays are saved once it answers, as they are tiny and sent at once.
+    /// Sends the oldest pending plays, then the rest, saving them once
+    /// Last.fm answers.
     pub(super) fn send_scrobbles(self: &Rc<Self>) {
         let (session, batch, generation) = {
             let mut state = self.state.borrow_mut();

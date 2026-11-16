@@ -3,6 +3,7 @@ import { PlaylistPicker } from "dialogs/playlist-picker.slint";
 import { SettingsDialog } from "dialogs/settings.slint";
 import { SignInDialog } from "dialogs/sign-in.slint";
 import { SidePanel } from "panel/side-panel.slint";
+import { FullPlayer } from "shell/full-player.slint";
 import { PageView } from "shell/page-view.slint";
 import { PlayerBar } from "shell/player-bar.slint";
 import { Sidebar } from "shell/sidebar.slint";
@@ -56,7 +57,6 @@ export component AppWindow inherits Window {
     default-font-family: "Segoe UI Variable Text";
     default-font-size: 14px;
 
-    // Navigation and page
     in property <[RowItem]> rows;
     in property <bool> page-loading;
     in property <string> page-error;
@@ -71,11 +71,14 @@ export component AppWindow inherits Window {
     in-out property <string> search-text;
     in-out property <length> page-scroll;
 
-    // Now playing
     in property <bool> has-track;
     in property <string> np-title;
     in property <string> np-artists;
     in property <image> np-art;
+    /// The artwork at the full player's size, while it is open.
+    in property <image> np-cover;
+    /// The artwork's colours, blended, behind the full player.
+    in property <image> np-backdrop;
     in property <color> np-accent: #3a3a3a;
     in property <float> np-duration;
     in property <float> np-position;
@@ -90,15 +93,23 @@ export component AppWindow inherits Window {
     in property <bool> shuffle;
     in property <bool> smart-shuffle;
     in property <int> repeat-mode;
+    in-out property <bool> full-player <=> root.full-screen;
+    /// The queue's drawer over the full player's lyrics.
+    out property <bool> queue-drawer;
+    /// The queue entry that plays after this one, as `Queue::next_index`
+    /// picks it, or -1 when none or the same one does.
+    property <int> up-next: root.repeat-mode == 2 ? -1
+        : root.queue-current + 1 < root.queue.length ? root.queue-current + 1
+        : root.repeat-mode != 0 && root.queue.length > 0 ? 0 : -1;
+    out property <bool> queue-shown: root.full-player ? root.queue-drawer : root.panel-open && root.panel-tab == 0;
+    out property <bool> lyrics-shown: root.full-player || (root.panel-open && root.panel-tab == 1);
 
-    // Panels
     in-out property <bool> sidebar-collapsed;
     in property <[CardItem]> library;
     in-out property <bool> panel-open;
     in-out property <int> panel-tab;
     in property <[QueueItem]> queue;
     in property <int> queue-current;
-    /// Rows picked with Ctrl- or Shift-click.
     in property <int> queue-selected;
     in property <[string]> lyrics;
     in property <bool> lyrics-synced;
@@ -106,7 +117,6 @@ export component AppWindow inherits Window {
     in property <string> lyrics-source;
     in property <bool> lyrics-loading;
 
-    // Account and settings
     in property <image> account-photo;
     in property <bool> signing-in;
     in property <bool> signing-in-browser;
@@ -129,7 +139,6 @@ export component AppWindow inherits Window {
     in property <bool> lastfm-available;
     in property <string> lastfm-user;
     in property <bool> lastfm-connecting;
-    // The equaliser.
     property <bool> eq-open;
     in-out property <bool> equaliser;
     in property <[float]> eq-gains;
@@ -138,7 +147,6 @@ export component AppWindow inherits Window {
     /// The preset the gains match, or -1.
     in property <int> eq-preset;
     in property <float> eq-max-db;
-    // Saving a song to a playlist.
     in-out property <bool> picker-open;
     in property <bool> picker-loading;
     in property <[PlaylistChoice]> playlist-choices;
@@ -179,6 +187,7 @@ export component AppWindow inherits Window {
     callback queue-save();
     callback panel-tab-changed(tab: int);
     callback lyric-clicked(index: int);
+    callback full-player-changed();
     callback sidebar-changed(collapsed: bool);
     callback np-go-artist();
     callback np-go-album();
@@ -208,8 +217,20 @@ export component AppWindow inherits Window {
     callback player-event(kind: string, message: string);
     callback media-action(action: string, value: float);
 
+    changed full-player => {
+        root.queue-drawer = false;
+        root.full-player-changed();
+    }
+
+    /// The full player always shows the lyrics, so there the queue's button
+    /// toggles its drawer and the lyrics' button closes it.
     function open-panel(tab: int) {
-        if root.panel-open && root.panel-tab == tab {
+        if root.full-player {
+            root.queue-drawer = tab == 0 && !root.queue-drawer;
+            if root.queue-drawer {
+                root.panel-tab-changed(0);
+            }
+        } else if root.panel-open && root.panel-tab == tab {
             root.panel-open = false;
         } else {
             root.panel-open = true;
@@ -241,20 +262,14 @@ export component AppWindow inherits Window {
         top-bar.focus-input();
     }
 
-    /// Hands the keyboard back from the search box, as when the page
-    /// changes.
     public function close-search() {
         if top-bar.search-focused {
             top-bar.close();
         }
     }
 
-    /// Closes the search box on a press outside it and its dropdown, in
-    /// logical pixels from the window's corner. Only text inputs and focus
-    /// scopes take focus on a click, so the page's rows and cards would
-    /// leave the box focused, its dropdown over them. Focus is checked
-    /// first, so the far commoner press with the box unfocused skips the
-    /// hit test.
+    /// Closes the search box on a press outside it (logical pixels from the
+    /// window's corner): rows and cards take no focus, so it would stay open.
     public function close-search-outside(x: length, y: length) {
         if top-bar.search-focused && !top-bar.contains(x, y) {
             top-bar.close();
@@ -275,24 +290,24 @@ export component AppWindow inherits Window {
                 root.eq-open = false;
                 return accept;
             }
-            if ev.text == Key.Escape && root.queue-selected > 0 {
+            if ev.text == Key.Escape && root.queue-selected > 0 && root.queue-shown {
                 root.queue-clear-selection();
                 return accept;
             }
-            if ev.text == Key.Delete && root.queue-selected > 0 && !top-bar.search-focused && !root.dialog-open {
+            if ev.text == Key.Escape && root.queue-drawer {
+                root.queue-drawer = false;
+                return accept;
+            }
+            if ev.text == Key.Escape && root.full-player {
+                root.full-player = false;
+                return accept;
+            }
+            if ev.text == Key.Delete && root.queue-selected > 0 && root.queue-shown && !top-bar.search-focused && !root.dialog-open {
                 root.queue-remove-selected();
                 return accept;
             }
             if ev.text == " " && !top-bar.search-focused {
                 root.toggle-play();
-                return accept;
-            }
-            if ev.modifiers.control && (ev.text == "f" || ev.text == "k" || ev.text == "l") {
-                top-bar.focus-input();
-                return accept;
-            }
-            if ev.modifiers.control && ev.text == "b" {
-                root.toggle-sidebar();
                 return accept;
             }
             if ev.modifiers.control && ev.text == Key.RightArrow {
@@ -301,6 +316,18 @@ export component AppWindow inherits Window {
             }
             if ev.modifiers.control && ev.text == Key.LeftArrow {
                 root.previous();
+                return accept;
+            }
+            // The rest act on the page and bars, which the full player hides.
+            if root.full-player {
+                return reject;
+            }
+            if ev.modifiers.control && (ev.text == "f" || ev.text == "k" || ev.text == "l") {
+                top-bar.focus-input();
+                return accept;
+            }
+            if ev.modifiers.control && ev.text == "b" {
+                root.toggle-sidebar();
                 return accept;
             }
             if ev.modifiers.alt && ev.text == Key.LeftArrow {
@@ -314,15 +341,32 @@ export component AppWindow inherits Window {
             reject
         }
 
+        if root.full-player: FullPlayer {
+            art: root.np-cover.width > 0 ? root.np-cover : root.np-art;
+            backdrop: root.np-backdrop;
+            title: root.np-title;
+            artists: root.np-artists;
+            next: root.up-next < 0 ? "" : "Next: " + root.queue[root.up-next].title + "  •  " + root.queue[root.up-next].artists;
+            lyrics: root.lyrics;
+            lyrics-synced: root.lyrics-synced;
+            lyrics-current: root.lyrics-current;
+            lyrics-source: root.lyrics-source;
+            lyrics-loading: root.lyrics-loading;
+            lyric-clicked(index) => { root.lyric-clicked(index); }
+            drawer-width: side-panel.width;
+        }
+
+        // The full player hides the top bar, sidebar and page, keeping their
+        // state; the panel becomes its queue's drawer.
         VerticalLayout {
             padding-left: Theme.gap;
             padding-right: Theme.gap;
 
-            // Top bar
             // On the instance, as Slint ignores `z` on a component's own root;
             // it keeps the search dropdown over the panels below.
             top-bar := TopBar {
                 z: 10;
+                visible: !root.full-player;
                 can-back: root.can-back;
                 can-forward: root.can-forward;
                 nav-current: root.nav-current;
@@ -345,8 +389,8 @@ export component AppWindow inherits Window {
                 vertical-stretch: 1;
                 spacing: Theme.gap;
 
-                // Your Library
                 sidebar := Sidebar {
+                    visible: !root.full-player;
                     sidebar-collapsed: root.sidebar-collapsed;
                     nav-current: root.nav-current;
                     library: root.library;
@@ -355,8 +399,8 @@ export component AppWindow inherits Window {
                     go(nav) => { root.go(nav); }
                 }
 
-                // Main panel
                 main := PageView {
+                    visible: !root.full-player;
                     rows: root.rows;
                     page-loading: root.page-loading;
                     page-error: root.page-error;
@@ -369,9 +413,9 @@ export component AppWindow inherits Window {
                     go(nav) => { root.go(nav); }
                 }
 
-                // Up next and lyrics
-                SidePanel {
-                    panel-open <=> root.panel-open;
+                side-panel := SidePanel {
+                    shown: root.full-player ? root.queue-drawer : root.panel-open;
+                    full-player: root.full-player;
                     panel-tab <=> root.panel-tab;
                     np-accent: root.np-accent;
                     queue: root.queue;
@@ -391,11 +435,17 @@ export component AppWindow inherits Window {
                     queue-clear => { root.queue-clear(); }
                     queue-save => { root.queue-save(); }
                     panel-tab-changed(tab) => { root.panel-tab-changed(tab); }
+                    close => {
+                        if root.full-player {
+                            root.queue-drawer = false;
+                        } else {
+                            root.panel-open = false;
+                        }
+                    }
                     lyric-clicked(index) => { root.lyric-clicked(index); }
                 }
             }
 
-            // Player bar
             PlayerBar {
                 has-track: root.has-track;
                 rating-buttons: root.rating-buttons;
@@ -415,8 +465,9 @@ export component AppWindow inherits Window {
                 shuffle: root.shuffle;
                 smart-shuffle: root.smart-shuffle;
                 repeat-mode: root.repeat-mode;
-                panel-open: root.panel-open;
-                panel-tab: root.panel-tab;
+                full-player <=> root.full-player;
+                queue-active: root.queue-shown;
+                lyrics-active: root.full-player ? !root.queue-drawer : root.lyrics-shown;
                 toggle-play => { root.toggle-play(); }
                 next => { root.next(); }
                 previous => { root.previous(); }
@@ -431,7 +482,6 @@ export component AppWindow inherits Window {
             }
         }
 
-        // Toast
         Rectangle {
             x: (root.width - self.width) / 2;
             y: root.height - Theme.player-bar - self.height - (root.toast-visible ? 20px : 0px);

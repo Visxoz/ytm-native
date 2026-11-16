@@ -1,6 +1,3 @@
-//! Signing in and out, with pasted cookies or Google's sign-in window, and
-//! the account's library and picture.
-
 use std::{cell::Cell, rc::Rc, time::Duration};
 
 use slint::{ComponentHandle, Image, Model, SharedString, Timer, TimerMode};
@@ -156,7 +153,6 @@ impl App {
         self.ui().set_signing_in_browser(false);
     }
 
-    /// Fills the sidebar with the signed-in user's playlists.
     pub(super) fn load_library(self: &Rc<Self>) {
         let api = self.api.clone();
         self.spawn(
@@ -180,7 +176,6 @@ impl App {
         );
     }
 
-    /// Drops back to signed out when YouTube rejects the stored cookie.
     pub(super) fn sign_in_expired(self: &Rc<Self>) {
         log::warn!("the stored sign-in was rejected");
         self.show_signed_out();
@@ -189,8 +184,6 @@ impl App {
         }
     }
 
-    /// Drops what belonged to the account: its pages, saved feed, library
-    /// and picture.
     fn show_signed_out(&self) {
         {
             let mut state = self.state.borrow_mut();
@@ -205,9 +198,8 @@ impl App {
         ui.set_account_photo(Image::default());
     }
 
-    /// Puts the account's profile picture on the account button, and with
-    /// `check_cookie`, checks the stored cookie if the menu didn't come back
-    /// signed in. Refreshes leave that out, as a failed check signs out.
+    /// With `check_cookie`, checks the stored cookie if no photo came back.
+    /// Refreshes leave that out, as a failed check signs out.
     pub(super) fn load_account_photo(self: &Rc<Self>, check_cookie: bool) {
         let api = self.api.clone();
         // Signing in or out meanwhile makes both the photo and the check

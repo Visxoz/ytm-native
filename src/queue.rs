@@ -1,7 +1,5 @@
-//! The play queue. Shuffle reorders what comes after the current track, as
-//! YouTube Music does, and turning it off restores the original order.
-//! Smart Shuffle mixes recommended tracks in among the user's own, marked
-//! so they can be taken out again.
+//! Shuffle reorders only what follows the current track, as YouTube Music
+//! does, and turning it off restores the original order.
 
 use std::{
     collections::HashMap,
@@ -107,7 +105,6 @@ impl<T: Clone> Queue<T> {
         self.rng
     }
 
-    /// A random index below `n`, for shuffled starts.
     pub fn random_below(&mut self, n: usize) -> usize {
         (self.random() % n.max(1) as u64) as usize
     }
@@ -120,7 +117,6 @@ impl<T: Clone> Queue<T> {
         }
     }
 
-    /// Replaces the queue, starting at `start`.
     pub fn set(&mut self, items: Vec<T>, start: usize, shuffle: bool) {
         self.revision += 1;
         self.entries = items.into_iter().map(|item| self.entry(item)).collect();
@@ -147,9 +143,8 @@ impl<T: Clone> Queue<T> {
                     .enumerate()
                     .map(|(i, uid)| (uid, i))
                     .collect();
-                // Entries added while shuffled have no place in the old
-                // order, so they stay behind the entry they followed; the
-                // one playing then never jumps to the end.
+                // Entries added while shuffled stay behind the entry they
+                // followed, so the one playing never jumps to the end.
                 let mut anchor = None;
                 let mut keyed: Vec<_> = std::mem::take(&mut self.entries)
                     .into_iter()
@@ -203,7 +198,6 @@ impl<T: Clone> Queue<T> {
         self.entries.get(index).is_some_and(|e| e.recommended)
     }
 
-    /// Indices of the entries Smart Shuffle put in.
     pub fn recommended(&self) -> impl Iterator<Item = usize> {
         self.entries
             .iter()
@@ -211,8 +205,6 @@ impl<T: Clone> Queue<T> {
             .filter_map(|(i, e)| e.recommended.then_some(i))
     }
 
-    /// Marks the entries at `indices` as Smart Shuffle's, as restored from
-    /// a saved queue.
     pub fn mark_recommended(&mut self, indices: impl IntoIterator<Item = usize>) {
         for index in indices {
             if let Some(entry) = self.entries.get_mut(index) {
@@ -221,8 +213,7 @@ impl<T: Clone> Queue<T> {
         }
     }
 
-    /// Puts a recommendation at `index`, which must be after the current
-    /// track.
+    /// Does nothing unless `index` is after the current track.
     pub fn insert_recommended(&mut self, index: usize, item: T) {
         let Some(current) = self.current else { return };
         if index <= current || index > self.entries.len() {
@@ -233,8 +224,7 @@ impl<T: Clone> Queue<T> {
         self.entries.insert(index, entry);
     }
 
-    /// Takes out every recommendation but the one playing, leaving the
-    /// user's own order as it was. Returns whether any was removed.
+    /// Keeps the one playing and the user's own order. Returns whether any was removed.
     pub fn remove_recommended(&mut self) -> bool {
         let Some(current) = self.current else {
             return false;
@@ -258,7 +248,6 @@ impl<T: Clone> Queue<T> {
         true
     }
 
-    /// The entry that `advance` would move to, without moving.
     pub fn peek_next(&self) -> Option<&T> {
         self.next_index(false).map(|i| &self.entries[i].item)
     }
@@ -277,8 +266,7 @@ impl<T: Clone> Queue<T> {
         }
     }
 
-    /// Moves to the next track. `user` skips ignore repeat-one. Returns
-    /// `None` at the end of the queue.
+    /// `user` skips ignore repeat-one. Returns `None` at the end of the queue.
     pub fn advance(&mut self, user: bool) -> Option<&T> {
         let next = self.next_index(user)?;
         self.current = Some(next);
@@ -306,7 +294,6 @@ impl<T: Clone> Queue<T> {
         self.current()
     }
 
-    /// Inserts right after the current track.
     pub fn play_next(&mut self, item: T) {
         let entry = self.entry(item);
         let at = self.current.map_or(self.entries.len(), |c| c + 1);
@@ -330,8 +317,7 @@ impl<T: Clone> Queue<T> {
         }
     }
 
-    /// Removes the entries at `indices`, all but the current one. Returns
-    /// the indices removed, in order.
+    /// Never removes the current entry. Returns the indices removed, in order.
     pub fn remove_many(&mut self, indices: impl IntoIterator<Item = usize>) -> Vec<usize> {
         let Some(current) = self.current else {
             return Vec::new();
@@ -358,8 +344,7 @@ impl<T: Clone> Queue<T> {
         removed
     }
 
-    /// Moves the entry at `from` so that it sits at `to`. The current track
-    /// may move too; its index follows it.
+    /// The current index follows the current track, which may itself move.
     pub fn move_to(&mut self, from: usize, to: usize) -> bool {
         if from == to || from >= self.entries.len() || to >= self.entries.len() {
             return false;
@@ -384,8 +369,7 @@ impl<T: Clone> Queue<T> {
         true
     }
 
-    /// Moves the entries at `indices`, in their queue order, to right after
-    /// the current track. Returns whether anything moved.
+    /// Keeps the entries' queue order. Returns whether anything moved.
     pub fn play_next_many(&mut self, indices: impl IntoIterator<Item = usize>) -> bool {
         let Some(current) = self.current else {
             return false;
@@ -435,7 +419,6 @@ impl<T: Clone> Queue<T> {
         replaced
     }
 
-    /// Drops everything after the current track.
     pub fn clear_upcoming(&mut self) {
         if let Some(current) = self.current {
             self.revision += 1;

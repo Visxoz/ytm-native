@@ -6,11 +6,12 @@ import { Spinner } from "../widgets/spinner.slint";
 import { Lyrics } from "lyrics.slint";
 import { Drag, PanelAction, QueueRow } from "queue.slint";
 
-/// The right-hand panel, with the queue under "Up next" and the lyrics,
-/// sliding open and shut.
+/// The queue and lyrics panel; over the full player, whose lyrics are always
+/// shown, a drawer of the queue alone.
 export component SidePanel inherits Rectangle {
-    in-out property <bool> panel-open;
+    in property <bool> shown;
     in-out property <int> panel-tab;
+    in property <bool> full-player;
     in property <color> np-accent;
     in property <[QueueItem]> queue;
     in property <int> queue-selected;
@@ -31,21 +32,23 @@ export component SidePanel inherits Rectangle {
     callback queue-save();
     callback panel-tab-changed(tab: int);
     callback lyric-clicked(index: int);
+    callback close();
+    property <int> tab: root.full-player ? 0 : root.panel-tab;
 
-    width: root.panel-open ? Theme.right-panel : 0px;
+    width: root.shown ? Theme.right-panel : 0px;
     animate width {
         duration: 260ms;
         easing: ease-in-out;
     }
     visible: self.width > 1px;
     border-radius: Theme.panel-radius;
-    background: Theme.panel;
+    background: root.full-player ? Theme.ink.with-alpha(0.06) : Theme.panel;
     clip: true;
 
     Rectangle {
         x: 0;
         width: Theme.right-panel;
-        if root.panel-tab == 1: Rectangle {
+        if root.tab == 1: Rectangle {
             background: @linear-gradient(180deg, Theme.tint(root.np-accent) 0%, Theme.tint(root.np-accent.darker(0.5)) 100%);
             animate background { duration: 500ms; }
         }
@@ -59,11 +62,13 @@ export component SidePanel inherits Rectangle {
                 cross-axis-alignment: center;
                 PillGroup {
                     spacing: 8px;
-                    labels: ["Up next", "Lyrics"];
-                    current: root.panel-tab;
+                    labels: root.full-player ? ["Up next"] : ["Up next", "Lyrics"];
+                    current: root.tab;
                     picked(tab) => {
-                        root.panel-tab = tab;
-                        root.panel-tab-changed(tab);
+                        if !root.full-player {
+                            root.panel-tab = tab;
+                            root.panel-tab-changed(tab);
+                        }
                     }
                 }
 
@@ -73,11 +78,11 @@ export component SidePanel inherits Rectangle {
 
                 IconButton {
                     icon: Icons.close;
-                    clicked => { root.panel-open = false; }
+                    clicked => { root.close(); }
                 }
             }
 
-            if root.panel-tab == 0: VerticalLayout {
+            if root.tab == 0: VerticalLayout {
                 vertical-stretch: 1;
                 HorizontalLayout {
                     height: 44px;
@@ -189,7 +194,7 @@ export component SidePanel inherits Rectangle {
                     }
                 }
             }
-            if root.panel-tab == 1: Rectangle {
+            if root.tab == 1: Rectangle {
                 vertical-stretch: 1;
                 if root.lyrics-loading: Spinner {
                     size: 32px;

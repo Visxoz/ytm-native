@@ -94,7 +94,6 @@ export component TrackRow inherits Rectangle {
             padding-right: 16px;
             spacing: 16px;
 
-            // Number, or play / equaliser
             Rectangle {
                 width: 24px;
                 if root.playing && !root.hot: Equalizer {
@@ -192,7 +191,6 @@ export component TrackRow inherits Rectangle {
     }
 }
 
-/// The column labels above a track list.
 export component Columns {
     in property <bool> show-album;
     height: 44px;

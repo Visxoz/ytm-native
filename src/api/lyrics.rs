@@ -1,8 +1,5 @@
-//! Lyrics line by line, timed where YouTube has them so.
-//!
-//! The web client is given lyrics as one block of text. YouTube Music's
-//! Android app is given them as lines, each with its start time when the
-//! lyrics are synced, so the timed ones are asked for as that app.
+//! The web client gets lyrics as one block of text, while the Android app gets
+//! lines with their start times when synced, so timed lyrics are asked for as it.
 
 use serde::Deserialize;
 use serde_json::{Value, json, value::RawValue};

@@ -1,7 +1,5 @@
-//! Plays music videos as their song versions, which are audio only and have
-//! Premium formats. The next track is looked up in the background while its
-//! stream is prefetched, and the song is swapped in only once its own stream
-//! is ready, so nothing ever waits for it.
+//! Music videos play as their song versions, which have Premium formats. The
+//! song is swapped in only once its own stream is ready, so nothing waits for it.
 
 use std::rc::Rc;
 
@@ -17,8 +15,7 @@ pub(super) enum SongVersion {
 }
 
 impl App {
-    /// Starts swapping `next`, the next track, for its song version if it is
-    /// a music video with one. Returns at once; the queue changes later.
+    /// Returns at once; the queue changes later.
     pub(super) fn swap_in_song_version(self: &Rc<Self>, next: &Track) {
         if !next.video {
             return;
@@ -65,8 +62,7 @@ impl App {
         });
     }
 
-    /// Resolves the song's stream, then swaps the song in. Until then the
-    /// queue keeps the video and its prefetched stream.
+    /// Until the song's stream resolves, the queue keeps the video and its stream.
     fn prefetch_song_version(self: &Rc<Self>, video_id: String, song: Track) {
         let ready = {
             let mut state = self.state.borrow_mut();
@@ -108,9 +104,7 @@ impl App {
         });
     }
 
-    /// Puts `song` in place of the video `video_id` in the queue, unless the
-    /// video is already playing, and drops the video's prefetched stream.
-    /// Returns whether it did.
+    /// Never swaps a video already playing. Returns whether it swapped.
     fn put_song_version(self: &Rc<Self>, video_id: &str, song: &Track) -> bool {
         let rows = {
             let mut state = self.state.borrow_mut();

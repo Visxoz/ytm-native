@@ -25,7 +25,6 @@ pub(super) const PREFETCH_FRESH: Duration = Duration::from_secs(60 * 60);
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
 
 impl App {
-    /// Loads and plays the queue's current track.
     pub(super) fn start_current(self: &Rc<Self>) {
         let Some(track) = self.state.borrow().queue.current().cloned() else {
             self.stop();
@@ -99,10 +98,8 @@ impl App {
                     playback.current_premium = false;
                     playback.force_free = Some(id.clone());
                     playback.prefetched.clear();
-                    // Failing mid-song, it carries on from where the sound
-                    // got to, before `start_current` stops the player; at
-                    // the very end, as when the next track fails to open,
-                    // there is nothing left to carry on, so it starts over.
+                    // Mid-song, carry on from where the sound got to, read before
+                    // `start_current` stops the player; at the very end, start over.
                     let position = self.player.position();
                     let carry_on = playback.started
                         && (playback.duration <= 0.0 || position < playback.duration - 1.0);
@@ -208,14 +205,17 @@ impl App {
         if let Some(video) = video {
             self.swap_in_song_version(&video);
         }
-        // At the player bar's size, which `present` shows the moment the
-        // track starts; the queue panel loads its own while open.
+        // At the sizes `present` shows the moment the track starts; the
+        // queue panel loads its own while open.
         let art = self
             .state
             .borrow()
             .queue
             .peek_next()
             .and_then(|t| t.thumb.clone());
+        if self.ui().get_full_player() {
+            self.load_image(art.clone(), images::COVER, |_, _| {});
+        }
         self.load_image(art, images::PLAYER, |_, _| {});
         let next = {
             let state = self.state.borrow();
@@ -326,10 +326,9 @@ impl App {
                 self.spawn(
                     async move { api.track_radio(&seed).await },
                     move |app, result| {
-                        // Something else started playing meanwhile, such as
-                        // another queue, and plays on as it is. Not the
-                        // queue's revision: the radio queued as the last
-                        // track started may have just extended it.
+                        // Something else started meanwhile. Not the queue's
+                        // revision: the radio queued as the last track started
+                        // may have just extended it.
                         if app.state.borrow().playback.generation != generation {
                             return;
                         }

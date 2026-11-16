@@ -1,8 +1,5 @@
-//! Smart Shuffle: while shuffling, recommended tracks are mixed into the
-//! queue, one after every few of the user's own, whether it is a playlist,
-//! album or radio. They come from the radio of one of the queue's tracks, a
-//! batch at a time as the queue runs, and are marked in the queue so that
-//! turning Smart Shuffle off takes them out again.
+//! Smart Shuffle mixes recommendations, from the radio of one of the queue's
+//! tracks, in after every few of the user's own, marked so they can be taken out.
 
 use std::{
     collections::{HashSet, VecDeque},
@@ -45,7 +42,6 @@ impl Smart {
         self.gap = 0;
     }
 
-    /// The next pooled recommendation not already in the queue.
     fn fresh(&mut self) -> Option<Track> {
         while let Some(track) = self.pool.pop_front() {
             if !self.known.contains(&track.id) {
@@ -64,7 +60,6 @@ impl Smart {
     }
 }
 
-/// A random one of the user's own tracks, to seed a batch from.
 fn seed(queue: &mut Queue<Track>) -> Option<String> {
     let own = queue.entries().filter(|(_, r)| !r).count();
     let pick = queue.random_below(own);

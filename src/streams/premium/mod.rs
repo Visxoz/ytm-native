@@ -1,10 +1,6 @@
-//! Premium audio (256 kbps Opus) for signed-in YouTube Premium accounts.
-//!
-//! YouTube offers Premium formats only to signed-in web clients, whose URLs
-//! are scrambled by its player JavaScript. Once per player version the
-//! player is cut down natively (see `trim`) and cached; each song then
-//! unscrambles its URL in a throwaway QuickJS context, so nothing stays in
-//! memory between songs.
+//! Premium audio (256 kbps Opus), offered only to signed-in web clients whose
+//! URLs the player JavaScript scrambles. The player is trimmed once per
+//! version (`trim`); each song is unscrambled in a throwaway QuickJS context.
 
 mod player;
 mod trim;
@@ -218,11 +214,9 @@ fn unscramble(format: &streams::Format, player: &Player) -> Result<String, Strin
     Ok(url.into())
 }
 
-/// The format to play from a web client's answer: `Err` when signed in
-/// without `any_format` and no Premium one plays, `Ok(None)` when no audio
-/// does. Premium formats come first, so a song with AAC 141 but no Opus 774
-/// doesn't fall to the free Opus beside them; a bitrate cap, which they
-/// never fit, goes to the rest.
+/// `Err` when signed in without `any_format` and no Premium format plays,
+/// `Ok(None)` when no audio does. Premium comes first, so AAC 141 beats free
+/// Opus; a bitrate cap, which Premium never fits, goes to the rest.
 fn choose(
     formats: &[streams::Format],
     signed_in: bool,
@@ -241,12 +235,9 @@ fn choose(
     }
 }
 
-/// Resolves a Premium stream. `cookie` is `None` only for dry runs, which
-/// time the path without a Premium account. With `any_format`, a song
-/// without a Premium stream takes the best the web client has within
-/// `max_kbps`: for an account known to have Premium, as its free formats
-/// play without a second request, and as the last resort when no client
-/// hands out plain URLs.
+/// `cookie` is `None` only for dry runs. With `any_format`, a song without a
+/// Premium stream takes the web client's best within `max_kbps`, saving a
+/// second request for a known Premium account, or as the last resort.
 pub async fn resolve(
     video_id: &str,
     cookie: Option<&str>,

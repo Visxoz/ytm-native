@@ -1,6 +1,5 @@
-//! The equaliser: six peaking filters, run in the
-//! device callback so a change is heard at once rather than after the
-//! audio already decoded ahead.
+//! Six peaking filters, run in the device callback so a change is heard at
+//! once rather than after the audio already decoded ahead.
 
 use std::f64::consts::PI;
 
@@ -79,15 +78,12 @@ pub(super) struct Equaliser {
     stale: bool,
     /// Every band's filter, so the memory keeps its layout as gains change.
     filters: [Biquad; BANDS.len()],
-    /// Each channel's memory for each filter, channel by channel. Kept
-    /// through a change of gains, as zeroing it mid-song would click. Sized
-    /// for the most channels the decoder gives, so the device callback
-    /// never allocates.
+    /// Kept through a change of gains, as zeroing it mid-song would click;
+    /// sized for the most channels, so the device callback never allocates.
     memory: [[f32; 2]; BANDS.len() * MAX_CHANNELS],
     /// Lowers the whole signal by the peak of the combined boost, so the
     /// bands cannot push the music past full scale.
     preamp: f32,
-    /// Every band at 0 dB, so nothing needs running.
     flat: bool,
 }
 
@@ -125,11 +121,9 @@ impl Equaliser {
         (self.rate, self.channels, self.stale) = (rate, channels, false);
     }
 
-    /// Filters interleaved `samples` in place.
     pub(super) fn process(&mut self, samples: &mut [f32], rate: u32, channels: usize) {
-        // Filters left idle are kept at rest, so they don't later resume with
-        // stale music in their memory, which thumps. An idle 0 dB filter
-        // would have settled there anyway.
+        // Idle filters are kept at rest, as resuming with stale music in
+        // their memory thumps.
         if self.gains.is_none() || rate == 0 || channels == 0 {
             self.memory.fill([0.0; 2]);
             return;

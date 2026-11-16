@@ -1,9 +1,7 @@
 name: Canary
 
-# Asks YouTube daily whether every stream path still works: each plain-URL
-# client, the bytes it serves, and trimming the current player for Premium.
-# A failure opens an issue, so a change on YouTube's side is known the day
-# it happens; the app keeps playing through the next client meanwhile.
+# Asks YouTube daily whether every stream path still works (each plain-URL
+# client and the Premium player trim), opening an issue when one breaks.
 on:
   schedule:
     - cron: '17 6 * * *'

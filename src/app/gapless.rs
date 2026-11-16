@@ -1,15 +1,10 @@
-//! Queues the next track in the player to follow the current one without a
-//! gap or fading into it, and moves the app on once it is heard.
-
 use std::{rc::Rc, time::Instant};
 
 use super::App;
 use crate::{api::Track, audio::SILENCE_TRIM_SECS};
 
-/// How long before a track ends the next one is queued to follow it with no
-/// gap: time for its stream to start downloading and its decoder to open.
-/// A crossfade adds its own length and the silence it may cut, as the
-/// player holds that much of the current track back.
+/// Time for the next stream to start downloading and its decoder to open. A
+/// crossfade adds its length and trimmed silence, as the player holds that back.
 const GAPLESS_LEAD_SECS: f64 = 15.0;
 /// Long enough to blend two songs, short enough to keep most of an ending.
 const CROSSFADE_SECS: f64 = 6.0;
@@ -27,10 +22,7 @@ fn in_album_order(current: Option<&Track>, next: &Track) -> bool {
 }
 
 impl App {
-    /// Queues the next track in the player shortly before the current one
-    /// ends, so it follows without a gap or fades in, and drops a queued
-    /// track the queue no longer has next. Runs every tick, so it copies
-    /// nothing until a track is due.
+    /// Runs every tick, so it copies nothing until a track is due.
     pub(super) fn update_gapless(self: &Rc<Self>, position: f64) {
         let (stale, due, generation) = {
             let state = self.state.borrow();

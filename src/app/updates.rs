@@ -1,5 +1,3 @@
-//! Checking GitHub for a newer release and installing it.
-
 use std::{
     rc::Rc,
     sync::{
@@ -25,7 +23,6 @@ pub(super) fn up_to_date_status(checking: bool) -> String {
 }
 
 impl App {
-    /// Looks for a newer release, when checks are on and none is waiting.
     pub(super) fn check_for_update(self: &Rc<Self>) {
         if !self.state.borrow().settings.check_updates || self.update.borrow().is_some() {
             return;
@@ -52,8 +49,7 @@ impl App {
         });
     }
 
-    /// Downloads and checks the update, then closes the app as its close
-    /// button does; the update takes over as the app exits.
+    /// Closes the app as its close button does; the update takes over on exit.
     pub(super) fn install_update(self: &Rc<Self>) {
         let Some(found) = self.update.borrow().clone() else {
             return;

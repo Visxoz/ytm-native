@@ -1,5 +1,3 @@
-//! Tracks and cards as the UI's row and card items.
-
 use super::{opaque, s};
 use crate::{
     CardItem, RowItem, RowKind, TrackItem,

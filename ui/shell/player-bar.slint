@@ -5,7 +5,6 @@ import { IconButton, PlayButton } from "../widgets/buttons.slint";
 import { Slider } from "../widgets/slider.slint";
 import { Spinner } from "../widgets/spinner.slint";
 
-/// The bar along the bottom: the track playing, the transport and seek bar, and the quality badge, panel buttons and volume.
 export component PlayerBar inherits Rectangle {
     in property <bool> has-track;
     in property <string> np-title;
@@ -24,9 +23,10 @@ export component PlayerBar inherits Rectangle {
     in property <bool> shuffle;
     in property <bool> smart-shuffle;
     in property <int> repeat-mode;
-    in property <bool> panel-open;
-    in property <int> panel-tab;
+    in property <bool> lyrics-active;
+    in property <bool> queue-active;
     in property <bool> rating-buttons;
+    in-out property <bool> full-player;
 
     callback toggle-play();
     callback next();
@@ -57,7 +57,6 @@ export component PlayerBar inherits Rectangle {
 
     height: Theme.player-bar;
 
-    // Now playing
     ContextMenuArea {
         x: 8px;
         width: parent.width * 0.3;
@@ -139,7 +138,6 @@ export component PlayerBar inherits Rectangle {
         }
     }
 
-    // Transport
     VerticalLayout {
         x: (parent.width - self.width) / 2;
         width: min(640px, parent.width * 0.4);
@@ -221,13 +219,11 @@ export component PlayerBar inherits Rectangle {
         }
     }
 
-    // Options
     HorizontalLayout {
         x: parent.width - self.width - 8px;
         width: self.preferred-width;
         spacing: 4px;
         cross-axis-alignment: center;
-        // Quality badge; Premium streams get a red PREMIUM tag.
         if root.np-quality != "": Rectangle {
             width: badge.preferred-width;
             height: 20px;
@@ -265,14 +261,19 @@ export component PlayerBar inherits Rectangle {
 
         IconButton {
             icon: Icons.lyrics;
-            active: root.panel-open && root.panel-tab == 1;
+            active: root.lyrics-active;
             clicked => { root.open-panel(1); }
         }
 
         IconButton {
             icon: Icons.queue;
-            active: root.panel-open && root.panel-tab == 0;
+            active: root.queue-active;
             clicked => { root.open-panel(0); }
+        }
+
+        IconButton {
+            icon: root.full-player ? Icons.fullscreen-exit : Icons.fullscreen;
+            clicked => { root.full-player = !root.full-player; }
         }
 
         IconButton {

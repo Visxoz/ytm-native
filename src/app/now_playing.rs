@@ -3,7 +3,7 @@
 
 use std::{rc::Rc, time::Duration};
 
-use slint::{ComponentHandle, Model, ModelRc, SharedString, TimerMode, VecModel};
+use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, TimerMode, VecModel};
 
 use super::{App, TICK, s};
 use crate::{
@@ -53,8 +53,7 @@ pub(super) fn queue_item(
 }
 
 impl App {
-    /// Shows `track` as the one playing: the player bar, its artwork, the
-    /// queue, the media overlay, Discord, the lyrics and the saved session.
+    /// Shows `track` as the one playing everywhere it appears.
     pub(super) fn present(self: &Rc<Self>, track: &Track, position: f64) {
         let ui = self.ui();
         // Not a song shown again, as on repeat or a retry.
@@ -84,46 +83,71 @@ impl App {
             state.lyrics_for = None;
             state.lyric_starts.clear();
         }
-        if ui.get_panel_open() && ui.get_panel_tab() == 1 {
+        if ui.get_lyrics_shown() {
             self.load_lyrics();
         }
         // The same song again keeps its lyrics; light the line it starts at.
         self.show_lyric_line(position);
     }
 
-    /// Loads `track`'s artwork into the player bar, with the colours taken
-    /// from it, unless another track is playing by then.
+    fn is_current(&self, id: &str) -> bool {
+        self.state
+            .borrow()
+            .queue
+            .current()
+            .is_some_and(|t| t.id == id)
+    }
+
+    /// Loads `track`'s artwork and colours, unless another track is playing by then.
     pub(super) fn load_player_art(self: &Rc<Self>, track: &Track) {
+        self.load_cover();
+        // Without artwork, or should it fail to load, the last song's colours
+        // would linger. Cached artwork sets them again at once.
+        self.ui().set_np_backdrop(Image::default());
+        let Some(url) = track.thumb.clone() else {
+            self.set_artwork_accent(None);
+            return;
+        };
         let id = track.id.clone();
-        let url = track.thumb.clone();
-        self.load_image(url.clone(), images::PLAYER, move |app, image| {
-            if !app
-                .state
-                .borrow()
-                .queue
-                .current()
-                .is_some_and(|t| t.id == id)
-            {
+        self.load_image(Some(url.clone()), images::PLAYER, move |app, image| {
+            if !app.is_current(&id) {
                 return;
             }
             let ui = app.ui();
             ui.set_np_art(image);
-            if let Some(color) = url
-                .as_deref()
-                .and_then(|url| images::accent(url, images::PLAYER))
-            {
+            if let Some(color) = images::accent(&url, images::PLAYER) {
                 ui.set_np_accent(color);
                 app.set_artwork_accent(images::vivid(color));
             }
+            ui.set_np_backdrop(images::backdrop(&url).unwrap_or_default());
         });
-        // Without artwork, the last song's colour would linger.
-        if track.thumb.is_none() {
-            self.set_artwork_accent(None);
-        }
     }
 
-    /// Puts `track` on the player bar at `position`, with the length the
-    /// playback has for it.
+    /// Loads the playing track's artwork at the full player's size while it
+    /// is open, and lets the last one go.
+    pub(super) fn load_cover(self: &Rc<Self>) {
+        let ui = self.ui();
+        ui.set_np_cover(Image::default());
+        if !ui.get_full_player() {
+            return;
+        }
+        let Some((id, url)) = self
+            .state
+            .borrow()
+            .queue
+            .current()
+            .map(|t| (t.id.clone(), t.thumb.clone()))
+        else {
+            return;
+        };
+        let wanted = move |app: &Rc<Self>| app.ui().get_full_player() && app.is_current(&id);
+        self.load_image_while(url, images::COVER, wanted.clone(), move |app, image| {
+            if wanted(app) {
+                app.ui().set_np_cover(image);
+            }
+        });
+    }
+
     pub(super) fn show_track_details(&self, ui: &AppWindow, track: &Track, position: f64) {
         ui.set_has_track(true);
         ui.set_np_title(s(&track.title));
@@ -288,7 +312,7 @@ impl App {
         // Rows nobody can see aren't worth a download; `load_missing_queue_art`
         // catches up when Up next is shown.
         let ui = self.ui();
-        if !(ui.get_panel_open() && ui.get_panel_tab() == 0) {
+        if !ui.get_queue_shown() {
             return;
         }
         let expected = url.clone();
@@ -394,7 +418,7 @@ impl App {
     /// so it lands on the beat.
     pub(super) fn show_lyric_line(self: &Rc<Self>, position: f64) {
         let ui = self.ui();
-        if !(ui.get_panel_open() && ui.get_panel_tab() == 1) {
+        if !ui.get_lyrics_shown() {
             return;
         }
         let (line, next) = {

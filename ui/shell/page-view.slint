@@ -5,7 +5,6 @@ import { PillButton, PlayButton } from "../widgets/buttons.slint";
 import { ListView } from "../widgets/list.slint";
 import { Spinner } from "../widgets/spinner.slint";
 
-/// The main panel: the current page's rows under its accent tint, with a sticky title, and the loading and error states.
 export component PageView inherits Rectangle {
     in property <[RowItem]> rows;
     in property <bool> page-loading;
@@ -26,7 +25,6 @@ export component PageView inherits Rectangle {
     background: Theme.panel;
     clip: true;
 
-    // Tint behind the top of the page, scrolling with it.
     Rectangle {
         y: root.page-scroll;
         height: 420px;

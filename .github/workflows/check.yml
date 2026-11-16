@@ -9,9 +9,8 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
 
-# Lint and test run side by side, each on the light `ci` profile. Caches are
-# saved from main only: one saved for a tag or pull request can be read by
-# nothing else, and would only push main's out of the 10 GB limit.
+# Caches are saved from main only: a tag's or pull request's can be read by
+# nothing else, and would push main's out of the 10 GB limit.
 jobs:
   lint:
     name: Format and lint

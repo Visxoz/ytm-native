@@ -1,10 +1,6 @@
-//! Resolves playable stream URLs straight from YouTube's player endpoint.
-//!
-//! Most clients get scrambled URLs that need YouTube's player JavaScript to
-//! unlock. A few get plain URLs, so asking as one of those keeps the whole
-//! pipeline native. They are tried in order: YouTube tends to change one
-//! client at a time, so a song keeps playing on the next while the first
-//! is fixed. Premium streams go through `premium`.
+//! Resolves stream URLs from YouTube's player endpoint, asking as clients that
+//! get plain, unscrambled URLs. They are tried in order, as YouTube tends to
+//! break one client at a time. Premium streams go through `premium`.
 
 pub mod premium;
 
@@ -76,8 +72,7 @@ pub struct ResolvedStream {
     pub bitrate_kbps: f64,
     pub duration: Option<f64>,
     pub loudness_db: Option<f32>,
-    /// A Premium format (774 or 141). Free formats the web client gives a
-    /// Premium account are not.
+    /// Not set for free formats the web client gives a Premium account.
     pub premium: bool,
     /// YouTube's format number: 774 and 141 are the Premium ones.
     pub itag: u32,
@@ -172,7 +167,6 @@ impl PlayerResponse {
             .and_then(|a| a.loudness_db)
     }
 
-    /// Builds the stream to play from one of this response's formats.
     pub fn stream(
         &self,
         format: &Format,
@@ -208,10 +202,9 @@ impl PlayerResponse {
     }
 }
 
-/// Fetches the first bytes of a stream that may play next, so googlevideo
-/// has them to hand: its first answer for a rarely played song can take
-/// over half a second, and later ones under 100 ms. Blocking, and on the
-/// download's client, so the connection it opens is pooled for the download.
+/// Fetches the likely next stream's first bytes, as googlevideo's first answer
+/// for a rarely played song can take over half a second. Blocking, and on the
+/// download's client so the connection is pooled for it.
 pub fn warm(url: &str, headers: &[(String, String)]) {
     if !crate::http::allowed(url) {
         return;
@@ -238,9 +231,8 @@ fn first_bytes(url: &str, headers: &[(String, String)]) -> Result<usize, String>
     Ok(bytes.len())
 }
 
-/// Fetches the player response and picks the best audio stream, from the
-/// first client that gives one. The first client's reason is reported
-/// when none does, as it is the usual one.
+/// The first client's error is reported when none works, as it is the usual
+/// one.
 pub async fn resolve(
     video_id: &str,
     visitor_data: &str,
@@ -264,7 +256,6 @@ pub async fn resolve(
     Err(first_error.unwrap_or_else(|| "no clients".into()))
 }
 
-/// Asks the player endpoint as one client.
 async fn resolve_with(
     client: &Client,
     video_id: &str,
@@ -462,10 +453,8 @@ mod tests {
         );
     }
 
-    /// Asks YouTube itself whether every stream path still works: each
-    /// plain-URL client, a byte of what it serves, and the player trimming
-    /// the Premium path relies on. The canary workflow runs it daily, so a
-    /// change on YouTube's side shows up before users notice.
+    /// Checks every plain-URL client and the Premium player trim against
+    /// YouTube itself; the canary workflow runs it daily.
     #[test]
     #[ignore = "talks to YouTube; run by the canary workflow"]
     fn canary_every_stream_path_still_works() {

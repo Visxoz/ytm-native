@@ -1,13 +1,9 @@
-//! Starting playback from the page: tracks, cards, header buttons and
-//! track menus.
-
 use std::{collections::HashSet, rc::Rc};
 
 use super::App;
 use crate::api::{CardKind, QueueMode, Route, Section, Track};
 
 impl App {
-    /// One track of the page.
     fn section_track(&self, section: usize, index: usize) -> Option<Track> {
         match self.state.borrow().page.sections.get(section)? {
             Section::Tracks { tracks, .. } => tracks.get(index).cloned(),
@@ -37,7 +33,6 @@ impl App {
         }
     }
 
-    /// Plays `track` now and queues a radio based on it, like YouTube Music.
     fn play_with_radio(self: &Rc<Self>, track: Track) {
         let id = track.id.clone();
         {
@@ -94,8 +89,8 @@ impl App {
         self.prefetch_next();
     }
 
-    /// Plays `tracks`, shuffled if the shuffle button is on. A Shuffle button
-    /// turns it on, and Play leaves it, and Smart Shuffle, as they are.
+    /// A Shuffle button turns shuffle on; Play leaves it, and Smart Shuffle,
+    /// as they are.
     fn play_tracks(self: &Rc<Self>, tracks: Vec<Track>, shuffle: bool) {
         if tracks.is_empty() {
             self.toast("Nothing to play here");
@@ -108,9 +103,7 @@ impl App {
         self.play_queue(tracks, None);
     }
 
-    /// Replaces the queue with `tracks` and plays it from `start`, or, for
-    /// `None`, from a random track if shuffling and the first if not. With
-    /// the shuffle button on, the tracks after the first are shuffled.
+    /// A `start` of `None` starts from a random track if shuffling, else the first.
     fn play_queue(self: &Rc<Self>, tracks: Vec<Track>, start: Option<usize>) {
         {
             let mut state = self.state.borrow_mut();
@@ -172,7 +165,6 @@ impl App {
         }
     }
 
-    /// Plays a song card from the current page, with a radio after it.
     pub(super) fn play_song_card(self: &Rc<Self>, id: &str) {
         let track = self
             .state

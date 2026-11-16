@@ -1,7 +1,4 @@
-//! Editing the queue from its panel: dragging a row into a new place,
-//! selecting several to remove or play next, and saving it all as a
-//! playlist. Rows change in place, so a long queue is never rebuilt for one
-//! move.
+//! Panel edits change rows in place, so a long queue is never rebuilt for one move.
 
 use std::rc::Rc;
 
@@ -19,8 +16,6 @@ pub(super) struct Selection {
 }
 
 impl App {
-    /// A click on a queue row: plain plays it, Ctrl toggles its selection,
-    /// and Shift selects from the row last clicked up to it.
     pub(super) fn queue_clicked(self: &Rc<Self>, index: usize, control: bool, shift: bool) {
         if !(control || shift) {
             self.clear_selection();
@@ -101,7 +96,6 @@ impl App {
             .collect()
     }
 
-    /// Puts the row dragged from `from` down at `to`.
     pub(super) fn queue_move(self: &Rc<Self>, from: usize, to: usize) {
         if !self.state.borrow_mut().queue.move_to(from, to) {
             return;
@@ -124,7 +118,6 @@ impl App {
         self.queue_edited();
     }
 
-    /// Moves `rows` to right after the current track, in their queue order.
     pub(super) fn queue_play_next(self: &Rc<Self>, mut rows: Vec<usize>) {
         let (current, moved) = {
             let mut state = self.state.borrow_mut();
@@ -154,14 +147,12 @@ impl App {
         self.queue_edited();
     }
 
-    /// Drops everything after the current track.
     pub(super) fn queue_clear(self: &Rc<Self>) {
         self.state.borrow_mut().queue.clear_upcoming();
         self.refresh_queue();
         self.queue_edited();
     }
 
-    /// Shows the entry just added at `index` without rebuilding the rest.
     pub(super) fn queue_inserted(self: &Rc<Self>, index: usize) {
         let (item, art) = {
             let state = self.state.borrow();
@@ -178,10 +169,8 @@ impl App {
         self.queue_edited();
     }
 
-    /// Shows the recommendations Smart Shuffle put in at `rows`, in the
-    /// order it put them in, without rebuilding the rest, so a selection or
-    /// a drag survives. Each index already counts the rows put in before it,
-    /// and all are after the current track, so the highlight stays put.
+    /// Inserted in place so a selection or drag survives. Each index counts the
+    /// rows put in before it, and all follow the current, so its highlight stays.
     pub(super) fn queue_recommended(self: &Rc<Self>, before: u64, rows: &[usize]) {
         let (current, len) = {
             let state = self.state.borrow();
@@ -221,9 +210,7 @@ impl App {
         }
     }
 
-    /// After rows changed in place: the model is at the queue's revision,
-    /// a track queued in the player that is no longer next is dropped, and
-    /// the new next one is prefetched.
+    /// After rows changed in place, so the model is at the queue's revision.
     fn queue_edited(self: &Rc<Self>) {
         self.clear_selection();
         let (revision, current, stale) = {
@@ -251,7 +238,6 @@ impl App {
         self.prefetch_next();
     }
 
-    /// Saves the queue as a private playlist named after today.
     pub(super) fn save_queue_as_playlist(self: &Rc<Self>) {
         let ids: Vec<String> = self
             .state

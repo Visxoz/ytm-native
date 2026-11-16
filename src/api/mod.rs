@@ -1,5 +1,3 @@
-//! YouTube Music data through rustypipe, shaped into the pages the UI shows.
-
 mod account;
 mod convert;
 mod format;
@@ -81,9 +79,8 @@ impl Api {
         self.rp.query()
     }
 
-    /// A query that sends the sign-in cookie when there is one: private
-    /// playlists, Liked music and radios made from them exist only for their
-    /// owner.
+    /// Sends the sign-in cookie when there is one: private playlists, Liked
+    /// music and radios made from them exist only for their owner.
     fn user_q(&self) -> RustyPipeQuery {
         let q = self.q();
         if q.auth_enabled(ClientType::DesktopMusic) {

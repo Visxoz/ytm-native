@@ -1,5 +1,3 @@
-//! Moving between pages: history, the page cache and search suggestions.
-
 use std::{
     rc::Rc,
     time::{Duration, Instant},
@@ -14,7 +12,6 @@ use crate::{
     settings,
 };
 
-/// How long a loaded page is reused when navigating back to it.
 const PAGE_CACHE_FOR: Duration = Duration::from_secs(5 * 60);
 const PAGE_CACHE_SIZE: usize = 12;
 const SUGGEST_DELAY: Duration = Duration::from_millis(150);
@@ -99,8 +96,6 @@ impl App {
         );
     }
 
-    /// Shows a page that has loaded, or why it did not, unless the user
-    /// has moved on meanwhile. With `cache_as`, it is kept for going back.
     fn page_loaded(
         self: &Rc<Self>,
         generation: u64,
@@ -126,14 +121,11 @@ impl App {
         }
     }
 
-    /// The signed-in feed, fresh each time it is not cached, waiting out
-    /// YouTube's refusals. Should it fail before any of it can show, the
-    /// feed as it last loaded in full stands in, or with none saved, the
-    /// charts: rather that than a fresh one missing shelves.
+    /// Should the feed fail before any of it shows, the last whole one stands
+    /// in, or the charts: rather that than a fresh one missing shelves.
     fn load_personal_home(self: &Rc<Self>, generation: u64) {
-        // The picture is asked again with each fresh feed, so one changed
-        // elsewhere, or one that failed to load, shows within minutes rather
-        // than at the next start. The first also checks the stored cookie.
+        // Asked with each fresh feed, so a changed or failed picture shows
+        // within minutes. The first also checks the stored cookie.
         let check_cookie = !std::mem::replace(&mut self.state.borrow_mut().cookie_checked, true);
         self.load_account_photo(check_cookie);
         let api = self.api.clone();
@@ -174,8 +166,7 @@ impl App {
         );
     }
 
-    /// The charts, in place of a personal feed that failed with none saved.
-    /// Not cached, so Home asks for the feed again next time.
+    /// Not cached, so Home asks for the personal feed again next time.
     fn show_public_home(self: &Rc<Self>, generation: u64) {
         let api = self.api.clone();
         self.spawn(
@@ -184,8 +175,6 @@ impl App {
         );
     }
 
-    /// Saves the signed-in feed once it has loaded in full, off the UI
-    /// thread.
     pub(super) fn save_home(self: &Rc<Self>, sections: Vec<api::Section>) {
         if !self.state.borrow().signed_in {
             return;
@@ -214,8 +203,7 @@ impl App {
         self.navigate(route, false);
     }
 
-    /// Shows `route` loaded afresh, as signing in or out changes what it
-    /// holds. Navigating to the page already shown would do nothing.
+    /// For signing in or out; navigating to the page already shown would do nothing.
     pub(super) fn show_fresh(self: &Rc<Self>, route: Route) {
         if self.state.borrow().route == route {
             self.reload();
@@ -232,8 +220,6 @@ impl App {
         self.step_history(true);
     }
 
-    /// Returns to the page one step back or forward, where it was scrolled,
-    /// leaving the current one on the other side.
     fn step_history(self: &Rc<Self>, forward: bool) {
         let scroll = self.ui().get_page_scroll();
         let entry = {
@@ -264,7 +250,6 @@ impl App {
         ui.set_can_forward(!state.forward.is_empty());
     }
 
-    /// Searches for `query`, keeping it among the recent searches.
     pub(super) fn search(self: &Rc<Self>, query: &str) {
         self.drop_suggestions();
         let query = query.trim();
@@ -299,8 +284,6 @@ impl App {
             .set_recent_searches(ModelRc::from(Rc::new(recent)));
     }
 
-    /// Clears the suggestions, dropping any request for them still on its
-    /// way.
     fn drop_suggestions(&self) {
         self.suggest_timer.stop();
         self.state.borrow_mut().suggest_generation += 1;

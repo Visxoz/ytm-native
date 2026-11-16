@@ -1,10 +1,9 @@
 import { Theme } from "../theme.slint";
 
-/// A stand-in for the std `ListView` whose scrolling always rests on whole
-/// physical pixels. Skia snaps text to the pixel grid but draws shapes at
-/// fractional positions, so the std wheel animation made text jitter against
-/// the rows behind it. Slint still creates rows lazily for a component named
-/// `ListView` with these `content-*` and `visible-*` properties.
+/// A stand-in for the std `ListView`, scrolling on whole physical pixels, as
+/// Skia snaps text but not shapes, so fractional offsets made text jitter.
+/// Slint still virtualises it because of its name and `content-*`/`visible-*`
+/// properties.
 export component ListView {
     in-out property <length> content-y;
     in-out property <length> content-height;
@@ -37,11 +36,10 @@ export component ListView {
             }
         }
     }
-    // Moved from outside: Slint shifts the offset to keep rows in place as it
-    // re-estimates their height, and the app restores scroll positions. Carry
-    // a glide along by the same amount; its next frame puts the list back on
-    // the grid. Rounding the offset here instead makes Slint re-estimate
-    // again, and the two chase each other until Slint gives up on the event.
+    // Moved from outside (Slint re-estimating row heights, or a restored
+    // position): carry a glide along; its next frame puts the list back on the
+    // grid. Rounding here instead makes Slint re-estimate again, and the two
+    // chase each other.
     changed content-y => {
         if root.content-y != root.written {
             if root.gliding {
@@ -81,7 +79,6 @@ export component ListView {
         }
     }
 
-    // Overlay scrollbar: a thin thumb that widens under the pointer.
     bar := TouchArea {
         property <length> thumb-height: max(32px, root.height * root.visible-height / max(root.content-height, 1px));
         property <length> pressed-scroll;

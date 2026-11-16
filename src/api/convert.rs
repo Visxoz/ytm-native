@@ -1,5 +1,3 @@
-//! Shapes rustypipe's items into tracks, cards and sections.
-
 use rustypipe::model::{
     AlbumItem, AlbumType, ArtistId, ArtistItem, MusicGenreItem, MusicPlaylistItem, Thumbnail,
     TrackItem, TrackType,
@@ -10,7 +8,6 @@ use super::{
     format::{compact, songs},
 };
 
-/// Thumbnail edge, in pixels, wanted for list rows and for cards.
 pub const ROW_THUMB: u32 = 120;
 pub const CARD_THUMB: u32 = 240;
 pub const HEADER_THUMB: u32 = 544;
@@ -23,7 +20,6 @@ pub fn join_artists(artists: &[ArtistRef]) -> String {
         .join(", ")
 }
 
-/// Picks the smallest thumbnail at least `edge` pixels wide.
 pub fn pick_thumb(thumbs: &[Thumbnail], edge: u32) -> Option<String> {
     fit_thumb(thumbs.iter().map(|t| (t.width, t.url.as_str())), edge)
 }

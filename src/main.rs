@@ -1,5 +1,4 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-// Every unsafe block says why it is sound; CI fails one that does not.
 #![deny(clippy::undocumented_unsafe_blocks)]
 
 mod api;
@@ -52,7 +51,8 @@ fn restore_geometry(ui: &AppWindow, geometry: Option<WindowGeometry>) {
 
 fn current_geometry(ui: &AppWindow, previous: Option<WindowGeometry>) -> Option<WindowGeometry> {
     let window = ui.window();
-    if window.is_minimized() {
+    // The full player's screen-sized window isn't one to reopen at.
+    if window.is_minimized() || window.is_fullscreen() {
         return previous;
     }
     if window.is_maximized() {
@@ -90,12 +90,9 @@ fn is_minimized(ui: &AppWindow) -> bool {
         .unwrap_or_else(|| ui.window().is_minimized())
 }
 
-/// Closes the search box on a press anywhere outside it. Clicking a row or
-/// card takes no focus from it, so the box would stay focused, its dropdown
-/// over the page. Watching winit's events rather than catching the press in
-/// the UI lets that press go on to do what it was meant to. A window keeps
-/// one winit event filter, so anything else watching winit's events belongs
-/// in this one; a second would replace it.
+/// Closes the search box on a press outside it, as rows and cards take no
+/// focus; watched in winit's events so the press still does its own work. A
+/// window keeps one winit event filter, so other watchers belong in this one.
 fn close_search_on_outside_press(ui: &AppWindow) {
     let weak = ui.as_weak();
     let mut cursor = dpi::PhysicalPosition::new(0.0_f64, 0.0);
@@ -121,10 +118,9 @@ fn close_search_on_outside_press(ui: &AppWindow) {
     });
 }
 
-/// Fonts Slint tries, character by character, for anything the UI font
-/// lacks. Its own fallback picks one font per writing system, so letters
-/// outside any, as in "𝓙𝓪𝓼𝓹𝓮𝓻", "ⓝⓘⓖⓗⓣⓒⓞⓡⓔ" or "ꜱʟᴏᴡᴇᴅ", drew as boxes. Emoji
-/// come before Segoe UI Symbol, whose emoji are black and white.
+/// Per-character fallbacks, as Slint's own picks one font per writing system
+/// and decorative letters ("ꜱʟᴏᴡᴇᴅ") drew as boxes. Emoji come before Segoe UI
+/// Symbol, whose emoji are black and white.
 const FALLBACK_FONTS: &[&str] = &["segoeui.ttf", "seguiemj.ttf", "seguisym.ttf", "cambria.ttc"];
 
 fn add_fallback_fonts() {
@@ -183,19 +179,17 @@ fn main() {
     });
 
     let settings = settings::Settings::load();
-    // winit puts the system's theme back on the title bar at every
-    // WM_SETTINGCHANGE unless the window was created with one, which
-    // `set_theme` does not count as. Only the main window, made first: the
-    // sign-in window's page is white in every look.
+    // winit resets the title bar to the system theme on WM_SETTINGCHANGE unless
+    // the window was created with one (`set_theme` doesn't count). Only the
+    // main window, made first: the sign-in page is white in every look.
     let title_bar = if settings.look == settings::Look::Light {
         slint::winit_030::winit::window::Theme::Light
     } else {
         slint::winit_030::winit::window::Theme::Dark
     };
     let main_window = std::cell::Cell::new(true);
-    // Skia on the GPU through Direct3D 12, which takes most of the work of
-    // scrolling off the CPU for about 50 MB of driver memory. Without a usable
-    // GPU, Skia falls back to drawing into a CPU buffer.
+    // Skia on Direct3D 12 takes scrolling off the CPU for about 50 MB of
+    // driver memory; without a usable GPU it draws into a CPU buffer.
     if std::env::var_os("SLINT_BACKEND").is_none()
         && let Err(e) = slint::BackendSelector::new()
             .backend_name("winit".into())

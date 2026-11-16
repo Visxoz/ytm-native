@@ -29,14 +29,12 @@ const ALLOWED_DOMAINS: &[&str] = &[
     "gstatic.com",
 ];
 const MAX_REDIRECTS: usize = 10;
-/// Idle connections are kept this long, with HTTP/2 pings meanwhile, so the
-/// next song's requests a few minutes after the last skip the TCP and TLS
-/// handshakes. A ping that goes unanswered drops the connection.
+/// Idle connections are kept, with HTTP/2 pings, so the next song's requests
+/// minutes later skip the TCP and TLS handshakes.
 const POOL_IDLE: Duration = Duration::from_secs(5 * 60);
 const KEEP_ALIVE_EVERY: Duration = Duration::from_secs(30);
 const KEEP_ALIVE_TIMEOUT: Duration = Duration::from_secs(10);
 
-/// Opens a web link in the default browser, as the Windows shell does.
 pub fn open_in_browser(url: &Url) {
     if !browsable(url) {
         log::warn!("refused to open a link in the browser");
@@ -78,17 +76,15 @@ pub fn open_in_browser(url: &Url) {
     });
 }
 
-/// Whether `url` may go to the browser. Only web links, as the shell runs
-/// whatever it's given, and none with a `"`, which the url crate keeps in
-/// hosts and which could break out of the quotes the shell puts around the
-/// link in the browser's command line.
+/// Only web links, as the shell runs whatever it's given, and none with a `"`,
+/// which the url crate keeps in hosts and could break out of the browser's
+/// command-line quotes.
 fn browsable(url: &Url) -> bool {
     matches!(url.scheme(), "http" | "https") && !url.as_str().contains('"')
 }
 
-/// Whether the app may request `url`: HTTPS on an allowed domain. URLs
-/// from YouTube's responses, such as artwork and streams, are checked with
-/// this before they are fetched, and every redirect is too.
+/// HTTPS on an allowed domain. Every URL from YouTube's responses is checked
+/// with this before it is fetched.
 pub fn allowed(url: &str) -> bool {
     Url::parse(url).is_ok_and(|url| within(&url, ALLOWED_DOMAINS))
 }
@@ -141,10 +137,8 @@ pub fn client() -> &'static reqwest::Client {
     })
 }
 
-/// For the audio download thread. Audio is fetched in byte ranges, whose
-/// lengths must be the bytes on the wire, so it asks for no compression.
-/// Idle connections are kept as long as the async client's, so one the
-/// next stream's warm-up opened is still there when it plays.
+/// For the audio download thread. No compression, as byte ranges must be the
+/// bytes on the wire; the long idle pool keeps the warm-up's connection.
 pub fn blocking_client() -> &'static reqwest::blocking::Client {
     static CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {

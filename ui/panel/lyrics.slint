@@ -7,6 +7,7 @@ export component Lyrics inherits Flickable {
     in property <bool> synced;
     in property <int> current: -1;
     in property <string> source;
+    in property <length> line-size: 22px;
     callback line-clicked(index: int);
 
     // An ease-out glide, written on whole pixels as the lists scroll.
@@ -23,7 +24,6 @@ export component Lyrics inherits Flickable {
         }
     }
 
-    // Where the current line is.
     property <length> line-y;
     property <length> line-height;
 
@@ -69,7 +69,7 @@ export component Lyrics inherits Flickable {
             }
             text: line;
             wrap: word-wrap;
-            font-size: 22px;
+            font-size: root.line-size;
             font-weight: 700;
             font-family: Theme.display-font;
             color: Theme.text;

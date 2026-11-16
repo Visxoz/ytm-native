@@ -1,7 +1,3 @@
-//! What is kept between runs: the queue and position, restored on the next
-//! start, the history of songs played, the recent searches, and plays not
-//! yet sent to Last.fm.
-
 use std::{rc::Rc, time::Duration};
 
 use slint::TimerMode;
@@ -17,8 +13,7 @@ use crate::{
 const PERSIST_AFTER: Duration = Duration::from_secs(2);
 
 impl App {
-    /// Adds the playing track to the history as its sound starts, starts
-    /// logging it to Last.fm, and reports it to YouTube.
+    /// Run as the track's sound starts: the one place a play is recorded.
     pub(super) fn record_play(self: &Rc<Self>) {
         {
             let mut state = self.state.borrow_mut();
@@ -33,9 +28,8 @@ impl App {
         self.report_play();
     }
 
-    /// Adds the playing song to the YouTube account's history, as YouTube
-    /// Music does, so its recommendations and Listen again follow what
-    /// plays here too.
+    /// As YouTube Music does, so the account's recommendations and Listen
+    /// again follow what plays here too.
     fn report_play(self: &Rc<Self>) {
         let id = {
             let state = self.state.borrow();
@@ -61,8 +55,6 @@ impl App {
         );
     }
 
-    /// The history as a page, newest first, or `None` when nothing has
-    /// played yet.
     pub(super) fn history_page(&self) -> Option<Page> {
         let state = self.state.borrow();
         let history = &state.history;
@@ -86,7 +78,6 @@ impl App {
         })
     }
 
-    /// Writes the session and history shortly, once things settle.
     pub(super) fn persist_soon(self: &Rc<Self>) {
         let weak = Rc::downgrade(self);
         self.persist_timer
@@ -97,8 +88,7 @@ impl App {
             });
     }
 
-    /// Writes the session and history off the UI thread, which only takes
-    /// copies of them, so a scroll never waits on the disk.
+    /// The UI thread only takes copies, so a scroll never waits on the disk.
     fn persist_in_background(self: &Rc<Self>) {
         let session = self.session();
         let history = self.state.borrow().history.unsaved();
@@ -121,9 +111,8 @@ impl App {
         );
     }
 
-    /// Writes the session, history and unsent scrobbles now, as on exit,
-    /// and the recent searches should saving them as they changed have
-    /// failed.
+    /// As on exit; the recent searches are saved again in case an earlier
+    /// save failed.
     pub(super) fn persist(&self) {
         self.persist_timer.stop();
         if let Some(session) = self.session() {
@@ -139,7 +128,6 @@ impl App {
         state.scrobbler.save();
     }
 
-    /// The restored position, if the current track is the restored one.
     pub(super) fn take_resume_position(&self) -> f64 {
         let mut state = self.state.borrow_mut();
         let current = state.queue.current().map(|t| t.id.clone());
@@ -149,8 +137,7 @@ impl App {
         }
     }
 
-    /// The queue and position to save, so the next start can resume. A long
-    /// queue is cut to the part around the current track before copying.
+    /// A long queue is cut to the part around the current track before copying.
     fn session(&self) -> Option<settings::Session> {
         let state = self.state.borrow();
         let index = state.queue.current_index()?;
@@ -181,7 +168,6 @@ impl App {
         })
     }
 
-    /// Shows the last run's track, paused, ready to resume where it was.
     pub(super) fn restore_session(self: &Rc<Self>) {
         let Some(session) = settings::Session::load() else {
             return;

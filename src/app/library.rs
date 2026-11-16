@@ -1,5 +1,3 @@
-//! Liking and disliking songs, and saving them to the account's playlists.
-
 use std::rc::Rc;
 
 use slint::{ComponentHandle, ModelRc, VecModel};
@@ -15,7 +13,6 @@ impl App {
         self.state.borrow().queue.current().map(|t| t.id.clone())
     }
 
-    /// Shows how the account rated `id`, the playing song, once YouTube says.
     pub(super) fn load_rating(self: &Rc<Self>, id: String) {
         let generation = {
             let mut state = self.state.borrow_mut();
@@ -41,9 +38,8 @@ impl App {
         });
     }
 
-    /// Likes or dislikes `id`, or takes that back if the playing song
-    /// already had it; `Rating::None` takes back either. Disliking the
-    /// playing song skips it. The UI offers this only when signed in.
+    /// Rating the playing song as it already is takes that back. Disliking it
+    /// skips it. The UI offers this only when signed in.
     pub(super) fn rate(self: &Rc<Self>, id: String, rating: Rating) {
         let ui = self.ui();
         let global = ui.global::<ApiGlobal>();
@@ -103,7 +99,6 @@ impl App {
         );
     }
 
-    /// Offers the account's playlists to save `id` to; only when signed in.
     pub(super) fn open_playlist_picker(self: &Rc<Self>, id: String) {
         let ui = self.ui();
         ui.set_playlist_choices(ModelRc::default());
@@ -145,7 +140,6 @@ impl App {
         );
     }
 
-    /// Saves the song being saved to the playlist offered at `index`.
     pub(super) fn pick_playlist(self: &Rc<Self>, index: usize) {
         self.ui().set_picker_open(false);
         let Some((id, offered)) = self.state.borrow_mut().saving.take() else {

@@ -1,5 +1,3 @@
-//! The pages behind each route.
-
 use rustypipe::{
     model::{AlbumType, MusicGenreItem, MusicItem},
     param::AlbumOrder,
@@ -64,10 +62,8 @@ impl Api {
             .cloned()
     }
 
-    /// Home: the personal feed when signed in, otherwise the charts. The
-    /// feed shows from its first shelf, usually on the first page, and
-    /// `complete` adds the rest below it. Should the feed fail before then,
-    /// the app decides what stands in for it.
+    /// The personal feed when signed in, otherwise the charts. Should the feed
+    /// fail before its first shelf, the app decides what stands in for it.
     async fn home(&self, signed_in: bool) -> Result<Page> {
         if !signed_in {
             return self.public_home().await;
@@ -89,7 +85,6 @@ impl Api {
         })
     }
 
-    /// Home for everyone: the charts and new releases.
     async fn public_home(&self) -> Result<Page> {
         let genres = async { genre_section(self.genres().await.unwrap_or_default()) };
         let q = self.q();
@@ -265,8 +260,7 @@ impl Api {
                 .items
                 .into_iter()
                 .filter(|p| liked_id != Some(p.id.as_str()))
-                // Episodes for Later is a podcast page, which does not open
-                // as a playlist.
+                // Episodes for Later is a podcast page, not a playlist.
                 .filter(|p| p.id != "SE")
                 .map(playlist_card),
         );
@@ -286,7 +280,6 @@ impl Api {
         let songs = songs.map_err(err)?;
 
         let mut sections = Vec::new();
-        // The top result leads, as on YouTube Music.
         let top = match main.ok().and_then(|m| m.items.items.into_iter().next()) {
             Some(MusicItem::Artist(a)) => Some(artist_card(a)),
             Some(MusicItem::Album(a)) => Some(album_card(a)),
@@ -452,8 +445,6 @@ impl Api {
                     header.meta = meta;
                 }
             }
-            // One page of shelves at a time, each shown as soon as those
-            // above it are.
             Some(More::Shelves(mut feed)) => {
                 if let Err(e) = feed.next(&self.user_q()).await {
                     log::warn!("could not load more of the home feed: {e}");
@@ -469,9 +460,8 @@ impl Api {
     }
 
     async fn artist(&self, id: &str) -> Result<Page> {
-        // The page and the full discography together, rather than one after
-        // the other as rustypipe does; the page's own albums stand in if the
-        // discography fails or has nothing more.
+        // Together rather than one after the other as rustypipe does; the
+        // page's own albums stand in if the discography fails or adds nothing.
         let q = self.q();
         let (artist, discography) = tokio::join!(
             q.music_artist(id, false),

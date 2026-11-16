@@ -1,7 +1,3 @@
-//! Turns a loaded page into rows, and fills in its artwork and what the
-//! page has still to fetch, such as the rest of a long playlist, as they
-//! arrive.
-
 use std::rc::Rc;
 
 use slint::{Model, ModelRc, VecModel};
@@ -25,14 +21,12 @@ fn on_page(generation: u64) -> impl Fn(&Rc<App>) -> bool + Copy {
     move |app| app.state.borrow().page_generation == generation
 }
 
-/// Rows built from sections, with the artwork they still need.
 struct Built {
     /// Model index of the first row, so artwork finds its row once shown.
     first: usize,
     rows: Vec<RowItem>,
     /// (row, thumbnail) for track artwork to fetch.
     track_art: Vec<(usize, String)>,
-    /// Each card model with the thumbnails its cards still need.
     card_art: Vec<CardArt>,
 }
 
@@ -199,7 +193,6 @@ impl App {
         }
     }
 
-    /// The first row of `kind`.
     fn find_row(&self, kind: RowKind) -> Option<usize> {
         (0..self.rows.row_count()).find(|&i| self.rows.row_data(i).is_some_and(|r| r.kind == kind))
     }
@@ -239,8 +232,7 @@ impl App {
         });
     }
 
-    /// Fetches the next step of what the page has still to show, after it
-    /// shows, and the step after that once it is on screen.
+    /// Fetches one step of `Page.more`; the next follows once it is on screen.
     fn complete_page(self: &Rc<Self>, route: Route, generation: u64) {
         let (page, account) = {
             let state = self.state.borrow();
@@ -271,11 +263,9 @@ impl App {
         );
     }
 
-    /// Adds the shelves after the first `shown` of `page` to the cached
-    /// Home, which, unlike the page on screen, has Listen again as YouTube
-    /// sent it, and saves it once whole. Should a request have failed, Home
-    /// is neither cached nor saved without the shelves it missed, so the next
-    /// visit asks again.
+    /// The cached Home, unlike the page on screen, has Listen again as YouTube
+    /// sent it. After a failed request it is neither cached nor saved, so the
+    /// next visit asks again.
     fn complete_home(self: &Rc<Self>, page: &Page, shown: usize, whole: bool) {
         let saved = {
             let mut state = self.state.borrow_mut();
@@ -297,8 +287,7 @@ impl App {
         }
     }
 
-    /// Shows what `page` has beyond the page on screen: tracks added to its
-    /// first section, and sections after the shown ones.
+    /// Shows tracks added to the first section, and sections after the shown ones.
     fn extend_page(self: &Rc<Self>, page: Page, route: Route, generation: u64) {
         let (shown_tracks, shown_sections) = {
             let state = self.state.borrow();
@@ -360,7 +349,6 @@ impl App {
     }
 }
 
-/// "Good morning" and so on, by the local time.
 fn greeting() -> &'static str {
     greeting_for(super::local_now().hour())
 }
@@ -374,7 +362,6 @@ fn greeting_for(hour: u8) -> &'static str {
     }
 }
 
-/// The header tint for pages without artwork.
 fn route_tint(route: &Route) -> slint::Color {
     let rgb = match route {
         // Transparent, for the page to follow the theme's accent.

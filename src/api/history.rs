@@ -1,5 +1,4 @@
-//! Reporting plays to YouTube, so songs played here show up in the
-//! account's YouTube Music history and shape its recommendations.
+//! Reports plays to YouTube, so they reach the account's history and recommendations.
 
 use std::hash::{BuildHasher, Hasher, RandomState};
 

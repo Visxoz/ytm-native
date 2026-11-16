@@ -1,10 +1,8 @@
-//! Cuts YouTube's player script down to the code that unscrambles stream
-//! URLs, so QuickJS loads a few hundred KB instead of several MB.
-//!
-//! This follows yt-dlp's solver (github.com/yt-dlp/ejs): the URL scrambler
-//! is the top-level function whose body calls `X.y("alr", "yes")`. Parsing
-//! happens natively with oxc; the solver's own JavaScript parser is far too
-//! slow under QuickJS.
+//! Cuts YouTube's player down to its URL unscrambling code, so QuickJS loads a
+//! few hundred KB instead of several MB. Follows yt-dlp's solver
+//! (github.com/yt-dlp/ejs): the scrambler is the top-level function calling
+//! `X.y("alr", "yes")`. Parsed with oxc, as the solver's own JS parser is far
+//! too slow under QuickJS.
 
 use std::collections::{HashMap, HashSet};
 

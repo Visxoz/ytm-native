@@ -69,13 +69,12 @@ fn crypt(data: &[u8], encrypt: bool) -> Option<Vec<u8>> {
     }
 }
 
-/// Reads and decrypts a file `write` made.
 pub fn read(path: &Path) -> Option<String> {
     let bytes = std::fs::read(path).ok()?;
     String::from_utf8(crypt(&bytes, false)?).ok()
 }
 
-/// Encrypts `text` into `path`. The old file stays whole should this fail.
+/// The old file stays whole should this fail.
 pub fn write(path: &Path, text: &str) -> io::Result<()> {
     let data = crypt(text.as_bytes(), true)
         .ok_or_else(|| io::Error::other("Windows could not encrypt the data"))?;

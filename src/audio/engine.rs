@@ -24,11 +24,9 @@ use super::{
     source::{Download, StreamReader},
 };
 
-/// Seconds of decoded audio kept ahead of the device.
 const BUFFER_AHEAD_SECS: f64 = 2.0;
-/// Seconds of audio the device is always given, taken from the end held
-/// back for a crossfade if need be: a download too slow to keep up shortens
-/// the fade rather than breaking up the sound.
+/// Audio the device is always given, out of a crossfade's hold if need be,
+/// so a slow download shortens the fade rather than breaking up the sound.
 const LOW_WATER_SECS: f64 = 1.0;
 /// About -60 dBFS: quieter than this, a frame counts as silence.
 const SILENCE: f32 = 0.001;
@@ -50,11 +48,9 @@ struct Next {
     loudness: f32,
     opened: Receiver<Result<Opened, String>>,
     ready: Option<Opened>,
-    /// Samples of the current track to hold back for the crossfade, with
-    /// room for its trailing silence: none for gapless, or once the track
-    /// opens in a format the current one cannot be mixed with.
+    /// Samples of the current track held back for the fade and its trailing
+    /// silence: none for gapless, or a format that cannot be mixed in.
     hold: usize,
-    /// Samples the crossfade lasts.
     fade: usize,
 }
 
@@ -69,7 +65,6 @@ struct Opened {
 struct Fade {
     tail: Vec<f32>,
     channels: usize,
-    /// Samples of the tail mixed so far.
     mixed: usize,
     /// The fading track's loudness correction over the next one's, as the
     /// device applies the next one's to the mix.
@@ -119,12 +114,9 @@ fn is_silent(frame: &[f32]) -> bool {
     frame.iter().all(|s| s.abs() < SILENCE)
 }
 
-/// Splits a finished track's held samples at the tail to fade from: up to
-/// `fade` samples, ending where its trailing silence, at most `trim`
-/// samples of it, begins. What comes before the tail moves on to `out`, and
-/// the tail keeps the held buffer, so nothing is allocated; the caller
-/// lines it up as a `Vec` once the output is unlocked. With no fade,
-/// gapless, everything moves on and no silence is cut.
+/// Splits off the last `fade` samples before the trailing silence (at most
+/// `trim` of it cut) and moves the rest to `out`. The tail keeps the held
+/// buffer, so nothing is allocated. With no fade, nothing is cut.
 fn take_tail(
     held: &mut VecDeque<f32>,
     out: &mut VecDeque<f32>,
@@ -265,11 +257,9 @@ impl Engine {
         }
     }
 
-    /// Whether only a command can change anything now, so the thread may
-    /// sleep until one comes rather than wake to look: paused or stopped,
-    /// with the device's stop behind it and no queued track still opening.
-    /// True only after a pass that found nothing to do, and only while all
-    /// the engine acts on in these states reaches it with a command.
+    /// Whether only a command can change anything, so the thread may block on
+    /// one: paused or stopped, the device stopped, no queued track opening.
+    /// Holds only while everything done in these states arrives as a command.
     fn idle(&self) -> bool {
         let opening = self.next.as_ref().is_some_and(|n| n.ready.is_none());
         let stopped = self.track.is_none() && self.previous.is_none();
@@ -708,10 +698,9 @@ impl Engine {
                 move |data, _| fill(&shared, data),
                 move |e| {
                     log::warn!("audio output error: {e}");
-                    // The kinds that say the device went or another became
-                    // the default. The rest cannot be told from a refused
-                    // priority boost, which leaves the stream playing; one
-                    // they ended is found when it next fails to start.
+                    // The device went or another became the default. Other
+                    // kinds can't be told from a refused priority boost; a
+                    // stream they did end is found when it next fails to start.
                     if matches!(
                         e.kind(),
                         cpal::ErrorKind::DeviceNotAvailable
@@ -752,11 +741,9 @@ impl Engine {
         }
     }
 
-    /// Stops the device while paused rather than feeding it silence: a running
-    /// stream wakes its callback every few ms and holds a power request that
-    /// keeps Windows from sleeping. The stop waits `PAUSE_AFTER`, as WASAPI
-    /// keeps its buffer through a stop and would replay the audio left in it
-    /// on the next start, a blip of the old track after a skip or seek.
+    /// Stops the device while paused, as a running stream holds a power request
+    /// that keeps Windows from sleeping. The stop waits `PAUSE_AFTER`, as WASAPI
+    /// would replay what is left in its buffer on the next start.
     fn apply_paused(&mut self) {
         let Some((stream, ..)) = &self.stream else {
             return;

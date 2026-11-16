@@ -40,8 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
-      # Build provenance: the exe is unsigned, so this is how a download can
-      # be shown to come from this repo's workflow at this commit, with
+      # Build provenance, as the exe is unsigned:
       # `gh attestation verify <exe> --repo Visxoz/ytm-native`.
       id-token: write
       attestations: write

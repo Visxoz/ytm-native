@@ -1,5 +1,3 @@
-//! Wires the window's callbacks to the app.
-
 use std::rc::Rc;
 
 use slint::ComponentHandle;
@@ -76,6 +74,18 @@ impl App {
                 app.load_lyrics();
             }
         });
+        on!(on_full_player_changed, |app| {
+            app.load_cover();
+            let ui = app.ui();
+            if ui.get_full_player() {
+                app.load_lyrics();
+                // The lit line stood still while the lyrics were hidden.
+                app.show_lyric_line(f64::from(ui.get_np_position()));
+            } else if ui.get_queue_shown() {
+                // Rows added while the queue was out of sight lack artwork.
+                app.load_missing_queue_art();
+            }
+        });
         on!(on_lyric_clicked, |app, index| {
             let start = app.state.borrow().lyric_starts.get(index as usize).copied();
             if let Some(start) = start {
@@ -90,6 +100,7 @@ impl App {
                 .current()
                 .and_then(|t| t.first_artist_id().map(str::to_owned));
             if let Some(id) = id {
+                app.ui().set_full_player(false);
                 app.navigate(Route::Artist(id), true);
             }
         });
@@ -101,6 +112,7 @@ impl App {
                 .current()
                 .and_then(|t| t.album.as_ref().map(|(id, _)| id.clone()));
             if let Some(id) = id {
+                app.ui().set_full_player(false);
                 app.navigate(Route::Album(id), true);
             }
         });

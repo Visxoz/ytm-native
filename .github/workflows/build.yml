@@ -36,7 +36,6 @@ jobs:
           LASTFM_API_SECRET: ${{ secrets.LASTFM_API_SECRET }}
         run: cargo build --release --locked
 
-      # Inno Setup builds the installer into dist/, beside the portable exe.
       - name: Build installer
         run: |
           $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"

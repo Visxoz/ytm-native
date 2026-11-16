@@ -1,5 +1,3 @@
-//! Preferences persisted as JSON in the app's data directory.
-
 use std::{
     collections::VecDeque,
     io,
@@ -21,11 +19,9 @@ pub fn data_dir() -> PathBuf {
         .join("ytm-native")
 }
 
-/// Writes `bytes` to a temporary file and renames it over `path`, so a
-/// crash or a full disk midway leaves the old file whole. Not flushed, as
-/// most saves run on the UI thread. Each
-/// write has its own temporary file, as rustypipe saves its cache from
-/// whichever worker refreshed it, and two writes could otherwise interleave.
+/// Renames a temporary file over `path`, so a failed write leaves the old file
+/// whole. Not flushed, as most saves run on the UI thread. Each write has its
+/// own temporary file, as rustypipe saves its cache from any worker.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let partial = path.with_extension(format!("{}.tmp", NEXT.fetch_add(1, Ordering::Relaxed)));
@@ -40,8 +36,7 @@ pub(crate) fn read_json<T: DeserializeOwned>(path: &Path) -> Option<T> {
     serde_json::from_slice(&std::fs::read(path).ok()?).ok()
 }
 
-/// Saves `value` as JSON, returning whether it was saved. A failure is
-/// logged as `what` that could not be saved.
+/// Returns whether it was saved; `what` names it in the warning.
 pub(crate) fn save_json(path: &Path, value: &impl Serialize, what: &str) -> bool {
     let written = serde_json::to_vec(value)
         .map_err(io::Error::other)
@@ -156,7 +151,6 @@ impl Quality {
     }
 }
 
-/// The app's colours: dark, light, or pure black for OLED screens.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Look {
@@ -180,11 +174,8 @@ impl Look {
     }
 }
 
-/// YouTube Music's red, the default accent.
 pub const YOUTUBE_RED: u32 = 0xff0033;
 
-/// The colour of active controls: one of a few, or one taken from the
-/// playing song's artwork.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Accent {
@@ -262,7 +253,6 @@ pub struct Settings {
     pub autoplay: bool,
     /// Report songs played to the signed-in account's YouTube history.
     pub youtube_history: bool,
-    /// Show like and dislike buttons beside the song playing.
     pub rating_buttons: bool,
     pub shuffle: bool,
     /// Shuffle with recommended tracks mixed in; a kind of shuffle, so it
@@ -271,9 +261,8 @@ pub struct Settings {
     pub repeat: i32,
     pub sidebar_collapsed: bool,
     pub quality: Quality,
-    /// What older versions had in place of `quality`'s High, and still
-    /// read. Kept in step for them, and read here only by `load`; the app
-    /// itself goes by `quality`.
+    /// Older versions' form of `quality`'s High, kept in step for them; only
+    /// `load` reads it here.
     pub premium_audio: bool,
     /// The signed-in account has been served Premium formats, so songs
     /// without them, such as music videos, never mark it as not Premium.
@@ -281,9 +270,7 @@ pub struct Settings {
     /// The signed-in account was taken as without Premium, so songs start
     /// on the free stream at once while a background check confirms it.
     pub no_premium: bool,
-    /// Fade each track into the next, rather than playing them gaplessly.
     pub crossfade: bool,
-    /// Look for a newer version on GitHub now and then.
     pub check_updates: bool,
     pub equaliser: bool,
     /// Each band's gain in dB, kept while the equaliser is off.
@@ -361,7 +348,6 @@ impl Settings {
         self.premium_audio = quality == Quality::High;
     }
 
-    /// The gains to play with, or `None` with the equaliser off.
     pub fn equaliser(&self) -> Option<crate::audio::eq::Gains> {
         self.equaliser.then_some(self.equaliser_gains)
     }
@@ -399,7 +385,6 @@ pub struct Session {
     pub recommended: Vec<usize>,
 }
 
-/// Longest queue kept between runs.
 const SESSION_QUEUE_LIMIT: usize = 500;
 
 fn session_path() -> PathBuf {
@@ -447,9 +432,8 @@ pub fn remove_home() {
     let _ = std::fs::remove_file(home_path());
 }
 
-/// The songs played, newest first, one entry per song. Changes are kept in
-/// memory until `save`, which the app calls a moment after the last one
-/// and on exit, so a song's start never waits on the disk.
+/// The songs played, newest first, one entry per song. Kept in memory until
+/// `save`, so a song's start never waits on the disk.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct History {
     tracks: VecDeque<crate::api::Track>,
@@ -517,9 +501,8 @@ impl History {
     }
 }
 
-/// The last few searches, newest first, offered from focusing the search
-/// box until the user types. Saved as soon as they change, being a few
-/// hundred bytes, and again on exit should that write have failed.
+/// The last few searches, newest first. Saved as soon as they change, being
+/// tiny, and again on exit should that write have failed.
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Searches {
     queries: VecDeque<String>,
@@ -580,7 +563,6 @@ impl Searches {
         removed
     }
 
-    /// Writes the searches, if they changed since the last save.
     pub fn save(&mut self) {
         if self.changed && save_json(&searches_path(), self, "the recent searches") {
             self.changed = false;

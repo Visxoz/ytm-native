@@ -4,7 +4,6 @@ import { Art } from "../widgets/art.slint";
 import { IconButton, PlayButton } from "../widgets/buttons.slint";
 import { Layout } from "layout.slint";
 
-/// The best search match, shown large.
 export component TopResult inherits Rectangle {
     in property <CardItem> card;
     property <bool> hot: touch.has-hover || top-play.has-hover;
@@ -68,7 +67,6 @@ export component TopResult inherits Rectangle {
     }
 }
 
-/// Album, playlist, artist and genre headers with their action buttons.
 export component PageHeader {
     in property <RowItem> data;
     in property <length> full-width;

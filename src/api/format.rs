@@ -1,5 +1,3 @@
-//! Counts, durations and running times as the UI words them.
-
 use super::Track;
 
 /// 1234567 → "1.2M".
@@ -20,7 +18,6 @@ fn trim_decimal(value: f64, suffix: &str) -> String {
     }
 }
 
-/// "1 song", "12 songs".
 pub fn songs(n: u64) -> String {
     if n == 1 {
         "1 song".to_owned()

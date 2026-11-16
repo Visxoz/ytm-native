@@ -1,6 +1,3 @@
-//! Changes to the signed-in account's music: likes, dislikes and its own
-//! playlists, through the same calls YouTube Music's web player makes.
-
 use rustypipe::client::ClientType;
 use serde::Deserialize;
 use serde_json::{Value, json, value::RawValue};
@@ -10,7 +7,6 @@ use super::{Api, Result, err};
 /// Video IDs YouTube takes in one playlist call.
 const PER_REQUEST: usize = 100;
 
-/// How the account rated a song.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub enum Rating {
     #[default]
@@ -52,7 +48,6 @@ impl Api {
             .map_err(err)
     }
 
-    /// The account's rating of `video_id`.
     pub async fn rating(&self, video_id: &str) -> Result<Rating> {
         let json = self.edit("next", &json!({ "videoId": video_id })).await?;
         Ok(parse_rating(&json))
@@ -101,9 +96,8 @@ impl Api {
         Ok(())
     }
 
-    /// Makes a private playlist of `video_ids` for the signed-in account,
-    /// and returns its ID. Large playlists are filled in after creation,
-    /// as the create call takes only so many.
+    /// Makes a private playlist and returns its ID. The create call takes only
+    /// so many songs, so the rest are added after.
     pub async fn create_playlist(&self, title: &str, video_ids: &[String]) -> Result<String> {
         let (first, rest) = video_ids.split_at(video_ids.len().min(PER_REQUEST));
         let created = self

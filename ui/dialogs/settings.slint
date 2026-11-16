@@ -4,7 +4,6 @@ import { PillButton, PillGroup } from "../widgets/buttons.slint";
 import { Toggle } from "../widgets/toggle.slint";
 import { Dialog, SettingRow, ToggleRow } from "dialog.slint";
 
-/// A round colour to pick, ringed while picked.
 component Swatch inherits Rectangle {
     in property <brush> fill;
     in property <bool> active;
@@ -41,9 +40,6 @@ component Tab inherits VerticalLayout {
     min-height: 400px;
 }
 
-/// The Settings dialog, in tabs: playback, appearance, the account and
-/// updates, with a way on to the equaliser and sign-in, which it closes
-/// itself to make way for.
 export component SettingsDialog inherits Dialog {
     in-out property <bool> settings-open;
     in-out property <bool> eq-open;

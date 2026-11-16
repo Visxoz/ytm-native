@@ -12,7 +12,6 @@ export global Drag {
     in-out property <int> edge;
 }
 
-/// A text button in a panel's header.
 export component PanelAction inherits Text {
     callback clicked();
     vertical-alignment: center;
@@ -186,7 +185,6 @@ export component QueueRow inherits Rectangle {
 
                 HorizontalLayout {
                     spacing: 4px;
-                    // Marks a track Smart Shuffle mixed in.
                     if root.item.recommended: Icon {
                         y: (parent.height - self.height) / 2;
                         path: Icons.sparkle;

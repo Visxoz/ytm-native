@@ -14,8 +14,6 @@ export component CarouselArrow inherits IconButton {
     hover-background: #000000e0;
 }
 
-/// A row of cards scrolled with arrow buttons that appear on hover, or by
-/// dragging the cards themselves.
 export component Carousel {
     in property <[CardItem]> cards;
     property <length> step: Layout.card-width + Layout.card-gap;

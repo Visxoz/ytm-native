@@ -1,6 +1,6 @@
-# Rebuilds vendor/<crate> for each patched crate from crates.io and applies
-# patches/<crate>.patch. Run once after cloning, and again after updating Slint
-# or rustypipe. CI vendors into a folder outside the repo with -Destination.
+# Rebuilds vendor/<crate> from crates.io with patches/<crate>.patch applied.
+# Run after cloning and after updating Slint or rustypipe.
+# CI vendors into a folder outside the repo with -Destination.
 param([string]$Destination)
 $ErrorActionPreference = 'Stop'
 $root = Split-Path $PSScriptRoot -Parent
@@ -17,26 +17,20 @@ $slintVersion = {
 
 $crates = @(
     @{
-        # The fonts in SLINT_FONT_PATH memory-mapped instead of read whole
-        # into the heap. Pinned to the same version as i-slint-core.
+        # Pinned to the same version as i-slint-core.
         Name    = 'i-slint-common'
         Version = $slintVersion
         Hint    = 'Slint changed how it loads SLINT_FONT_PATH. Check whether it still reads the files into memory, and update or drop the patch.'
     },
     @{
-        # Slint's fallback fonts read from their memory-mapped files instead of
-        # copied, and the GPU surface dropped while the window is minimised.
-        # The renderer is pinned to the same version as i-slint-core, which
-        # always comes from crates.io, so read the version from there.
+        # Pinned to the same version as i-slint-core, which always comes from
+        # crates.io.
         Name    = 'i-slint-renderer-skia'
         Version = $slintVersion
         Hint    = 'Slint changed the renderer. Check whether it still copies font data and keeps its surface while minimised, and update or drop the patch.'
     },
     @{
-        # Playlists the signed-in user owns, and visitor IDs fetched from the
-        # visitor_id endpoint, once for requests arriving together, with an
-        # error rather than a panic when YouTube refuses. Pinned with "=" in
-        # Cargo.toml, so read it from there.
+        # Pinned with "=" in Cargo.toml.
         Name    = 'rustypipe'
         Version = {
             if ($manifest -notmatch '(?m)^rustypipe = \{ version = "=([^"]+)"') {

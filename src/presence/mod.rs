@@ -54,7 +54,6 @@ const MAX_DURATION_SECS: f64 = 24.0 * 60.0 * 60.0;
 const POSITION_SLACK_SECS: f64 = 5.0;
 const ARTWORK_DOMAINS: &[&str] = &["ytimg.com", "googleusercontent.com"];
 
-/// What is playing, as the player reports it.
 pub struct Track {
     pub video_id: String,
     pub title: String,

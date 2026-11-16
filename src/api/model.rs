@@ -1,5 +1,3 @@
-//! The pages the UI shows, independent of rustypipe's models.
-
 use rustypipe::model::{TrackItem, paginator::Paginator};
 
 use super::convert::{HEADER_THUMB, join_artists, resize_thumb};
@@ -34,7 +32,6 @@ impl Track {
         self.artists.iter().find_map(|a| a.id.as_deref())
     }
 
-    /// The album's name, or empty for a track without one.
     pub fn album_name(&self) -> &str {
         self.album.as_ref().map_or("", |(_, name)| name.as_str())
     }

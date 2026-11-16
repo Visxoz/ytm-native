@@ -5,7 +5,6 @@ fn read(path: &str) -> String {
         .replace("\r\n", "\n")
 }
 
-/// The text between `prefix` and the next quote.
 fn quoted_after(text: &str, prefix: &str) -> Option<String> {
     let rest = &text[text.find(prefix)? + prefix.len()..];
     Some(rest[..rest.find('"')?].to_owned())

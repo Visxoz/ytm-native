@@ -3,7 +3,6 @@ import { Api } from "../types.slint";
 import { Art } from "../widgets/art.slint";
 import { Icon, IconButton } from "../widgets/buttons.slint";
 
-/// YouTube Music's mark: a red disc with a ring and a centred play triangle.
 export component Logo {
     width: 32px;
     height: 32px;
@@ -44,9 +43,8 @@ export component SearchBox inherits Rectangle {
         input.focus();
         input.select-all();
     }
-    /// Hands the keyboard back to the window, so the next focus starts
-    /// with the recent searches again. Reset here rather than on focus,
-    /// which switching windows also takes and gives back.
+    /// Resets `typed` here rather than on focus, which switching windows
+    /// also takes and gives back.
     public function close() {
         root.typed = false;
         root.release-focus();
@@ -124,9 +122,8 @@ export component SearchBox inherits Rectangle {
     }
 
     // Recent searches show from focusing the box until the user types, even
-    // over the last query, as clicking the box on a results page is the
-    // likeliest time to want them; typing swaps them for YouTube's
-    // suggestions, and clearing the box brings them back.
+    // over the last query, as a results page is the likeliest time to want
+    // them; typing swaps in YouTube's suggestions.
     property <bool> typed;
     property <bool> show-recent: input.text == "" || !root.typed;
     property <[string]> choices: root.show-recent ? root.recent : root.suggestions;
@@ -191,8 +188,6 @@ export component SearchBox inherits Rectangle {
     }
 }
 
-/// The window's top row: history buttons, Home, the search box and the
-/// account button.
 export component TopBar inherits Rectangle {
     in property <bool> can-back;
     in property <bool> can-forward;
@@ -222,8 +217,6 @@ export component TopBar inherits Rectangle {
         search-box.close();
     }
 
-    /// Whether a point, in logical pixels from the window's corner, is on
-    /// the search box or its open dropdown.
     public pure function contains(x: length, y: length) -> bool {
         search-box.contains(x, y)
     }
@@ -280,8 +273,7 @@ export component TopBar inherits Rectangle {
         }
     }
 
-    // The account button opens Settings, which holds sign-in
-    // and sign-out too. A dot on it marks a waiting update.
+    // The account button opens Settings; a dot marks a waiting update.
     Rectangle {
         x: parent.width - self.width - 8px;
         y: (parent.height - self.height) / 2;

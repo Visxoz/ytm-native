@@ -20,13 +20,10 @@ const SESSION_COOKIES: &[&str] = &["SAPISID", "__Secure-3PAPISID"];
 /// Google sets __Secure-1PSIDRTS and __Secure-3PSIDRTS, which last minutes,
 /// only on a session bound to the browser.
 const BOUND_SESSION_COOKIE: &str = "PSIDRTS";
-/// Turns off Device Bound Session Credentials. With them, WebView2 binds the
-/// session to a key only it holds, and Google signs out the copy the app
-/// keeps once the window closes and nothing refreshes it. The runtime ignores
-/// feature names it lacks, so the list names each variant. Passing arguments
-/// replaces wry's own, so its msWebOOUI, msPdfOOUI and msSmartScreenProtection
-/// are repeated here; its autoplay switch is left out, as sign-in plays
-/// nothing.
+/// Turns off Device Bound Session Credentials, which bind the session to a key
+/// only WebView2 holds, so Google would sign out the app's copy. The runtime
+/// ignores names it lacks, so each variant is listed. These replace wry's
+/// arguments, so its flags are repeated, except autoplay, as sign-in plays nothing.
 const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,\
     DeviceBoundSessions,DeviceBoundSessionsForRestrictedSites,EnableBoundSessionCredentials";
 
@@ -120,10 +117,8 @@ impl GoogleSignIn {
         })
     }
 
-    /// Places Google's page in the window, once Windows has created it.
-    /// Returns `false` until then. `on_page` runs on the UI thread as each
-    /// page finishes loading, from inside WebView2's event, so it should
-    /// only schedule work.
+    /// Returns `false` until Windows has created the window. `on_page` runs
+    /// inside WebView2's page-load event, so it should only schedule work.
     pub fn attach(&mut self, on_page: impl Fn() + 'static) -> Result<bool, String> {
         let handle = self.window.window().window_handle();
         if handle.window_handle().is_err() {
@@ -155,7 +150,6 @@ impl GoogleSignIn {
         &self.window
     }
 
-    /// Sizes the page to the window.
     pub fn fit(&self) {
         if let Some(webview) = &self.webview {
             let _ = webview.set_bounds(bounds(&self.window));
@@ -177,10 +171,8 @@ impl GoogleSignIn {
             .iter()
             .any(|c| c.name().ends_with(BOUND_SESSION_COOKIE))
         {
-            // BROWSER_ARGS did not take: a runtime that renamed the feature,
-            // WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS or a policy replacing
-            // them, or an account that insists on binding. Kept rather than
-            // refused, as it works until the session goes unrefreshed.
+            // BROWSER_ARGS did not take (renamed feature, policy or env
+            // override). Kept rather than refused, as it works for a while.
             log::warn!("Google bound the sign-in to the sign-in window, so it will lapse");
         }
         Some(
