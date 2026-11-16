@@ -28,9 +28,12 @@ use slint::{
         winit::{
             dpi,
             event::{ElementState, TouchPhase, WindowEvent},
+            platform::windows::{IconExtWindows, WindowAttributesExtWindows},
+            window::{Icon, WindowAttributes},
         },
     },
 };
+use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSMICON};
 
 use crate::{app::App, settings::WindowGeometry};
 
@@ -140,6 +143,17 @@ fn add_fallback_fonts() {
     }
 }
 
+/// The exe's own icon (resource 1), so Windows picks the drawn frame for each
+/// size rather than scaling one image down, as Slint's `icon` property would.
+fn with_exe_icon(attributes: WindowAttributes) -> WindowAttributes {
+    // SAFETY: GetSystemMetrics takes no pointers and only reads a system setting.
+    let small = unsafe { GetSystemMetrics(SM_CXSMICON) } as u32;
+    let icon = |size| Icon::from_resource(1, size).ok();
+    attributes
+        .with_window_icon(icon(Some(dpi::PhysicalSize::new(small, small))))
+        .with_taskbar_icon(icon(None))
+}
+
 fn main() {
     add_fallback_fonts();
     logger::init();
@@ -195,6 +209,7 @@ fn main() {
             .backend_name("winit".into())
             .renderer_name("skia".into())
             .with_winit_window_attributes_hook(move |attributes| {
+                let attributes = with_exe_icon(attributes);
                 if main_window.replace(false) {
                     attributes.with_theme(Some(title_bar))
                 } else {

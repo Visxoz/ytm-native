@@ -48,7 +48,6 @@ component Linger {
 
 export component AppWindow inherits Window {
     title: "YouTube Music";
-    icon: @image-url("../app-icon.png");
     background: Theme.background;
     preferred-width: 1360px;
     preferred-height: 860px;
@@ -582,7 +581,6 @@ export component AppWindow inherits Window {
 /// Holds Google's sign-in page, which the app places over it.
 export component SignInWindow inherits Window {
     title: "Sign in to YouTube Music";
-    icon: @image-url("../app-icon.png");
     // White like Google's page, which covers it once loaded, in every look.
     background: #ffffff;
     preferred-width: 480px;

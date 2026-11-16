@@ -50,6 +50,8 @@ fn main() {
     let config = slint_build::CompilerConfiguration::new().with_style("fluent".into());
     slint_build::compile_with_config("ui/app.slint", config).expect("Slint UI compiles");
 
+    // winresource doesn't tell Cargo to watch the icon.
+    println!("cargo:rerun-if-changed=icons/icon.ico");
     let mut res = winresource::WindowsResource::new();
     res.set_icon("icons/icon.ico")
         .set("FileDescription", "YouTube Music")
