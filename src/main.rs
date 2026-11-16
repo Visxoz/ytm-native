@@ -29,11 +29,13 @@ use slint::{
             dpi,
             event::{ElementState, TouchPhase, WindowEvent},
             platform::windows::{IconExtWindows, WindowAttributesExtWindows},
-            window::{Icon, WindowAttributes},
+            window::{Fullscreen, Icon, Window, WindowAttributes},
         },
     },
 };
-use windows_sys::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSMICON};
+use windows_sys::Win32::UI::WindowsAndMessaging::{
+    GetSystemMetrics, SM_CXSMICON, SWP_NOACTIVATE, SWP_NOZORDER, SetWindowPos,
+};
 
 use crate::{app::App, settings::WindowGeometry};
 
@@ -76,9 +78,8 @@ fn current_geometry(ui: &AppWindow, previous: Option<WindowGeometry>) -> Option<
     })
 }
 
-fn hwnd(ui: &AppWindow) -> Option<*mut std::ffi::c_void> {
-    let handle = ui.window().window_handle();
-    let handle = handle.window_handle().ok()?;
+fn hwnd(window: &impl HasWindowHandle) -> Option<*mut std::ffi::c_void> {
+    let handle = window.window_handle().ok()?;
     match handle.as_raw() {
         RawWindowHandle::Win32(h) => Some(h.hwnd.get() as *mut std::ffi::c_void),
         _ => None,
@@ -93,14 +94,51 @@ fn is_minimized(ui: &AppWindow) -> bool {
         .unwrap_or_else(|| ui.window().is_minimized())
 }
 
-/// Closes the search box on a press outside it, as rows and cards take no
-/// focus; watched in winit's events so the press still does its own work. A
-/// window keeps one winit event filter, so other watchers belong in this one.
-fn close_search_on_outside_press(ui: &AppWindow) {
+/// Keeps the full player's window a pixel taller than the screen. One that
+/// covers the screen exactly is handed to the display past the compositor, and
+/// G-Sync then follows the app's frame rate, which swings between idle and a
+/// lyric line's glide, flickering the screen and slowing the cursor.
+fn keep_composed(window: &Window, size: dpi::PhysicalSize<u32>) {
+    // winit names the monitor while making the window cover it.
+    let Some(Fullscreen::Borderless(Some(monitor))) = window.fullscreen() else {
+        return;
+    };
+    if size != monitor.size() {
+        return;
+    }
+    let Some(hwnd) = hwnd(window) else { return };
+    let at = monitor.position();
+    // shortcut: the extra row shows on a monitor directly below; pick a free
+    // edge if anyone stacks monitors vertically.
+    // SAFETY: `hwnd` is this live window's handle and the call dereferences no
+    // memory; winit buffers the events its re-entrant messages raise until
+    // this handler returns, so Slint's handler isn't re-entered.
+    unsafe {
+        SetWindowPos(
+            hwnd,
+            std::ptr::null_mut(),
+            at.x,
+            at.y,
+            size.width as i32,
+            size.height as i32 + 1,
+            SWP_NOZORDER | SWP_NOACTIVATE,
+        )
+    };
+}
+
+/// Keeps the full player composed, and closes the search box on a press
+/// outside it, as rows and cards take no focus; watched in winit's events so
+/// the press still does its own work. A window keeps one winit event filter,
+/// so other watchers belong in this one.
+fn watch_window_events(ui: &AppWindow) {
     let weak = ui.as_weak();
     let mut cursor = dpi::PhysicalPosition::new(0.0_f64, 0.0);
     ui.window().on_winit_window_event(move |window, event| {
         let pressed_at = match event {
+            WindowEvent::Resized(size) => {
+                window.with_winit_window(|w| keep_composed(w, *size));
+                None
+            }
             WindowEvent::CursorMoved { position, .. } => {
                 cursor = *position;
                 None
@@ -239,7 +277,7 @@ fn main() {
     });
 
     ui.show().expect("window shows");
-    close_search_on_outside_press(&ui);
+    watch_window_events(&ui);
 
     let start_app = Rc::clone(&app);
     slint::Timer::single_shot(Duration::ZERO, move || start_app.start());
@@ -256,7 +294,7 @@ fn main() {
         move || {
             attempts.set(attempts.get() + 1);
             let Some(ui) = weak.upgrade() else { return };
-            let found = hwnd(&ui);
+            let found = hwnd(&ui.window().window_handle());
             if let Some(hwnd) = found {
                 media_app.attach_window(hwnd);
             } else if attempts.get() < 50 {
