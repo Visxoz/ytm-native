@@ -480,7 +480,7 @@ impl App {
             .rgb()
             .map(opaque)
             .or(state.artwork_accent)
-            .unwrap_or_else(|| opaque(settings::YOUTUBE_RED));
+            .unwrap_or_else(|| opaque(settings::LILY));
         ui.global::<Theme>()
             .set_accent(images::readable(accent, settings.look == Look::Light));
     }

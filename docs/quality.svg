@@ -8,7 +8,7 @@
     .note { font-size: 14px; fill: #8b8b94; }
     .val { font-size: 18px; font-weight: 700; fill: #f4f4f5; }
     .bar { fill: #6b6b76; }
-    .hi { fill: #ff0033; }
+    .hi { fill: #d65db1; }
     .track { fill: #ffffff; fill-opacity: 0.05; }
   </style>
   <rect width="640" height="400" rx="28" fill="#0c0c0f"/>

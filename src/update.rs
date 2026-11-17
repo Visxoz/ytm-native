@@ -14,7 +14,7 @@ use std::{
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-const LATEST: &str = "https://api.github.com/repos/Visxoz/ytm-native/releases/latest";
+const LATEST: &str = "https://api.github.com/repos/Visxoz/lily/releases/latest";
 /// GitHub's API and the hosts its release downloads redirect to.
 const DOMAINS: &[&str] = &["api.github.com", "github.com", "githubusercontent.com"];
 const SUMS: &str = "SHA256SUMS";
@@ -59,7 +59,7 @@ fn client() -> &'static reqwest::Client {
     CLIENT.get_or_init(|| {
         reqwest::Client::builder()
             // GitHub's API refuses requests without one.
-            .user_agent(format!("ytm-native/{CURRENT}"))
+            .user_agent(format!("Lily/{CURRENT}"))
             .timeout(Duration::from_secs(120))
             .redirect(crate::http::redirects(DOMAINS))
             .build()
@@ -261,8 +261,8 @@ mod tests {
     }
 
     const ASSETS: &[&str] = &[
-        "ytm-native_0.2.0_x64-portable.exe",
-        "ytm-native_0.2.0_x64-setup.exe",
+        "lily_0.2.0_x64-portable.exe",
+        "lily_0.2.0_x64-setup.exe",
         "SHA256SUMS",
     ];
 
@@ -291,7 +291,7 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(update.version, "0.2.0");
-        assert_eq!(update.asset.name, "ytm-native_0.2.0_x64-portable.exe");
+        assert_eq!(update.asset.name, "lily_0.2.0_x64-portable.exe");
         let mut draft = release("v0.2.0", ASSETS);
         draft.prerelease = true;
         assert!(newer(draft, "0.1.2", Kind::Portable).unwrap().is_none());
@@ -302,7 +302,7 @@ mod tests {
         let update = newer(release("v0.2.0", ASSETS), "0.1.2", Kind::Installed)
             .unwrap()
             .unwrap();
-        assert_eq!(update.asset.name, "ytm-native_0.2.0_x64-setup.exe");
+        assert_eq!(update.asset.name, "lily_0.2.0_x64-setup.exe");
         assert!(
             newer(release("v0.2.0", &ASSETS[..2]), "0.1.2", Kind::Installed).is_err(),
             "no checksums, no update"
@@ -311,14 +311,13 @@ mod tests {
 
     #[test]
     fn finds_the_checksum() {
-        let sums =
-            "ABC123  ytm-native_0.2.0_x64-setup.exe\ndef456 *ytm-native_0.2.0_x64-portable.exe\n";
+        let sums = "ABC123  lily_0.2.0_x64-setup.exe\ndef456 *lily_0.2.0_x64-portable.exe\n";
         assert_eq!(
-            expected_hash(sums, "ytm-native_0.2.0_x64-setup.exe").as_deref(),
+            expected_hash(sums, "lily_0.2.0_x64-setup.exe").as_deref(),
             Some("abc123")
         );
         assert_eq!(
-            expected_hash(sums, "ytm-native_0.2.0_x64-portable.exe").as_deref(),
+            expected_hash(sums, "lily_0.2.0_x64-portable.exe").as_deref(),
             Some("def456")
         );
         assert_eq!(expected_hash(sums, "other.exe"), None);
@@ -329,7 +328,7 @@ mod tests {
         let allowed = |url: &str| crate::http::within(&url::Url::parse(url).unwrap(), DOMAINS);
         assert!(allowed(LATEST));
         assert!(allowed(
-            "https://github.com/Visxoz/ytm-native/releases/download/v1/a.exe"
+            "https://github.com/Visxoz/lily/releases/download/v1/a.exe"
         ));
         assert!(allowed("https://release-assets.githubusercontent.com/x"));
         assert!(!allowed("https://github.com.evil.com/"));

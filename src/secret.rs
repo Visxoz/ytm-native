@@ -15,7 +15,8 @@ use windows_sys::Win32::{
 };
 
 /// Mixed into the key, so other programs calling DPAPI for this user
-/// without it cannot decrypt the files.
+/// without it cannot decrypt the files. Kept from before the app was named
+/// Lily, as changing it would sign everyone out.
 const ENTROPY: &[u8] = b"ytm-native sign-in";
 
 fn blob(data: &[u8]) -> CRYPT_INTEGER_BLOB {

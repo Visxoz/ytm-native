@@ -6,7 +6,7 @@
   <rect x="0.5" y="0.5" width="359" height="75" rx="18" fill="#121216" stroke="#ffffff" stroke-opacity="0.12"/>
 
   <!-- Windows logo, in the accent -->
-  <g fill="#ff0033" transform="translate(26 24)">
+  <g fill="#d65db1" transform="translate(26 24)">
     <rect x="0" y="0" width="13" height="13" rx="1.5"/>
     <rect x="15" y="0" width="13" height="13" rx="1.5"/>
     <rect x="0" y="15" width="13" height="13" rx="1.5"/>

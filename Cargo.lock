@@ -3164,6 +3164,43 @@ dependencies = [
 ]
 
 [[package]]
+name = "lily"
+version = "0.1.16"
+dependencies = [
+ "cpal",
+ "discord-rich-presence",
+ "http",
+ "image",
+ "log",
+ "md-5",
+ "oxc_allocator",
+ "oxc_ast",
+ "oxc_ast_visit",
+ "oxc_parser",
+ "oxc_semantic",
+ "oxc_span",
+ "raw-window-handle",
+ "reqwest",
+ "rquickjs",
+ "rustypipe",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2",
+ "slint",
+ "slint-build",
+ "souvlaki",
+ "symphonia",
+ "time",
+ "tokio",
+ "unsafe-libopus",
+ "url",
+ "windows-sys 0.61.2",
+ "winresource",
+ "wry",
+]
+
+[[package]]
 name = "linebender_resource_handle"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7824,43 +7861,6 @@ dependencies = [
  "quote",
  "syn 3.0.9",
  "synstructure",
-]
-
-[[package]]
-name = "ytm-native"
-version = "0.1.16"
-dependencies = [
- "cpal",
- "discord-rich-presence",
- "http",
- "image",
- "log",
- "md-5",
- "oxc_allocator",
- "oxc_ast",
- "oxc_ast_visit",
- "oxc_parser",
- "oxc_semantic",
- "oxc_span",
- "raw-window-handle",
- "reqwest",
- "rquickjs",
- "rustypipe",
- "serde",
- "serde_json",
- "sha1",
- "sha2",
- "slint",
- "slint-build",
- "souvlaki",
- "symphonia",
- "time",
- "tokio",
- "unsafe-libopus",
- "url",
- "windows-sys 0.61.2",
- "winresource",
- "wry",
 ]
 
 [[package]]

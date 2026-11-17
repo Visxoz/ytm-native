@@ -6,14 +6,14 @@
 #   release-notes.sh <previous-tag> <tag> [previous-ref] [ref]
 #
 # The refs default to the tags. Locally this checkout shares its tags with
-# ytm-lite, so pass the commits from `git ls-remote --tags ytm-native`.
+# ytm-lite, so pass the commits from `git ls-remote --tags lily`.
 set -euo pipefail
 
 previous=$1
 tag=$2
 previous_ref=${3:-$previous}
 ref=${4:-$tag}
-repo=${GITHUB_REPOSITORY:-Visxoz/ytm-native}
+repo=${GITHUB_REPOSITORY:-Visxoz/lily}
 
 section() {
     local heading=$1 type=$2 lines
@@ -31,7 +31,7 @@ section "Faster" perf
 cat <<EOF
 ## Install
 
-Download \`ytm-native_${tag#v}_x64-setup.exe\` for an installer, or the portable exe to run from anywhere. The app is not code-signed yet, so if Windows says it protected your PC, choose **More info**, then **Run anyway**.
+Download \`lily_${tag#v}_x64-setup.exe\` for an installer, or the portable exe to run from anywhere. The app is not code-signed yet, so if Windows says it protected your PC, choose **More info**, then **Run anyway**.
 
 **Full changelog:** https://github.com/$repo/compare/$previous...$tag
 EOF

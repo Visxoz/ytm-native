@@ -13,12 +13,9 @@ use crate::update;
 
 pub(super) fn up_to_date_status(checking: bool) -> String {
     if checking {
-        format!(
-            "ytm-native {}. Checks GitHub for new versions.",
-            update::CURRENT
-        )
+        format!("Lily {}. Checks GitHub for new versions.", update::CURRENT)
     } else {
-        format!("ytm-native {}. Automatic checks are off.", update::CURRENT)
+        format!("Lily {}. Automatic checks are off.", update::CURRENT)
     }
 }
 
@@ -39,7 +36,7 @@ impl App {
                     .into(),
                 );
                 app.toast(format!(
-                    "ytm-native {} is available; update it from Settings",
+                    "Lily {} is available; update it from Settings",
                     found.version
                 ));
                 *app.update.borrow_mut() = Some(found);

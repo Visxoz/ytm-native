@@ -1,11 +1,20 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#FF1440"/>
-      <stop offset="1" stop-color="#E5000E"/>
+      <stop offset="0" stop-color="#17111D"/>
+      <stop offset="1" stop-color="#0B0A0F"/>
+    </linearGradient>
+    <radialGradient id="glow" gradientUnits="userSpaceOnUse" cx="512" cy="460" r="460">
+      <stop offset="0" stop-color="#C45AD8" stop-opacity="0.16"/>
+      <stop offset="1" stop-color="#C45AD8" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ink" gradientUnits="userSpaceOnUse" x1="240" y1="180" x2="784" y2="864">
+      <stop offset="0" stop-color="#F472D0"/>
+      <stop offset="1" stop-color="#9B5CFF"/>
     </linearGradient>
   </defs>
   <rect width="1024" height="1024" rx="225" fill="url(#bg)"/>
-  <path fill="#FFFFFF" fill-rule="evenodd" d="M196.0,512.0 A316.0,316.0 0 1 1 828.0,512.0 A316.0,316.0 0 1 1 196.0,512.0 Z M266.0,512.0 A246.0,246.0 0 1 0 758.0,512.0 A246.0,246.0 0 1 0 266.0,512.0 Z"/>
-  <path fill="#FFFFFF" d="M474.63,389.18 L633.37,480.82 A36.0,36.0 0 0 1 633.37,543.18 L474.63,634.82 A36.0,36.0 0 0 1 420.63,603.65 L420.63,420.35 A36.0,36.0 0 0 1 474.63,389.18 Z"/>
+  <rect width="1024" height="1024" rx="225" fill="url(#glow)"/>
+  <path fill="none" stroke="url(#ink)" stroke-width="38" stroke-linecap="round" stroke-linejoin="round" d="M 478 845 C 494 786 500 726 498 677 C 520 674 543 669 564 661 C 644 635 716 585 753 518 C 774 479 813 474 844 503 C 826 431 778 380 729 392 C 688 401 629 548 564 661 M 476 655 C 374 627 290 553 265 458 C 255 415 218 401 180 420 C 215 357 273 317 319 341 C 363 364 405 578 476 655 M 474 536 C 449 459 429 340 425 225 M 503 528 C 514 439 536 320 565 213 M 532 540 C 579 469 631 374 690 283"/>
+  <path fill="url(#ink)" d="M 390 225 A 35 35 0 1 0 460 225 A 35 35 0 1 0 390 225 Z M 530 213 A 35 35 0 1 0 600 213 A 35 35 0 1 0 530 213 Z M 655 283 A 35 35 0 1 0 725 283 A 35 35 0 1 0 655 283 Z"/>
 </svg>

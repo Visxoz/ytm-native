@@ -41,7 +41,9 @@ use crate::{app::App, settings::WindowGeometry};
 
 slint::include_modules!();
 
-const WINDOW_TITLE: &str = "YouTube Music";
+/// The main window's class, by which a second launch finds it; its title
+/// alone would match an Explorer window on a folder named Lily.
+const WINDOW_CLASS: &str = "Lily";
 
 fn restore_geometry(ui: &AppWindow, geometry: Option<WindowGeometry>) {
     let Some(g) = geometry else { return };
@@ -195,10 +197,11 @@ fn with_exe_icon(attributes: WindowAttributes) -> WindowAttributes {
 fn main() {
     add_fallback_fonts();
     logger::init();
-    let Some(instance) = single_instance::acquire(WINDOW_TITLE) else {
+    let Some(instance) = single_instance::acquire(WINDOW_CLASS) else {
         return;
     };
     update::clean_up();
+    settings::move_data_dir();
     let _ = std::fs::create_dir_all(settings::data_dir());
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
@@ -249,7 +252,9 @@ fn main() {
             .with_winit_window_attributes_hook(move |attributes| {
                 let attributes = with_exe_icon(attributes);
                 if main_window.replace(false) {
-                    attributes.with_theme(Some(title_bar))
+                    attributes
+                        .with_theme(Some(title_bar))
+                        .with_class_name(WINDOW_CLASS)
                 } else {
                     attributes
                 }

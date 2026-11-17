@@ -1,10 +1,10 @@
-# Builds icons/icon.ico from icons/icon.svg, and icon-small.svg at 16 and 20 px. Needs ImageMagick 7.
+# Builds icons/icon.ico from icons/icon.svg, and icon-small.svg at 16, 20 and 24 px. Needs ImageMagick 7.
 $ErrorActionPreference = 'Stop'
 $icons = Join-Path (Split-Path $PSScriptRoot) 'icons'
-$png = Join-Path ([IO.Path]::GetTempPath()) 'ytm-native-icon.png'
+$png = Join-Path ([IO.Path]::GetTempPath()) 'lily-icon.png'
 
 $frames = foreach ($size in 16, 20, 24, 32, 40, 48, 64, 256) {
-    $svg = if ($size -le 20) { 'icon-small.svg' } else { 'icon.svg' }
+    $svg = if ($size -le 24) { 'icon-small.svg' } else { 'icon.svg' }
     magick -background none "$icons\$svg" -filter Box -resize "${size}x$size" -strip "png32:$png"
     if ($LASTEXITCODE) { throw "magick failed at $size px" }
     @{ Size = $size; Bytes = [IO.File]::ReadAllBytes($png) }

@@ -4,19 +4,46 @@ use std::{
     ops::Range,
     path::{Path, PathBuf},
     sync::{
-        Mutex, PoisonError,
+        Mutex, OnceLock, PoisonError,
         atomic::{AtomicU64, Ordering},
     },
 };
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
-/// `%APPDATA%\ytm-native`, where settings and caches live.
-pub fn data_dir() -> PathBuf {
+static DATA_DIR: OnceLock<PathBuf> = OnceLock::new();
+
+fn app_data() -> PathBuf {
     std::env::var_os("APPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir)
-        .join("ytm-native")
+}
+
+/// `%APPDATA%\Lily`, where settings and caches live.
+pub fn data_dir() -> PathBuf {
+    DATA_DIR
+        .get()
+        .cloned()
+        .unwrap_or_else(|| app_data().join("Lily"))
+}
+
+/// Moves the folder of the versions named ytm-native to `%APPDATA%\Lily`.
+/// Run once from `main` while holding the single-instance lock, so no other
+/// copy has files open; should the move fail, the old folder stays in use.
+pub fn move_data_dir() {
+    let (old, new) = (app_data().join("ytm-native"), app_data().join("Lily"));
+    let dir = if !new.exists() && old.exists() {
+        match std::fs::rename(&old, &new) {
+            Ok(()) => new,
+            Err(e) => {
+                log::warn!("could not move {} to {}: {e}", old.display(), new.display());
+                old
+            }
+        }
+    } else {
+        new
+    };
+    let _ = DATA_DIR.set(dir);
 }
 
 /// Renames a temporary file over `path`, so a failed write leaves the old file
@@ -154,9 +181,9 @@ impl Quality {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Look {
-    #[default]
     Dark,
     Light,
+    #[default]
     Black,
 }
 
@@ -174,12 +201,14 @@ impl Look {
     }
 }
 
-pub const YOUTUBE_RED: u32 = 0xff0033;
+/// The orchid of Lily's icon.
+pub const LILY: u32 = 0xd65db1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum Accent {
     #[default]
+    Lily,
     Red,
     Orange,
     Green,
@@ -192,7 +221,8 @@ pub enum Accent {
 
 impl Accent {
     /// In the order the Settings dialog offers them, which is their index.
-    pub const ALL: [Self; 8] = [
+    pub const ALL: [Self; 9] = [
+        Accent::Lily,
         Accent::Red,
         Accent::Orange,
         Accent::Green,
@@ -205,6 +235,7 @@ impl Accent {
 
     pub fn name(self) -> &'static str {
         match self {
+            Accent::Lily => "Lily",
             Accent::Red => "Red",
             Accent::Orange => "Orange",
             Accent::Green => "Green",
@@ -220,7 +251,8 @@ impl Accent {
     /// with the song.
     pub fn rgb(self) -> Option<u32> {
         match self {
-            Accent::Red => Some(YOUTUBE_RED),
+            Accent::Lily => Some(LILY),
+            Accent::Red => Some(0xff0033),
             Accent::Orange => Some(0xff6a13),
             Accent::Green => Some(0x1db954),
             Accent::Teal => Some(0x00a89d),
@@ -302,8 +334,8 @@ impl Default for Settings {
             check_updates: true,
             equaliser: false,
             equaliser_gains: Default::default(),
-            look: Look::Dark,
-            accent: Accent::Red,
+            look: Look::Black,
+            accent: Accent::Lily,
             window: None,
         }
     }
@@ -581,7 +613,7 @@ mod tests {
         );
         assert!(!settings.youtube_history, "the opt-out is kept");
         assert_eq!(settings.volume, 0.5);
-        assert_eq!(settings.accent, Accent::Red);
+        assert_eq!(settings.accent, Accent::Lily);
         assert_eq!(settings.equaliser_gains, [0.0; 6]);
         assert_eq!(Settings::parse(b"not json"), Settings::default());
     }
@@ -759,8 +791,8 @@ mod tests {
             assert_eq!(accent.index(), i as i32, "ALL is in declaration order");
             assert_eq!(Accent::from_index(accent.index()), accent);
         }
-        assert_eq!(Accent::from_index(-1), Accent::Red);
-        assert_eq!(Accent::from_index(99), Accent::Red);
+        assert_eq!(Accent::from_index(-1), Accent::Lily);
+        assert_eq!(Accent::from_index(99), Accent::Lily);
         assert_eq!(Accent::Artwork.rgb(), None);
         for look in [Look::Dark, Look::Light, Look::Black] {
             assert_eq!(Look::from_index(look.index()), look);

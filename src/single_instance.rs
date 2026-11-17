@@ -6,6 +6,8 @@ use windows_sys::Win32::{
     UI::WindowsAndMessaging::{FindWindowW, SW_RESTORE, SetForegroundWindow, ShowWindow},
 };
 
+/// Kept from before the app was named Lily, so an older copy and a newer one
+/// never run together, which would share the data folder as it moves.
 const MUTEX_NAME: &str = "Local\\ytm-native-single-instance";
 
 fn wide(s: &str) -> Vec<u16> {
@@ -26,11 +28,11 @@ impl Drop for Guard {
 }
 
 /// Returns `None` if another instance is running, after focusing it.
-pub fn acquire(window_title: &str) -> Option<Guard> {
-    acquire_named(MUTEX_NAME, window_title)
+pub fn acquire(window_class: &str) -> Option<Guard> {
+    acquire_named(MUTEX_NAME, window_class)
 }
 
-fn acquire_named(mutex: &str, window_title: &str) -> Option<Guard> {
+fn acquire_named(mutex: &str, window_class: &str) -> Option<Guard> {
     let name = wide(mutex);
     // SAFETY: `name` is a valid NUL-terminated UTF-16 string.
     let handle = unsafe { CreateMutexW(std::ptr::null(), 0, name.as_ptr()) };
@@ -42,9 +44,9 @@ fn acquire_named(mutex: &str, window_title: &str) -> Option<Guard> {
     }
     // Let go of the other copy's mutex at once, rather than at exit.
     drop(guard);
-    let title = wide(window_title);
-    // SAFETY: `title` is NUL-terminated; a null class matches any window.
-    let hwnd = unsafe { FindWindowW(std::ptr::null(), title.as_ptr()) };
+    let class = wide(window_class);
+    // SAFETY: `class` is NUL-terminated; a null title matches any window.
+    let hwnd = unsafe { FindWindowW(class.as_ptr(), std::ptr::null()) };
     if !hwnd.is_null() {
         // SAFETY: `hwnd` was just returned by FindWindowW.
         unsafe {

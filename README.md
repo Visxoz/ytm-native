@@ -1,23 +1,23 @@
 <div align="center">
 
-<img src="docs/banner.svg" width="100%" alt="ytm-native: YouTube Music, as a real Windows app">
+<img src="docs/banner.svg" width="100%" alt="Lily: a native YouTube Music client for Windows">
 
 <br>
 
-[![Release](https://img.shields.io/github/v/release/Visxoz/ytm-native?style=flat&labelColor=18181b&color=ff0033&label=release)](https://github.com/Visxoz/ytm-native/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/Visxoz/ytm-native/total?style=flat&labelColor=18181b&color=ff0033&label=downloads)](https://github.com/Visxoz/ytm-native/releases)
-[![CI](https://img.shields.io/github/actions/workflow/status/Visxoz/ytm-native/ci.yml?branch=main&style=flat&labelColor=18181b&label=ci)](https://github.com/Visxoz/ytm-native/actions/workflows/ci.yml)
+[![Release](https://img.shields.io/github/v/release/Visxoz/lily?style=flat&labelColor=18181b&color=d65db1&label=release)](https://github.com/Visxoz/lily/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/Visxoz/lily/total?style=flat&labelColor=18181b&color=d65db1&label=downloads)](https://github.com/Visxoz/lily/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/Visxoz/lily/ci.yml?branch=main&style=flat&labelColor=18181b&label=ci)](https://github.com/Visxoz/lily/actions/workflows/ci.yml)
 [![Windows 10 and 11](https://img.shields.io/badge/Windows-10%20%7C%2011-0078d4?style=flat&labelColor=18181b&logo=windows11&logoColor=white)](#install)
 [![Rust](https://img.shields.io/badge/Rust-2024-b7410e?style=flat&labelColor=18181b&logo=rust&logoColor=white)](#under-the-hood)
-[![Licence](https://img.shields.io/github/license/Visxoz/ytm-native?style=flat&labelColor=18181b&color=3f3f46&label=licence)](LICENSE)
+[![Licence](https://img.shields.io/github/license/Visxoz/lily?style=flat&labelColor=18181b&color=3f3f46&label=licence)](LICENSE)
 
 <br>
 
-<a href="https://github.com/Visxoz/ytm-native/releases/latest"><img src="docs/download.svg" width="300" alt="Download for Windows"></a>
+<a href="https://github.com/Visxoz/lily/releases/latest"><img src="docs/download.svg" width="300" alt="Download for Windows"></a>
 
 <br>
 
-<img src="docs/hero.png" width="100%" alt="ytm-native in the black look, with an artist page, and synced lyrics tinted from the artwork">
+<img src="docs/hero.png" width="100%" alt="Lily in the black look, with an artist page, and synced lyrics tinted from the artwork">
 
 <sub>Black look · lyrics that follow the song, tinted from its artwork</sub>
 
@@ -46,14 +46,14 @@ One 24 MB exe, drawn by the GPU, using 0.1% of the CPU while it plays. Minimised
 <td width="33%" valign="top">
 
 ### Looks the part
-Dark, light or pure black, in seven accents, or one that follows the song's artwork. Pages are tinted to match.
+Pure black and orchid out of the box, or dark or light, in eight other accents including one that follows the song's artwork. Pages are tinted to match.
 
 </td>
 </tr>
 <tr>
 <td width="33%" valign="top">
 
-### Plays like YouTube Music
+### All of YouTube Music
 Radio, autoplay, Smart Shuffle, repeat, history and search with recent searches. Artist pages carry the whole discography.
 
 </td>
@@ -99,7 +99,7 @@ The button beside the queue's takes the window full screen: the artwork and its 
 </tr>
 </table>
 
-Pick a look and an accent in **Settings ▸ Appearance**: Red, Orange, Green, Teal, Blue, Purple, Pink, or **From the artwork**.
+Lily starts in pure black with its own orchid. Pick another look and accent in **Settings ▸ Appearance**: Lily, Red, Orange, Green, Teal, Blue, Purple, Pink, or **From the artwork**.
 
 ## Sounds as good as YouTube gets
 
@@ -144,20 +144,20 @@ RAM is the private working set, the figure Task Manager's Memory column shows. C
 
 ## Install
 
-Grab one from the [latest release](https://github.com/Visxoz/ytm-native/releases/latest):
+Grab one from the [latest release](https://github.com/Visxoz/lily/releases/latest):
 
 <table>
 <tr>
 <td width="50%" valign="top">
 
-**Installer** · `ytm-native_<version>_x64-setup.exe`
+**Installer** · `lily_<version>_x64-setup.exe`
 
 Installs for your account only, with no admin prompt, a Start menu entry and an uninstaller.
 
 </td>
 <td width="50%" valign="top">
 
-**Portable** · `ytm-native_<version>_x64-portable.exe`
+**Portable** · `lily_<version>_x64-portable.exe`
 
 Put it anywhere and run it. Nothing is installed.
 
@@ -199,7 +199,7 @@ Open music.youtube.com in a private browser window and sign in. Copy either a co
 </details>
 
 > [!WARNING]
-> ytm-native is an unofficial client. It uses YouTube's undocumented API, which is against YouTube's terms of service. Google could ask you to confirm you're not a bot or sign the session out, and could in principle restrict the account. A separate account is the safest choice.
+> Lily is an unofficial client. It uses YouTube's undocumented API, which is against YouTube's terms of service. Google could ask you to confirm you're not a bot or sign the session out, and could in principle restrict the account. A separate account is the safest choice.
 
 ## Under the hood
 
@@ -236,7 +236,7 @@ flowchart LR
 
 Most YouTube clients get stream URLs that YouTube's player JavaScript has to unscramble. The visionOS client gets plain ones, so the app asks as that client and needs no JavaScript engine, falling back to Android VR and iOS if YouTube changes it. A daily check flags it when one of them stops working. With Premium, the app unscrambles the web player's URLs itself, in a short-lived QuickJS context with a cut-down copy of the player.
 
-The app talks only to YouTube's hosts, plus GitHub for updates and Last.fm if you connect it, each checked against an allowlist. It keeps everything in `%APPDATA%\ytm-native`.
+The app talks only to YouTube's hosts, plus GitHub for updates and Last.fm if you connect it, each checked against an allowlist. It keeps everything in `%APPDATA%\Lily`, and moves the folder of versions named ytm-native there on its first start.
 
 </details>
 
@@ -252,7 +252,7 @@ You need Rust with the MSVC toolchain. Three crates are built from `vendor/` wit
 
 ```powershell
 cargo run              # debug build with logging
-cargo build --release  # target/release/ytm-native.exe
+cargo build --release  # target/release/lily.exe
 cargo test
 ```
 
@@ -268,7 +268,7 @@ The patches:
 
 ## Licence
 
-ytm-native is free software under the [GNU General Public License, version 3](LICENSE). It builds on [rustypipe](https://codeberg.org/ThetaDev/rustypipe), which is GPL-3.0, and on [Slint](https://slint.dev) under its GPL-3.0 option.
+Lily is free software under the [GNU General Public License, version 3](LICENSE). It builds on [rustypipe](https://codeberg.org/ThetaDev/rustypipe), which is GPL-3.0, and on [Slint](https://slint.dev) under its GPL-3.0 option.
 
 <br>
 

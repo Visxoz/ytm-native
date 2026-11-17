@@ -1,10 +1,10 @@
 [package]
-name = "ytm-native"
+name = "lily"
 version = "0.1.16"
-description = "A native YouTube Music client for Windows"
+description = "Lily, a native YouTube Music client for Windows"
 # rustypipe is GPL-3.0, so the app is too.
 license = "GPL-3.0-only"
-repository = "https://github.com/Visxoz/ytm-native"
+repository = "https://github.com/Visxoz/lily"
 edition = "2024"
 publish = false
 

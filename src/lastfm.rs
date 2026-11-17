@@ -105,7 +105,7 @@ async fn call<T: DeserializeOwned>(method: &str, mut params: Params) -> Result<T
         .post(API_URL)
         .header(
             reqwest::header::USER_AGENT,
-            concat!("ytm-native/", env!("CARGO_PKG_VERSION")),
+            concat!("Lily/", env!("CARGO_PKG_VERSION")),
         )
         .form(&params)
         .timeout(TIMEOUT)

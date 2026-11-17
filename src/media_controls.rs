@@ -33,8 +33,8 @@ impl Controls {
         on_action: impl Fn(Action) + Send + 'static,
     ) -> Option<Self> {
         let config = PlatformConfig {
-            display_name: "YouTube Music",
-            dbus_name: "ytm_native",
+            display_name: "Lily",
+            dbus_name: "lily",
             hwnd: Some(hwnd),
         };
         let mut inner = MediaControls::new(config)

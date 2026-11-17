@@ -10,7 +10,7 @@
     .val { font-size: 16px; font-weight: 700; fill: #f4f4f5; }
     .pct { font-size: 40px; font-weight: 700; fill: #f4f4f5; letter-spacing: -1px; }
     .open { fill: #6b6b76; }
-    .min { fill: #ff0033; }
+    .min { fill: #d65db1; }
     .track { fill: #ffffff; fill-opacity: 0.05; }
     .rule { stroke: #ffffff; stroke-opacity: 0.08; }
   </style>

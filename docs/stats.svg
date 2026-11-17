@@ -6,7 +6,7 @@
     .big { font-size: 54px; font-weight: 700; fill: #f4f4f5; letter-spacing: -1px; }
     .unit { font-size: 24px; font-weight: 600; fill: #a1a1aa; }
     .cap { font-size: 17px; fill: #a1a1aa; }
-    .tick { fill: #ff0033; }
+    .tick { fill: #d65db1; }
   </style>
   <g>
     <rect class="tile" x="0.5" y="0.5" width="305" height="189" rx="22"/>

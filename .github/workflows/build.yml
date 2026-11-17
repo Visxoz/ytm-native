@@ -45,13 +45,13 @@ jobs:
           }
           $version = (Select-String -Path Cargo.toml -Pattern '^version = "([^"]+)"' |
             Select-Object -First 1).Matches[0].Groups[1].Value
-          & $iscc /Qp "/DAppVersion=$version" installer/ytm-native.iss
+          & $iscc /Qp "/DAppVersion=$version" installer/lily.iss
           if ($LASTEXITCODE -ne 0) { throw 'the installer did not build' }
-          Copy-Item target/release/ytm-native.exe dist/
+          Copy-Item target/release/lily.exe dist/
 
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: ytm-native-${{ github.sha }}
+          name: lily-${{ github.sha }}
           path: dist/*.exe
           if-no-files-found: error
           retention-days: 14

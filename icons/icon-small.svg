@@ -1,12 +1,16 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
-  <!-- icon.svg with the ring's outer radius 340 rather than 316, so it stays white at 16 and 20 px. -->
+  <!-- icon.svg redrawn for 16 to 24 px: filled petals, two stamens, heavier lines. -->
   <defs>
     <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#FF1440"/>
-      <stop offset="1" stop-color="#E5000E"/>
+      <stop offset="0" stop-color="#17111D"/>
+      <stop offset="1" stop-color="#0B0A0F"/>
+    </linearGradient>
+    <linearGradient id="ink" gradientUnits="userSpaceOnUse" x1="240" y1="180" x2="784" y2="864">
+      <stop offset="0" stop-color="#F472D0"/>
+      <stop offset="1" stop-color="#9B5CFF"/>
     </linearGradient>
   </defs>
   <rect width="1024" height="1024" rx="225" fill="url(#bg)"/>
-  <path fill="#FFFFFF" fill-rule="evenodd" d="M172.0,512.0 A340.0,340.0 0 1 1 852.0,512.0 A340.0,340.0 0 1 1 172.0,512.0 Z M266.0,512.0 A246.0,246.0 0 1 0 758.0,512.0 A246.0,246.0 0 1 0 266.0,512.0 Z"/>
-  <path fill="#FFFFFF" d="M474.63,389.18 L633.37,480.82 A36.0,36.0 0 0 1 633.37,543.18 L474.63,634.82 A36.0,36.0 0 0 1 420.63,603.65 L420.63,420.35 A36.0,36.0 0 0 1 474.63,389.18 Z"/>
+  <path fill="none" stroke="url(#ink)" stroke-width="70" stroke-linecap="round" stroke-linejoin="round" d="M 498 661 C 500 733 493 790 475 843 M 487 609 C 466 506 450 382 444 258 M 512 615 C 553 516 601 413 644 289"/>
+  <path fill="url(#ink)" d="M 498 661 C 603 661 719 599 768 501 C 791 456 833 448 870 477 C 849 394 793 342 735 355 C 677 367 599 589 498 661 Z M 498 661 C 367 630 276 537 251 435 C 239 386 198 371 154 394 C 191 320 258 276 307 303 C 355 340 396 609 498 661 Z M 378 247 A 66 66 0 1 0 510 247 A 66 66 0 1 0 378 247 Z M 583 280 A 66 66 0 1 0 715 280 A 66 66 0 1 0 583 280 Z"/>
 </svg>

@@ -1,13 +1,13 @@
 ; Windows installer, built by the release workflow with Inno Setup 6:
-;   ISCC /DAppVersion=<x.y.z> installer\ytm-native.iss
+;   ISCC /DAppVersion=<x.y.z> installer\lily.iss
 ; Installs per user, without an admin prompt, so the app can update itself
 ; by running a newer installer silently with /relaunch=1.
 
 #ifndef AppVersion
   #define AppVersion "0.0.0"
 #endif
-#define AppName "ytm-native"
-#define AppExe "ytm-native.exe"
+#define AppName "Lily"
+#define AppExe "lily.exe"
 
 [Setup]
 ; Never change: Windows matches updates and the uninstaller by it.
@@ -16,9 +16,10 @@ AppName={#AppName}
 AppVersion={#AppVersion}
 AppVerName={#AppName} {#AppVersion}
 AppPublisher=Visxoz
-AppPublisherURL=https://github.com/Visxoz/ytm-native
-AppSupportURL=https://github.com/Visxoz/ytm-native/issues
-AppUpdatesURL=https://github.com/Visxoz/ytm-native/releases
+AppPublisherURL=https://github.com/Visxoz/lily
+AppSupportURL=https://github.com/Visxoz/lily/issues
+AppUpdatesURL=https://github.com/Visxoz/lily/releases
+; Copies installed as ytm-native stay in its folder, as the AppId is the same.
 DefaultDirName={localappdata}\Programs\{#AppName}
 DisableDirPage=auto
 DisableProgramGroupPage=yes
@@ -27,7 +28,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 MinVersion=10.0
 OutputDir=..\dist
-OutputBaseFilename={#AppName}_{#AppVersion}_x64-setup
+OutputBaseFilename=lily_{#AppVersion}_x64-setup
 SetupIconFile=..\icons\icon.ico
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
@@ -40,6 +41,12 @@ RestartApplications=no
 
 [Tasks]
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
+
+[InstallDelete]
+; What versions named ytm-native left, so an upgrade leaves no dead shortcuts.
+Type: files; Name: "{app}\ytm-native.exe"
+Type: files; Name: "{autoprograms}\ytm-native.lnk"
+Type: files; Name: "{autodesktop}\ytm-native.lnk"
 
 [Files]
 Source: "..\target\release\{#AppExe}"; DestDir: "{app}"; Flags: ignoreversion

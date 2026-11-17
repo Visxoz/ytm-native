@@ -54,7 +54,7 @@ fn main() {
     println!("cargo:rerun-if-changed=icons/icon.ico");
     let mut res = winresource::WindowsResource::new();
     res.set_icon("icons/icon.ico")
-        .set("FileDescription", "YouTube Music")
-        .set("ProductName", "YouTube Music");
+        .set("FileDescription", "Lily")
+        .set("ProductName", "Lily");
     res.compile().expect("Windows resources compile");
 }
