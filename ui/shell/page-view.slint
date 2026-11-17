@@ -98,7 +98,8 @@ export component PageView inherits Rectangle {
             wrap: word-wrap;
         }
 
-        HorizontalLayout {
+        // Downloads has nothing to try again.
+        if root.nav-current != "downloads": HorizontalLayout {
             alignment: center;
             PillButton {
                 text: root.nav-current == "local" ? "Add folder"

@@ -4,7 +4,7 @@
 
 pub mod premium;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 
 const PLAYER_URL: &str = "https://www.youtube.com/youtubei/v1/player?prettyPrint=false";
@@ -62,11 +62,15 @@ const CLIENTS: &[Client] = &[
     },
 ];
 
-#[derive(Debug, Clone, Default)]
+/// Saved with a download without what only streaming needs, so it plays
+/// from the file as it was resolved.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct ResolvedStream {
+    #[serde(skip)]
     pub url: String,
     pub size: u64,
     pub mime: String,
+    #[serde(skip)]
     pub headers: Vec<(String, String)>,
     pub codec: String,
     pub bitrate_kbps: f64,
@@ -74,10 +78,12 @@ pub struct ResolvedStream {
     pub loudness_db: Option<f32>,
     /// Not set for free formats the web client gives a Premium account, nor
     /// for a file, which has nothing to retry.
+    #[serde(skip)]
     pub premium: bool,
     /// YouTube's format number: 774 and 141 are the Premium ones.
     pub itag: u32,
-    /// The file it plays from instead, the user's own.
+    /// The file it plays from instead, downloaded or the user's own.
+    #[serde(skip)]
     pub file: Option<std::path::PathBuf>,
 }
 

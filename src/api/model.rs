@@ -197,6 +197,7 @@ pub enum Route {
     /// The songs played: the account's YouTube Music history when signed
     /// in, otherwise the one kept locally.
     History,
+    Downloads,
     /// Songs in the folders the user added.
     LocalFiles,
     Search(String),
@@ -213,6 +214,7 @@ impl Route {
             Route::Explore => "explore",
             Route::Library => "library",
             Route::History => "history",
+            Route::Downloads => "downloads",
             Route::LocalFiles => "local",
             _ => "",
         }

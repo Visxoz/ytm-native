@@ -5,7 +5,7 @@ use crate::{
     images,
 };
 
-fn track_item(track: &Track, number: usize) -> TrackItem {
+fn track_item(track: &Track, number: usize, downloaded: bool) -> TrackItem {
     TrackItem {
         id: s(&track.id),
         title: s(&track.title),
@@ -16,11 +16,18 @@ fn track_item(track: &Track, number: usize) -> TrackItem {
         number: s(number.to_string()),
         has_artist: track.first_artist_id().is_some(),
         has_album: track.album_id().is_some(),
+        downloaded,
         local: track.is_local(),
     }
 }
 
-pub(super) fn track_row(track: &Track, index: usize, numbered: bool, section: usize) -> RowItem {
+pub(super) fn track_row(
+    track: &Track,
+    index: usize,
+    numbered: bool,
+    section: usize,
+    downloaded: bool,
+) -> RowItem {
     let number = if numbered {
         track.track_nr.map_or(index + 1, usize::from)
     } else {
@@ -28,7 +35,7 @@ pub(super) fn track_row(track: &Track, index: usize, numbered: bool, section: us
     };
     RowItem {
         kind: RowKind::Track,
-        track: track_item(track, number),
+        track: track_item(track, number, downloaded),
         numbered,
         show_album: !numbered,
         section: section as i32,

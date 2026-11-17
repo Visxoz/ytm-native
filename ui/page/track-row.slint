@@ -49,6 +49,13 @@ export component TrackRow inherits Rectangle {
                 activated => { Api.track-action("radio", root.section, root.index); }
             }
 
+            if !root.track.local: MenuItem {
+                title: root.track.downloaded ? "Remove download" : "Download";
+                activated => {
+                    Api.track-action(root.track.downloaded ? "remove-download" : "download", root.section, root.index);
+                }
+            }
+
             if root.youtube: MenuSeparator { }
 
             if root.youtube: MenuItem {
@@ -139,6 +146,13 @@ export component TrackRow inherits Rectangle {
                     // Only the text is a link, so the rest of the row still plays.
                     HorizontalLayout {
                         alignment: start;
+                        spacing: 4px;
+                        if root.track.downloaded: Icon {
+                            y: (parent.height - self.height) / 2;
+                            path: Icons.downloaded;
+                            size: 14px;
+                            color: Theme.accent;
+                        }
                         Link {
                             max-width: self.preferred-width;
                             text: root.track.artists;

@@ -326,6 +326,25 @@ impl Resolver {
         self.free(&visitor).await
     }
 
+    /// The stream to download. Counts nothing towards the Premium state, as
+    /// a playlist of music videos or uploads would read as a lapsed account.
+    async fn for_keeping(&self) -> Result<ResolvedStream, String> {
+        let video_id = self.video_id.as_str();
+        if !api::is_video_id(video_id) {
+            return Err("not a YouTube song".into());
+        }
+        let visitor = self.api.visitor_data(false).await?;
+        let cookie =
+            (self.premium.cookie()).filter(|_| self.want_premium && !self.premium.skipped());
+        if let Some(cookie) = cookie
+            && let Ok(stream) =
+                solved_stream(&self.premium, video_id, &cookie, &visitor, false, None).await
+        {
+            return Ok(stream);
+        }
+        self.free(&visitor).await
+    }
+
     /// A fresh URL for the same file. A free web-client format is asked of the
     /// plain-URL clients, so one googlevideo refuses still plays. Counts
     /// nothing towards the Premium state, as the song already counted.
@@ -405,9 +424,10 @@ impl App {
         }
     }
 
-    /// A local file plays from there, ahead of anything prefetched.
+    /// A downloaded or local file plays from there, online or not, ahead
+    /// of anything prefetched.
     pub(super) fn resolve_future(
-        &self,
+        self: &Rc<Self>,
         video_id: String,
         prefetched: Option<ResolvedStream>,
     ) -> impl Future<Output = Result<ResolvedStream, String>> + Send + 'static {
@@ -420,6 +440,15 @@ impl App {
                 None => resolver.resolve().await,
             }
         }
+    }
+
+    /// `video_id`'s stream to download, from YouTube.
+    pub(super) fn keeping_future(
+        &self,
+        video_id: String,
+    ) -> impl Future<Output = Result<ResolvedStream, String>> + Send + 'static {
+        let resolver = self.resolver(video_id);
+        async move { resolver.for_keeping().await }
     }
 
     /// The player's spec for `video_id`'s stream.

@@ -10,6 +10,7 @@ use super::{
 use crate::{
     CardItem, RowItem, RowKind,
     api::{self, CardLayout, Header, Page, QueueMode, Route, Section, Track},
+    downloads::Downloads,
     images,
 };
 
@@ -59,7 +60,7 @@ impl Built {
         }
     }
 
-    fn section(&mut self, section_index: usize, section: &Section) {
+    fn section(&mut self, section_index: usize, section: &Section, downloads: &Downloads) {
         let title = section.title();
         if !title.is_empty() {
             self.rows.push(RowItem {
@@ -87,8 +88,13 @@ impl Built {
                         self.track_art
                             .push((self.first + self.rows.len(), thumb.clone()));
                     }
-                    self.rows
-                        .push(track_row(track, i, *numbered, section_index));
+                    self.rows.push(track_row(
+                        track,
+                        i,
+                        *numbered,
+                        section_index,
+                        downloads.contains(&track.id),
+                    ));
                 }
             }
             Section::Cards { cards, layout, .. } => {
@@ -147,8 +153,11 @@ impl App {
             Some(h) if h.banner => images::BANNER,
             _ => images::HEADER,
         };
+        let state = self.state.borrow();
+        let downloads = &state.downloads;
         if let Some(header) = &page.header {
-            let has_tracks = !page.header_tracks().is_empty();
+            let tracks = page.header_tracks();
+            let has_tracks = !tracks.is_empty();
             built.rows.push(RowItem {
                 kind: RowKind::Header,
                 label: s(&header.label),
@@ -161,13 +170,16 @@ impl App {
                 can_play: has_tracks,
                 can_shuffle: has_tracks || header.shuffle_playlist.is_some(),
                 can_radio: header.radio_id.is_some(),
+                can_download: has_tracks && matches!(route, Route::Album(_) | Route::Playlist(_)),
+                downloaded: has_tracks && tracks.iter().all(|t| downloads.contains(&t.id)),
                 ..Default::default()
             });
         }
 
         for (section_index, section) in page.sections.iter().enumerate() {
-            built.section(section_index, section);
+            built.section(section_index, section, downloads);
         }
+        drop(state);
 
         let ui = self.ui();
         let header_thumb = page.header.as_ref().and_then(|h| h.thumb.clone());
@@ -332,8 +344,9 @@ impl App {
         {
             for (index, track) in tracks.iter().enumerate().skip(shown_tracks) {
                 let row_index = last_row + 1 + index - shown_tracks;
+                let downloaded = self.state.borrow().downloads.contains(&track.id);
                 self.rows
-                    .insert(row_index, track_row(track, index, *numbered, 0));
+                    .insert(row_index, track_row(track, index, *numbered, 0, downloaded));
                 if !*numbered {
                     self.load_row_art(row_index, track.thumb.clone(), generation);
                 }
@@ -343,15 +356,19 @@ impl App {
                 && let Some(mut row) = self.rows.row_data(i)
             {
                 row.meta = s(&header.meta);
+                let downloads = &self.state.borrow().downloads;
+                row.downloaded = tracks.iter().all(|t| downloads.contains(&t.id));
                 self.rows.set_row_data(i, row);
             }
         }
 
         if page.sections.len() > shown_sections {
             let mut built = Built::new(self.rows.row_count());
+            let state = self.state.borrow();
             for (section_index, section) in page.sections.iter().enumerate().skip(shown_sections) {
-                built.section(section_index, section);
+                built.section(section_index, section, &state.downloads);
             }
+            drop(state);
             let Built {
                 rows,
                 track_art,

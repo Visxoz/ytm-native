@@ -54,17 +54,20 @@ pub struct Download {
 }
 
 impl Download {
-    pub fn start(source: Source, refresh: Refresh) -> Arc<Self> {
-        let download = Arc::new(Self::default());
+    fn sized(size: u64) -> Self {
+        let download = Self::default();
         {
             let mut state = download.state.lock().unwrap();
-            state.total = source.size;
+            state.total = size;
             // Sized once, as growing by doubling can hold twice the file.
             // Tried, so a wrong size too big to set aside grows as it downloads.
-            let _ = state
-                .data
-                .try_reserve_exact(source.size.min(MAX_RESERVE) as usize);
+            let _ = state.data.try_reserve_exact(size.min(MAX_RESERVE) as usize);
         }
+        download
+    }
+
+    pub fn start(source: Source, refresh: Refresh) -> Arc<Self> {
+        let download = Arc::new(Self::sized(source.size));
         let worker = Arc::clone(&download);
         thread::Builder::new()
             .name("stream-download".into())
@@ -96,6 +99,14 @@ impl Download {
             })
             .expect("file thread spawns");
         download
+    }
+
+    /// The whole stream, fetched on this thread as the player would, for keeping.
+    pub fn fetch_all(source: Source, refresh: Refresh) -> Result<Vec<u8>, String> {
+        let download = Self::sized(source.size);
+        download.run(source, refresh);
+        let state = download.state.into_inner().unwrap();
+        state.error.map_or(Ok(state.data), Err)
     }
 
     /// Stops the download and fails any blocked read.

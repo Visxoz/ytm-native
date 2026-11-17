@@ -33,6 +33,7 @@ impl App {
             "explore" => app.navigate(Route::Explore, true),
             "library" => app.navigate(Route::Library, true),
             "history" => app.navigate(Route::History, true),
+            "downloads" => app.navigate(Route::Downloads, true),
             "local" => app.navigate(Route::LocalFiles, true),
             "add-folder" => app.add_folder(),
             _ => app.reload(),

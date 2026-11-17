@@ -60,6 +60,10 @@ impl App {
                 self.show_or_empty(self.history_page(), "Songs you play will show up here.");
                 return;
             }
+            Route::Downloads => {
+                self.show_downloads();
+                return;
+            }
             Route::LocalFiles => {
                 self.load_local_files(generation);
                 return;

@@ -22,7 +22,7 @@ mod updates;
 
 use std::{
     cell::{Cell, RefCell},
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     future::Future,
     rc::Rc,
     sync::{Arc, Mutex},
@@ -39,6 +39,7 @@ use crate::{
     AccentChoice, Api as ApiGlobal, AppWindow, CardItem, QueueItem, RowItem, Theme,
     api::{self, Api, Page, Route, Track},
     audio::{Player, PlayerEvent, eq},
+    downloads::Downloads,
     google_sign_in::GoogleSignIn,
     images, local,
     media_controls::{Action, Controls},
@@ -167,6 +168,10 @@ struct State {
     /// Whether the stored cookie has been checked this run, which the first
     /// signed-in Home does with its picture.
     cookie_checked: bool,
+    downloads: Downloads,
+    /// Songs waiting to download; the first is downloading while `downloading`.
+    download_queue: VecDeque<Track>,
+    downloading: bool,
 }
 
 impl State {
@@ -296,6 +301,9 @@ impl App {
                 artwork_accent: None,
                 scrobbler: scrobble::Scrobbler::load(),
                 cookie_checked: false,
+                downloads: Downloads::load(),
+                download_queue: VecDeque::new(),
+                downloading: false,
             }),
             rows: Rc::new(VecModel::default()),
             library: Rc::new(VecModel::default()),

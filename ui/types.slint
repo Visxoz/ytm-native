@@ -8,6 +8,7 @@ export struct TrackItem {
     number: string,
     has-artist: bool,
     has-album: bool,
+    downloaded: bool,
     /// A file on this PC, which YouTube's actions don't apply to.
     local: bool,
 }
@@ -38,6 +39,9 @@ export struct RowItem {
     can-play: bool,
     can-shuffle: bool,
     can-radio: bool,
+    can-download: bool,
+    /// Every one of the page's tracks is downloaded.
+    downloaded: bool,
     // track rows and their column header
     track: TrackItem,
     numbered: bool,

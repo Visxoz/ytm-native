@@ -4,6 +4,7 @@
 mod api;
 mod app;
 mod audio;
+mod downloads;
 mod folder_picker;
 mod google_sign_in;
 mod http;

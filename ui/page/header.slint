@@ -181,5 +181,12 @@ export component PageHeader {
             icon-size: 28px;
             clicked => { Api.header-action("radio"); }
         }
+        if root.data.can-download: IconButton {
+            icon: root.data.downloaded ? Icons.downloaded : Icons.download;
+            active: root.data.downloaded;
+            size: 48px;
+            icon-size: 28px;
+            clicked => { Api.header-action("download"); }
+        }
     }
 }

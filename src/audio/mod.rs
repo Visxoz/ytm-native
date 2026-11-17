@@ -60,6 +60,11 @@ impl StreamSpec {
     }
 }
 
+/// The whole stream, fetched on this thread, which may block, for keeping.
+pub fn fetch(source: Source, refresh: Refresh) -> Result<Vec<u8>, String> {
+    Download::fetch_all(source, refresh)
+}
+
 #[derive(Debug)]
 pub enum PlayerEvent {
     /// The track has started producing sound.

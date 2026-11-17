@@ -130,32 +130,31 @@ impl App {
     }
 
     pub(super) fn header_action(self: &Rc<Self>, action: &str) {
-        let (tracks, shuffle_playlist, radio_id) = {
+        let (tracks, shuffle_playlist, unloaded, radio_id) = {
             let state = self.state.borrow();
             let Some(header) = &state.page.header else {
                 return;
             };
+            // A long playlist whose rest is still loading.
+            let unloaded = match (&state.route, &state.page.more) {
+                (Route::Playlist(id), Some(_)) => Some(id.clone()),
+                _ => None,
+            };
             (
                 state.page.header_tracks().to_vec(),
                 header.shuffle_playlist.clone(),
+                unloaded,
                 header.radio_id.clone(),
             )
         };
         match action {
             "play" => self.play_tracks(tracks, false),
-            "shuffle" => match shuffle_playlist {
-                Some(playlist) => {
-                    let api = self.api.clone();
-                    self.spawn(
-                        async move { api.playlist_tracks(&playlist).await },
-                        move |app, result| match result {
-                            Ok(found) if !found.is_empty() => app.play_tracks(found, true),
-                            _ => app.play_tracks(tracks, true),
-                        },
-                    );
-                }
-                None => self.play_tracks(tracks, true),
-            },
+            "shuffle" => self.with_all_tracks(tracks, shuffle_playlist, |app, tracks| {
+                app.play_tracks(tracks, true);
+            }),
+            "download" => {
+                self.with_all_tracks(tracks, unloaded, |app, tracks| app.download(tracks))
+            }
             "radio" => {
                 if let Some(radio) = radio_id {
                     self.play_radio(radio);
@@ -163,6 +162,28 @@ impl App {
             }
             _ => {}
         }
+    }
+
+    /// Runs `then` with the page's tracks, or the whole playlist when the
+    /// page shows only part of it.
+    fn with_all_tracks(
+        self: &Rc<Self>,
+        shown: Vec<Track>,
+        playlist: Option<String>,
+        then: impl FnOnce(&Rc<Self>, Vec<Track>) + 'static,
+    ) {
+        let Some(playlist) = playlist else {
+            then(self, shown);
+            return;
+        };
+        let api = self.api.clone();
+        self.spawn(
+            async move { api.playlist_tracks(&playlist).await },
+            move |app, result| match result {
+                Ok(found) if !found.is_empty() => then(app, found),
+                _ => then(app, shown),
+            },
+        );
     }
 
     pub(super) fn play_song_card(self: &Rc<Self>, id: &str) {
@@ -242,6 +263,8 @@ impl App {
                 }
             }
             "radio" => self.play_with_radio(track),
+            "download" => self.download(vec![track]),
+            "remove-download" => self.remove_download(&track.id),
             "artist" => {
                 if let Some(id) = track.first_artist_id() {
                     self.navigate(Route::Artist(id.to_owned()), true);

@@ -190,9 +190,11 @@ async fn fetch(
     permit: Option<OwnedSemaphorePermit>,
 ) -> Option<Decoded> {
     let pixels = physical(edge);
-    // A local file's own. Any other path fails the host check below.
-    if crate::local::owns(url.as_ref()) {
-        let file = std::path::PathBuf::from(&url);
+    // A download's cover, or a local file's own. Any other path fails the
+    // host check below.
+    let file = crate::downloads::cover(&url)
+        .or_else(|| crate::local::owns(url.as_ref()).then(|| url.clone().into()));
+    if let Some(file) = file {
         return rt
             .spawn_blocking(move || {
                 let _permit = permit;

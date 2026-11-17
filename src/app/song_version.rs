@@ -17,7 +17,8 @@ pub(super) enum SongVersion {
 impl App {
     /// Returns at once; the queue changes later.
     pub(super) fn swap_in_song_version(self: &Rc<Self>, next: &Track) {
-        if !next.video {
+        // A downloaded video plays as it was saved, online or not.
+        if !next.video || self.state.borrow().downloads.contains(&next.id) {
             return;
         }
         let known = {
