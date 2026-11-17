@@ -2,9 +2,10 @@
 //! folders they add.
 
 use std::{
+    collections::HashSet,
     path::{Path, PathBuf},
     rc::Rc,
-    sync::PoisonError,
+    sync::{Arc, Mutex, PoisonError},
 };
 
 use slint::{ComponentHandle, Model};
@@ -17,6 +18,19 @@ use crate::{
     local,
     streams::ResolvedStream,
 };
+
+/// Reads the folders' music, saving what changed, with the library's
+/// revision. The folders are read once locked, so a scan waiting behind
+/// another never lists a folder taken away meanwhile. Blocking.
+fn scan_library(library: &Mutex<Option<local::Library>>) -> (Vec<Track>, u64) {
+    let mut library = library.lock().unwrap_or_else(PoisonError::into_inner);
+    let library = library.get_or_insert_with(local::Library::load);
+    let (tracks, changed) = library.scan(&local::folders());
+    if changed {
+        library.save();
+    }
+    (tracks, library.revision())
+}
 
 /// A local file plays as the decoders find it, which the badge names by
 /// its extension.
@@ -211,28 +225,115 @@ impl App {
 
     /// Lists the folders' music, reading only files new since the last time.
     pub(super) fn load_local_files(self: &Rc<Self>, generation: u64) {
-        let folders = self.state.borrow().settings.local_folders.clone();
-        if folders.is_empty() {
+        if self.state.borrow().settings.local_folders.is_empty() {
             self.show_or_empty(None, "Add a folder of your music to play it here.");
             return;
         }
-        let library = std::sync::Arc::clone(&self.local);
-        let scan = self.rt.spawn_blocking(move || {
-            let mut library = library.lock().unwrap_or_else(PoisonError::into_inner);
-            let library = library.get_or_insert_with(local::Library::load);
-            let (tracks, changed) = library.scan(&folders);
-            if changed {
-                library.save();
+        let library = Arc::clone(&self.local);
+        let scan = self.rt.spawn_blocking(move || scan_library(&library));
+        self.spawn(scan, move |app, scanned| {
+            if app.state.borrow().page_generation == generation {
+                let (tracks, revision) = scanned.unwrap_or_default();
+                app.show_local_files(tracks, revision);
             }
-            tracks
         });
-        self.spawn(scan, move |app, tracks| {
-            if app.state.borrow().page_generation != generation {
-                return;
+    }
+
+    fn show_local_files(self: &Rc<Self>, tracks: Vec<Track>, revision: u64) {
+        self.local_shown.set(revision);
+        let page = track_list_page("On this PC", "Local files", tracks);
+        self.show_or_empty(page, "No music was found in your folders.");
+    }
+
+    /// After files in the folders came, went or changed, as at the start:
+    /// songs whose files have gone leave the queue, and Local files is read
+    /// again should it be open. One check runs at a time, and changes
+    /// meanwhile bring one more.
+    pub(super) fn local_files_changed(self: &Rc<Self>) {
+        if self.local_check.get().is_some() {
+            self.local_check.set(Some(true));
+            return;
+        }
+        let (paths, scan, generation) = {
+            let state = self.state.borrow();
+            let paths: HashSet<String> = (state.queue.items())
+                .filter(|t| t.is_local())
+                .map(|t| t.id.clone())
+                .collect();
+            let scan = (state.route == Route::LocalFiles
+                && !state.settings.local_folders.is_empty())
+            .then(|| Arc::clone(&self.local));
+            (paths, scan, state.page_generation)
+        };
+        if paths.is_empty() && scan.is_none() {
+            return;
+        }
+        self.local_check.set(Some(false));
+        let check = self.rt.spawn_blocking(move || {
+            let scanned = scan.map(|library| scan_library(&library));
+            (local::gone(paths), scanned)
+        });
+        self.spawn(check, move |app, result| {
+            let again = app.local_check.take() == Some(true);
+            if let Ok((gone, scanned)) = result {
+                if !gone.is_empty() {
+                    app.remove_gone(&gone);
+                }
+                if let Some((tracks, revision)) = scanned
+                    && revision != app.local_shown.get()
+                    && app.state.borrow().page_generation == generation
+                {
+                    let ui = app.ui();
+                    {
+                        let mut state = app.state.borrow_mut();
+                        // A page still loading takes this as its first list, so its
+                        // scroll, as Back gives, stands.
+                        if !ui.get_page_loading() {
+                            state.restore_scroll = Some(ui.get_page_scroll());
+                        }
+                        // Rows move, so art still on its way to their old places is
+                        // dropped, as is a first list now older than this.
+                        state.page_generation += 1;
+                    }
+                    app.show_local_files(tracks, revision);
+                }
             }
-            let page = track_list_page("On this PC", "Local files", tracks.unwrap_or_default());
-            app.show_or_empty(page, "No music was found in your folders.");
+            if again {
+                app.local_files_changed();
+            }
         });
+    }
+
+    /// One playing moves on to the next; one paused or not yet started stays,
+    /// and plays on from what it read, as its file is still open, or fails to start.
+    fn remove_gone(self: &Rc<Self>, gone: &HashSet<String>) {
+        let (rows, current) = {
+            let state = self.state.borrow();
+            let rows = (state.queue.items().enumerate())
+                .filter(|(_, t)| gone.contains(&t.id))
+                .map(|(i, _)| i)
+                .collect();
+            let current = state.queue.current().is_some_and(|t| gone.contains(&t.id));
+            (rows, current)
+        };
+        // All but the current go first, so what it moves on to is still there.
+        self.queue_remove(rows);
+        if !current || !self.ui().global::<ApiGlobal>().get_is_playing() {
+            return;
+        }
+        let (old, moved) = {
+            let mut state = self.state.borrow_mut();
+            let old = state.queue.current_index();
+            let moved = state.queue.advance(true).is_some() && state.queue.current_index() != old;
+            (old, moved)
+        };
+        if moved {
+            self.queue_remove(old.into_iter().collect());
+            self.start_current();
+        } else {
+            // Last in the queue, it stops and stays shown, as one that failed to play.
+            self.stop();
+        }
     }
 
     /// Asks for a folder of music to add, and shows Local files with it.

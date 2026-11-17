@@ -209,6 +209,7 @@ impl App {
             .remove_folder(index as usize));
         on!(on_player_event, |app, kind, message| app
             .on_player_event(&kind, &message));
+        on!(on_local_files_changed, |app| app.local_files_changed());
         on!(
             on_media_action,
             |app, action, value| match action.as_str() {

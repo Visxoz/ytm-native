@@ -217,6 +217,7 @@ export component AppWindow inherits Window {
     // Delivered from background threads through the event loop.
     callback player-event(kind: string, message: string);
     callback media-action(action: string, value: float);
+    callback local-files-changed();
 
     changed full-player => {
         root.queue-drawer = false;

@@ -216,6 +216,11 @@ pub struct App {
     home_ahead: RefCell<Option<HomeAhead>>,
     /// The local files as last read, loaded with the first scan.
     local: Arc<Mutex<Option<local::Library>>>,
+    watcher: RefCell<Option<local::Watcher>>,
+    /// Set while a check after files changed runs, to whether they changed again since.
+    local_check: Cell<Option<bool>>,
+    /// The local library's revision Local files last showed.
+    local_shown: Cell<u64>,
 }
 
 pub type HomeAhead = tokio::task::JoinHandle<api::Result<Page>>;
@@ -326,6 +331,9 @@ impl App {
             scrobble_timer: Timer::default(),
             home_ahead: RefCell::new(home_ahead),
             local: Arc::default(),
+            watcher: RefCell::new(None),
+            local_check: Cell::new(None),
+            local_shown: Cell::new(0),
         });
         app.bind(ui);
         app.apply_settings_to_ui(ui);
@@ -469,6 +477,11 @@ impl App {
     fn show_folders(&self) {
         let folders = &self.state.borrow().settings.local_folders;
         crate::local::set_folders(folders);
+        self.watcher.take();
+        let ui = self.ui.clone();
+        *self.watcher.borrow_mut() = local::watch(folders, move || {
+            let _ = ui.upgrade_in_event_loop(|ui| ui.invoke_local_files_changed());
+        });
         let names: Vec<SharedString> = folders.iter().map(|f| s(f.to_string_lossy())).collect();
         self.ui()
             .set_local_folders(ModelRc::new(VecModel::from(names)));
@@ -550,6 +563,8 @@ impl App {
     pub fn start(self: &Rc<Self>) {
         images::set_scale(self.ui().window().scale_factor());
         self.restore_session();
+        // Files deleted while the app was closed.
+        self.local_files_changed();
         let app = Rc::clone(self);
         self.tick
             .start(TimerMode::Repeated, TICK, move || app.on_tick());
