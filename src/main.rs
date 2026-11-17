@@ -19,13 +19,14 @@ mod secret;
 mod settings;
 mod single_instance;
 mod streams;
+mod tray;
 mod update;
 
 use std::{rc::Rc, time::Duration};
 
 use raw_window_handle::{HasWindowHandle, RawWindowHandle};
 use slint::{
-    CloseRequestResponse, ComponentHandle, PhysicalPosition, PhysicalSize,
+    ComponentHandle, PhysicalPosition, PhysicalSize,
     winit_030::{
         EventResult, WinitWindowAccessor,
         winit::{
@@ -59,7 +60,10 @@ fn restore_geometry(ui: &AppWindow, geometry: Option<WindowGeometry>) {
     }
 }
 
-fn current_geometry(ui: &AppWindow, previous: Option<WindowGeometry>) -> Option<WindowGeometry> {
+pub(crate) fn current_geometry(
+    ui: &AppWindow,
+    previous: Option<WindowGeometry>,
+) -> Option<WindowGeometry> {
     let window = ui.window();
     // The full player's screen-sized window isn't one to reopen at.
     if window.is_minimized() || window.is_fullscreen() {
@@ -83,7 +87,7 @@ fn current_geometry(ui: &AppWindow, previous: Option<WindowGeometry>) -> Option<
     })
 }
 
-fn hwnd(window: &impl HasWindowHandle) -> Option<*mut std::ffi::c_void> {
+pub(crate) fn hwnd(window: &impl HasWindowHandle) -> Option<*mut std::ffi::c_void> {
     let handle = window.window_handle().ok()?;
     match handle.as_raw() {
         RawWindowHandle::Win32(h) => Some(h.hwnd.get() as *mut std::ffi::c_void),
@@ -92,7 +96,7 @@ fn hwnd(window: &impl HasWindowHandle) -> Option<*mut std::ffi::c_void> {
 }
 
 /// Whether the window is minimised, as winit asks Windows directly.
-fn is_minimized(ui: &AppWindow) -> bool {
+pub(crate) fn is_minimized(ui: &AppWindow) -> bool {
     ui.window()
         .with_winit_window(|window| window.is_minimized())
         .flatten()
@@ -284,17 +288,8 @@ fn main() {
     let app = App::new(&ui, runtime.handle().clone(), api, settings, home_ahead);
 
     let close_app = Rc::clone(&app);
-    let weak = ui.as_weak();
-    ui.window().on_close_requested(move || {
-        if let Some(ui) = weak.upgrade() {
-            let mut settings = close_app.settings();
-            settings.window = current_geometry(&ui, settings.window);
-            settings.save();
-        }
-        close_app.shutdown();
-        let _ = slint::quit_event_loop();
-        CloseRequestResponse::HideWindow
-    });
+    ui.window()
+        .on_close_requested(move || close_app.close_requested());
 
     ui.show().expect("window shows");
     watch_window_events(&ui);
@@ -330,6 +325,8 @@ fn main() {
 
     // Some drivers show a blank window after restoring from minimised until
     // something repaints, so repaint on restore, and once more shortly after.
+    // One going to the tray is hidden a tick after it minimised.
+    let watch_app = Rc::clone(&app);
     let restore_timer = slint::Timer::default();
     let weak = ui.as_weak();
     let was_minimized = std::cell::Cell::new(false);
@@ -341,11 +338,15 @@ fn main() {
             let minimized = is_minimized(&ui);
             let was = was_minimized.replace(minimized);
             ui.global::<Api>().set_minimised(minimized);
-            if minimized && !was {
+            if !minimized {
+                watch_app.cancel_hide();
+            } else if !was {
                 // The patched renderer drops its GPU surface on this frame. Asked
                 // of winit, as Slint drops its own requests while one is pending.
                 ui.window()
                     .with_winit_window(|window| window.request_redraw());
+            } else if watch_app.take_hide_pending() {
+                let _ = ui.hide();
             }
             if was && !minimized {
                 // Again after the restore animation, which can swallow frames.

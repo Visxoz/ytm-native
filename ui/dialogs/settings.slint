@@ -101,6 +101,7 @@ export component SettingsDialog inherits Dialog {
     in property <bool> check-updates;
     in property <[AccentChoice]> accents;
     in property <int> accent-choice;
+    in property <bool> close-to-tray;
     in property <bool> lastfm-available;
     in property <string> lastfm-user;
     in property <bool> lastfm-connecting;
@@ -118,6 +119,7 @@ export component SettingsDialog inherits Dialog {
     callback set-check-updates(value: bool);
     callback set-look(index: int);
     callback set-accent(index: int);
+    callback set-close-to-tray(value: bool);
     callback lastfm-connect();
     callback lastfm-disconnect();
     callback install-update();
@@ -277,6 +279,13 @@ export component SettingsDialog inherits Dialog {
                     clicked => { root.set-accent(i); }
                 }
             }
+        }
+
+        ToggleRow {
+            label: "Close to the system tray";
+            detail: "Closing the window keeps the music playing, with Lily's icon in the system tray to bring it back or quit.";
+            checked: root.close-to-tray;
+            toggled(v) => { root.set-close-to-tray(v); }
         }
     }
 

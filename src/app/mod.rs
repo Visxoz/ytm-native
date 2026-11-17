@@ -19,9 +19,10 @@ mod session;
 mod smart_shuffle;
 mod song_version;
 mod updates;
+mod window;
 
 use std::{
-    cell::{Cell, RefCell},
+    cell::{Cell, OnceCell, RefCell},
     collections::{HashMap, HashSet, VecDeque},
     future::Future,
     rc::Rc,
@@ -225,6 +226,9 @@ pub struct App {
     local_shown: Cell<u64>,
     /// Settings' devices after "System default": cpal ID and name.
     output_devices: RefCell<Vec<(String, String)>>,
+    tray: OnceCell<crate::tray::Tray>,
+    /// Set as the window minimises on its way to the tray.
+    hide_pending: Cell<bool>,
 }
 
 pub type HomeAhead = tokio::task::JoinHandle<api::Result<Page>>;
@@ -341,8 +345,11 @@ impl App {
             local_check: Cell::new(None),
             local_shown: Cell::new(0),
             output_devices: RefCell::default(),
+            tray: OnceCell::new(),
+            hide_pending: Cell::new(false),
         });
         app.bind(ui);
+        app.attach_tray();
         app.apply_settings_to_ui(ui);
         app.show_folders();
         app.apply_theme(ui);
@@ -482,6 +489,7 @@ impl App {
                 .position(|&s| s == settings.speed)
                 .map_or(-1, |i| i as i32),
         );
+        ui.set_close_to_tray(settings.close_to_tray);
         ui.set_sidebar_collapsed(settings.sidebar_collapsed);
         ui.set_check_updates(settings.check_updates);
         ui.set_equaliser(settings.equaliser);
@@ -642,10 +650,6 @@ impl App {
         self.show_output_device();
     }
 
-    pub fn settings(&self) -> Settings {
-        self.state.borrow().settings.clone()
-    }
-
     /// Starts background work once the event loop runs.
     pub fn start(self: &Rc<Self>) {
         images::set_scale(self.ui().window().scale_factor());
@@ -723,7 +727,11 @@ impl App {
         *self.media.borrow_mut() = controls;
     }
 
-    pub fn shutdown(&self) {
+    fn shutdown(&self) {
+        // Windows would leave the icon until the pointer passes over it.
+        if let Some(tray) = self.tray.get() {
+            tray.set_visible(false);
+        }
         self.persist();
         self.player.stop();
         self.presence.shutdown();

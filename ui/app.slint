@@ -131,6 +131,7 @@ export component AppWindow inherits Window {
     /// 0 low, 1 normal, 2 high.
     in property <int> quality: 2;
     in property <bool> crossfade;
+    in property <bool> close-to-tray;
     /// "System default", then each output device; the chosen one's index,
     /// or -1 while it is unplugged.
     in property <[string]> output-devices;
@@ -214,6 +215,7 @@ export component AppWindow inherits Window {
     callback set-rating-buttons(value: bool);
     callback set-quality(value: int);
     callback set-crossfade(value: bool);
+    callback set-close-to-tray(value: bool);
     callback list-output-devices();
     callback set-output-device(index: int);
     callback set-speed(index: int);
@@ -556,6 +558,8 @@ export component AppWindow inherits Window {
             check-updates: root.check-updates;
             accents: root.accents;
             accent-choice: root.accent-choice;
+            close-to-tray: root.close-to-tray;
+            set-close-to-tray(v) => { root.set-close-to-tray(v); }
             lastfm-available: root.lastfm-available;
             lastfm-user: root.lastfm-user;
             lastfm-connecting: root.lastfm-connecting;

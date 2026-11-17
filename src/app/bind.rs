@@ -196,6 +196,8 @@ impl App {
         on!(on_set_rating_buttons, |app, value| app
             .update_settings(|s| s.rating_buttons = value));
         on!(on_set_speed, |app, index| app.set_speed(index as usize));
+        on!(on_set_close_to_tray, |app, value| app
+            .set_close_to_tray(value));
         on!(on_set_autoplay, |app, value| app
             .update_settings(|s| s.autoplay = value));
         on!(on_set_check_updates, |app, value| {

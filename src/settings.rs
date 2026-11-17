@@ -305,6 +305,8 @@ pub struct Settings {
     pub crossfade: bool,
     /// Playback speed, the pitch moving with it.
     pub speed: f32,
+    /// Closing the window leaves the app playing in the tray.
+    pub close_to_tray: bool,
     pub check_updates: bool,
     pub equaliser: bool,
     /// Each band's gain in dB, kept while the equaliser is off.
@@ -345,6 +347,7 @@ impl Default for Settings {
             no_premium: false,
             crossfade: false,
             speed: 1.0,
+            close_to_tray: true,
             check_updates: true,
             equaliser: false,
             equaliser_gains: Default::default(),

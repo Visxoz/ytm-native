@@ -6,8 +6,6 @@ use std::{
     },
 };
 
-use slint::ComponentHandle;
-
 use super::{App, s};
 use crate::update;
 
@@ -73,10 +71,7 @@ impl App {
             match result.and_then(|path| update::stage(&found, path)) {
                 Ok(()) => {
                     ui.set_update_status("Restarting to finish the update…".into());
-                    let close = slint::platform::WindowEvent::CloseRequested;
-                    if let Err(e) = ui.window().dispatch_event_with_result(close) {
-                        log::warn!("could not close for the update: {e}");
-                    }
+                    app.quit();
                 }
                 Err(e) => {
                     ui.set_update_busy(false);
