@@ -39,6 +39,10 @@ pub struct PlaylistOption {
     pub contains: bool,
 }
 
+fn all_video_ids(ids: &[String]) -> Result<()> {
+    ids.iter().try_for_each(|id| super::video_id(id).map(drop))
+}
+
 impl Api {
     async fn edit(&self, endpoint: &str, body: &Value) -> Result<String> {
         self.q()
@@ -49,7 +53,9 @@ impl Api {
     }
 
     pub async fn rating(&self, video_id: &str) -> Result<Rating> {
-        let json = self.edit("next", &json!({ "videoId": video_id })).await?;
+        let json = self
+            .edit("next", &json!({ "videoId": super::video_id(video_id)? }))
+            .await?;
         Ok(parse_rating(&json))
     }
 
@@ -59,6 +65,7 @@ impl Api {
             Rating::Dislike => "like/dislike",
             Rating::None => "like/removelike",
         };
+        let video_id = super::video_id(video_id)?;
         self.edit(endpoint, &json!({ "target": { "videoId": video_id } }))
             .await
             .map(drop)
@@ -69,7 +76,7 @@ impl Api {
         let json = self
             .edit(
                 "playlist/get_add_to_playlist",
-                &json!({ "videoIds": [video_id] }),
+                &json!({ "videoIds": [super::video_id(video_id)?] }),
             )
             .await?;
         parse_playlists(&json).ok_or_else(|| "YouTube did not list your playlists".into())
@@ -77,6 +84,7 @@ impl Api {
 
     /// Adds `video_ids` to the end of one of the account's playlists.
     pub async fn add_to_playlist(&self, playlist_id: &str, video_ids: &[String]) -> Result<()> {
+        all_video_ids(video_ids)?;
         for chunk in video_ids.chunks(PER_REQUEST) {
             let actions: Vec<_> = chunk
                 .iter()
@@ -99,6 +107,7 @@ impl Api {
     /// Makes a private playlist and returns its ID. The create call takes only
     /// so many songs, so the rest are added after.
     pub async fn create_playlist(&self, title: &str, video_ids: &[String]) -> Result<String> {
+        all_video_ids(video_ids)?;
         let (first, rest) = video_ids.split_at(video_ids.len().min(PER_REQUEST));
         let created = self
             .edit(

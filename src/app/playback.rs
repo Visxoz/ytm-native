@@ -259,6 +259,9 @@ impl App {
     /// Fetches a prefetched stream's first bytes on Tokio's blocking pool,
     /// as the download's blocking client must never run on its workers.
     pub(super) fn warm_stream(&self, stream: &ResolvedStream) {
+        if stream.file.is_some() {
+            return;
+        }
         let (url, headers) = (stream.url.clone(), stream.headers.clone());
         self.rt
             .spawn_blocking(move || crate::streams::warm(&url, &headers));
@@ -275,7 +278,8 @@ impl App {
             {
                 return;
             }
-            let Some(current) = state.queue.current() else {
+            // A local file has no radio to carry on with.
+            let Some(current) = state.queue.current().filter(|t| !t.is_local()) else {
                 return;
             };
             (
@@ -317,7 +321,11 @@ impl App {
             let (seed, generation) = {
                 let state = self.state.borrow();
                 (
-                    state.queue.current().map(|t| t.id.clone()),
+                    state
+                        .queue
+                        .current()
+                        .filter(|t| !t.is_local())
+                        .map(|t| t.id.clone()),
                     state.playback.generation,
                 )
             };

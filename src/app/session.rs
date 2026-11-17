@@ -3,10 +3,7 @@ use std::{rc::Rc, time::Duration};
 use slint::TimerMode;
 
 use super::{App, State};
-use crate::{
-    api::{self, Header, Page, QueueMode, Section},
-    settings,
-};
+use crate::{api::Page, settings};
 
 /// How long after the last change the session and history are written.
 /// Skipping through songs then costs one write, after the sound starts.
@@ -36,7 +33,7 @@ impl App {
             if !(state.signed_in && state.settings.youtube_history) {
                 return;
             }
-            let Some(track) = state.queue.current() else {
+            let Some(track) = state.queue.current().filter(|t| !t.is_local()) else {
                 return;
             };
             track.id.clone()
@@ -56,26 +53,8 @@ impl App {
     }
 
     pub(super) fn history_page(&self) -> Option<Page> {
-        let state = self.state.borrow();
-        let history = &state.history;
-        if history.is_empty() {
-            return None;
-        }
-        Some(Page {
-            header: Some(Header {
-                label: "Recently played".to_owned(),
-                title: "History".to_owned(),
-                meta: api::songs(history.len() as u64),
-                ..Default::default()
-            }),
-            sections: vec![Section::Tracks {
-                title: String::new(),
-                tracks: history.tracks().cloned().collect(),
-                mode: QueueMode::Section,
-                numbered: false,
-            }],
-            more: None,
-        })
+        let tracks = self.state.borrow().history.tracks().cloned().collect();
+        super::page::track_list_page("Recently played", "History", tracks)
     }
 
     pub(super) fn persist_soon(self: &Rc<Self>) {

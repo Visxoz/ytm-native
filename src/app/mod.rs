@@ -9,6 +9,7 @@ mod items;
 mod library;
 mod navigation;
 mod now_playing;
+mod offline;
 mod page;
 mod playback;
 mod queue_panel;
@@ -24,7 +25,7 @@ use std::{
     collections::{HashMap, HashSet},
     future::Future,
     rc::Rc,
-    sync::Arc,
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 
@@ -39,7 +40,7 @@ use crate::{
     api::{self, Api, Page, Route, Track},
     audio::{Player, PlayerEvent, eq},
     google_sign_in::GoogleSignIn,
-    images,
+    images, local,
     media_controls::{Action, Controls},
     presence::PresenceHandle,
     queue::{Queue, Repeat},
@@ -208,6 +209,8 @@ pub struct App {
     scrobble_timer: Timer,
     /// The signed-in Home, asked for as the app starts, for the first visit.
     home_ahead: RefCell<Option<HomeAhead>>,
+    /// The local files as last read, loaded with the first scan.
+    local: Arc<Mutex<Option<local::Library>>>,
 }
 
 pub type HomeAhead = tokio::task::JoinHandle<api::Result<Page>>;
@@ -314,9 +317,11 @@ impl App {
             persist_timer: Timer::default(),
             scrobble_timer: Timer::default(),
             home_ahead: RefCell::new(home_ahead),
+            local: Arc::default(),
         });
         app.bind(ui);
         app.apply_settings_to_ui(ui);
+        app.show_folders();
         app.apply_theme(ui);
         // Set here and by the switch only, so other settings changing can't
         // wipe out a found update's line.
@@ -450,6 +455,15 @@ impl App {
             self.eq_gains.set_row_data(band, db);
         }
         ui.set_accent_choice(settings.accent.index());
+    }
+
+    /// Lists the music folders, and lets their files be read; run as they change.
+    fn show_folders(&self) {
+        let folders = &self.state.borrow().settings.local_folders;
+        crate::local::set_folders(folders);
+        let names: Vec<SharedString> = folders.iter().map(|f| s(f.to_string_lossy())).collect();
+        self.ui()
+            .set_local_folders(ModelRc::new(VecModel::from(names)));
     }
 
     /// Colours the window and its title bar. Run only where the look changes,

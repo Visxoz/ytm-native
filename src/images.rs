@@ -189,11 +189,22 @@ async fn fetch(
     edge: u32,
     permit: Option<OwnedSemaphorePermit>,
 ) -> Option<Decoded> {
+    let pixels = physical(edge);
+    // A local file's own. Any other path fails the host check below.
+    if crate::local::owns(url.as_ref()) {
+        let file = std::path::PathBuf::from(&url);
+        return rt
+            .spawn_blocking(move || {
+                let _permit = permit;
+                decode(&crate::local::artwork(&file)?, pixels, edge)
+            })
+            .await
+            .ok()?;
+    }
     if !crate::http::allowed(&url) {
         log::debug!("skipped artwork from a host YouTube does not use");
         return None;
     }
-    let pixels = physical(edge);
     // googleusercontent renders any size, so ask for the pixels drawn rather
     // than download a larger rendition and scale it down. Banners keep the
     // wide rendition they came with, as a square size would crop them.

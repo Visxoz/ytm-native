@@ -33,6 +33,8 @@ impl App {
             "explore" => app.navigate(Route::Explore, true),
             "library" => app.navigate(Route::Library, true),
             "history" => app.navigate(Route::History, true),
+            "local" => app.navigate(Route::LocalFiles, true),
+            "add-folder" => app.add_folder(),
             _ => app.reload(),
         });
         on!(on_back, |app| app.go_back());
@@ -110,7 +112,7 @@ impl App {
                 .borrow()
                 .queue
                 .current()
-                .and_then(|t| t.album.as_ref().map(|(id, _)| id.clone()));
+                .and_then(|t| t.album_id().map(str::to_owned));
             if let Some(id) = id {
                 app.ui().set_full_player(false);
                 app.navigate(Route::Album(id), true);
@@ -202,6 +204,8 @@ impl App {
             }
         });
         on!(on_install_update, |app| app.install_update());
+        on!(on_remove_folder, |app, index| app
+            .remove_folder(index as usize));
         on!(on_player_event, |app, kind, message| app
             .on_player_event(&kind, &message));
         on!(

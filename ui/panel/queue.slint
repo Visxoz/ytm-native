@@ -41,6 +41,8 @@ export component QueueRow inherits Rectangle {
     callback play-next-selected();
     callback drag-to(target: int);
     property <bool> many: root.item.selected && root.selected-count > 1;
+    /// One song's YouTube actions, which a local file has none of.
+    property <bool> youtube: Api.signed-in && !root.many && !root.item.local;
     property <bool> dragging;
     property <length> pressed-y;
     /// Where the pointer is in the list's viewport.
@@ -90,24 +92,24 @@ export component QueueRow inherits Rectangle {
                 }
             }
 
-            if Api.signed-in && !root.many: MenuSeparator { }
+            if root.youtube: MenuSeparator { }
 
-            if Api.signed-in && !root.many: MenuItem {
+            if root.youtube: MenuItem {
                 title: Api.rating-of(root.item.id) == 1 ? "Remove from liked songs" : "Like";
                 activated => { Api.rate(root.item.id, 1); }
             }
 
-            if Api.signed-in && !root.many: MenuItem {
+            if root.youtube: MenuItem {
                 title: Api.rating-of(root.item.id) == 2 ? "Remove dislike" : "Dislike";
                 activated => { Api.rate(root.item.id, 2); }
             }
 
-            if Api.signed-in && !root.many && !root.item.current: MenuItem {
+            if root.youtube && !root.item.current: MenuItem {
                 title: "Remove rating";
                 activated => { Api.rate(root.item.id, 0); }
             }
 
-            if Api.signed-in && !root.many: MenuItem {
+            if root.youtube: MenuItem {
                 title: "Save to playlist";
                 activated => { Api.save-to-playlist(root.item.id); }
             }

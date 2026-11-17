@@ -19,6 +19,8 @@ fn quality_label(stream: &ResolvedStream) -> String {
     let codec = stream.codec.to_uppercase();
     match stream.itag {
         774 | 141 => format!("{codec} 256"),
+        // A local file's, which isn't measured.
+        _ if stream.bitrate_kbps <= 0.0 => codec,
         _ => format!("{codec} {}", stream.bitrate_kbps.round()),
     }
 }
@@ -48,6 +50,7 @@ pub(super) fn queue_item(
         current,
         recommended,
         selected,
+        local: track.is_local(),
     };
     (item, missing)
 }
@@ -153,10 +156,12 @@ impl App {
         ui.set_np_title(s(&track.title));
         ui.set_np_artists(s(track.artist_names()));
         ui.set_np_has_artist(track.first_artist_id().is_some());
-        ui.set_np_has_album(track.album.is_some());
+        ui.set_np_has_album(track.album_id().is_some());
         ui.set_np_duration(self.state.borrow().playback.duration as f32);
         ui.set_np_position(position as f32);
-        ui.global::<ApiGlobal>().set_playing_id(s(&track.id));
+        let api = ui.global::<ApiGlobal>();
+        api.set_playing_id(s(&track.id));
+        api.set_playing_local(track.is_local());
     }
 
     /// Shows the stream's quality, and fills in a length the track lacked.
@@ -209,7 +214,10 @@ impl App {
     fn update_presence_at(&self, position: f64) {
         let state = self.state.borrow();
         let track = match state.queue.current() {
-            Some(track) if state.settings.discord && self.ui().get_has_track() => {
+            // A local file has no YouTube page to show; the last song's goes too.
+            Some(track)
+                if state.settings.discord && self.ui().get_has_track() && !track.is_local() =>
+            {
                 Some(presence::Track {
                     video_id: track.id.clone(),
                     title: track.title.clone(),
@@ -469,6 +477,7 @@ mod tests {
             loudness_db: None,
             premium: itag == 774,
             itag,
+            file: None,
         };
         assert_eq!(quality_label(&stream(774, 284.6)), "OPUS 256");
         assert_eq!(quality_label(&stream(251, 146.4)), "OPUS 146");

@@ -101,10 +101,13 @@ export component PageView inherits Rectangle {
         HorizontalLayout {
             alignment: center;
             PillButton {
-                text: root.nav-current == "library" && !Api.signed-in ? "Sign in" : "Try again";
+                text: root.nav-current == "local" ? "Add folder"
+                    : root.nav-current == "library" && !Api.signed-in ? "Sign in" : "Try again";
                 primary: true;
                 clicked => {
-                    if root.nav-current == "library" && !Api.signed-in {
+                    if root.nav-current == "local" {
+                        root.go("add-folder");
+                    } else if root.nav-current == "library" && !Api.signed-in {
                         root.sign-in-open = true;
                     } else {
                         root.go("reload");

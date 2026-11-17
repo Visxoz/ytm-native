@@ -56,7 +56,7 @@ impl Api {
             .raw(
                 ClientType::DesktopMusic,
                 "player",
-                &serde_json::json!({ "videoId": video_id }),
+                &serde_json::json!({ "videoId": super::video_id(video_id)? }),
             )
             .await
             .map_err(err)?;

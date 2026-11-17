@@ -45,6 +45,7 @@ impl Api {
             Route::Explore => self.explore().await,
             Route::Library => self.library().await,
             Route::History => self.history().await,
+            Route::LocalFiles => Err("only on this PC".into()),
             Route::Search(query) => self.search(query).await,
             Route::Album(id) => self.album(id).await,
             Route::Playlist(id) => self.playlist(id).await,

@@ -62,7 +62,7 @@ const CLIENTS: &[Client] = &[
     },
 ];
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ResolvedStream {
     pub url: String,
     pub size: u64,
@@ -72,10 +72,13 @@ pub struct ResolvedStream {
     pub bitrate_kbps: f64,
     pub duration: Option<f64>,
     pub loudness_db: Option<f32>,
-    /// Not set for free formats the web client gives a Premium account.
+    /// Not set for free formats the web client gives a Premium account, nor
+    /// for a file, which has nothing to retry.
     pub premium: bool,
     /// YouTube's format number: 774 and 141 are the Premium ones.
     pub itag: u32,
+    /// The file it plays from instead, the user's own.
+    pub file: Option<std::path::PathBuf>,
 }
 
 #[derive(Deserialize)]
@@ -198,6 +201,7 @@ impl PlayerResponse {
             loudness_db: format.loudness_db.or_else(|| self.loudness_db()),
             premium,
             itag: format.itag,
+            file: None,
         }
     }
 }

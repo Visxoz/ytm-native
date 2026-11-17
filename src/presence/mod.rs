@@ -47,7 +47,6 @@ const WATCH_URL: &str = "https://music.youtube.com/watch?v=";
 
 const EVENT_ERROR: &str = "ERROR";
 
-const VIDEO_ID_LEN: usize = 11;
 /// Longer than any track or podcast episode YouTube Music serves.
 const MAX_DURATION_SECS: f64 = 24.0 * 60.0 * 60.0;
 /// currentTime can run marginally past duration as a track ends.
@@ -116,13 +115,6 @@ fn clamp_text(text: &str) -> Option<String> {
     Some(clamped)
 }
 
-fn is_video_id(id: &str) -> bool {
-    id.len() == VIDEO_ID_LEN
-        && id
-            .bytes()
-            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-}
-
 /// Accepts https URLs on YouTube's image hosts only, as Discord fetches the
 /// artwork itself.
 fn trusted_artwork_url(raw: &str) -> Option<String> {
@@ -135,7 +127,7 @@ fn trusted_artwork_url(raw: &str) -> Option<String> {
 
 impl Track {
     fn validate(self, now_ms: i64) -> Result<Presence, &'static str> {
-        if !is_video_id(&self.video_id) {
+        if !crate::api::is_video_id(&self.video_id) {
             return Err("malformed video ID");
         }
         if !(0.0..=MAX_DURATION_SECS).contains(&self.duration) {

@@ -239,14 +239,15 @@ impl App {
     }
 
     pub(super) fn save_queue_as_playlist(self: &Rc<Self>) {
-        let ids: Vec<String> = self
-            .state
-            .borrow()
-            .queue
-            .items()
-            .map(|t| t.id.clone())
-            .collect();
+        let (ids, queued): (Vec<String>, bool) = {
+            let state = self.state.borrow();
+            let ids = state.queue.items().filter(|t| !t.is_local());
+            (ids.map(|t| t.id.clone()).collect(), !state.queue.is_empty())
+        };
         if ids.is_empty() {
+            if queued {
+                self.toast("Local files can't be saved to a YouTube playlist");
+            }
             return;
         }
         let today = super::local_now();

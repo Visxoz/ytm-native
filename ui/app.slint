@@ -154,6 +154,7 @@ export component AppWindow inherits Window {
     in property <string> update-status;
     in property <bool> update-busy;
     in property <bool> check-updates;
+    in property <[string]> local-folders;
 
     in property <string> toast;
     in property <bool> toast-visible;
@@ -197,6 +198,7 @@ export component AppWindow inherits Window {
     callback set-discord(value: bool);
     callback set-check-updates(value: bool);
     callback install-update();
+    callback remove-folder(index: int);
     callback pick-playlist(index: int);
     callback set-autoplay(value: bool);
     callback set-youtube-history(value: bool);
@@ -544,6 +546,9 @@ export component AppWindow inherits Window {
             set-discord(v) => { root.set-discord(v); }
             set-check-updates(v) => { root.set-check-updates(v); }
             install-update => { root.install-update(); }
+            local-folders: root.local-folders;
+            add-folder => { root.go("add-folder"); }
+            remove-folder(i) => { root.remove-folder(i); }
             sign-out => { root.sign-out(); }
         }
 

@@ -11,6 +11,7 @@ mod output;
 mod source;
 
 use std::{
+    path::PathBuf,
     sync::{
         Arc, Mutex,
         atomic::{AtomicBool, AtomicU32, Ordering},
@@ -21,19 +22,25 @@ use std::{
 
 use engine::Engine;
 use output::Output;
-pub use source::Source;
-use source::{Download, Refresh};
+use source::Download;
+pub use source::{Refresh, Source};
 
 /// The most silence cut from either side of a crossfade, so a quiet
 /// passage or a hidden track is not mistaken for the end.
 pub const SILENCE_TRIM_SECS: f64 = 4.0;
 
-/// A stream to play: where its bytes come from, how to ask for them again
-/// should googlevideo refuse the URL, and what the engine opens them with.
+/// A stream to play: where its bytes come from and what the engine opens
+/// them with.
 pub struct StreamSpec {
-    pub source: Source,
-    pub refresh: Refresh,
+    pub input: Input,
     pub opening: Opening,
+}
+
+pub enum Input {
+    /// Downloaded, with how to ask for it again should googlevideo refuse
+    /// the URL.
+    Stream(Source, Refresh),
+    File(PathBuf),
 }
 
 pub struct Opening {
@@ -45,7 +52,11 @@ pub struct Opening {
 
 impl StreamSpec {
     fn start(self) -> (Arc<Download>, Opening) {
-        (Download::start(self.source, self.refresh), self.opening)
+        let download = match self.input {
+            Input::Stream(source, refresh) => Download::start(source, refresh),
+            Input::File(path) => Download::open(path),
+        };
+        (download, self.opening)
     }
 }
 
@@ -255,6 +266,19 @@ impl Player {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use decode::{Decoded, Decoder};
+    #[test]
+    fn plays_a_file_from_disk() {
+        let path = std::env::temp_dir().join(format!("lily-play-{}.wav", std::process::id()));
+        crate::local::tests::write_wav(&path, 1);
+        let download = Download::open(path.clone());
+        let mut decoder = Decoder::open(download.reader(), "").unwrap();
+        let mut samples = Vec::new();
+        while let Ok(Decoded::Samples) = decoder.decode_next(&mut samples) {}
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!((decoder.rate, decoder.channels), (8000, 1));
+        assert_eq!(samples.len(), 8000, "a second of it");
+    }
 
     #[test]
     fn applies_the_next_tracks_loudness() {

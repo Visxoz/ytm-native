@@ -248,8 +248,8 @@ impl App {
                 }
             }
             "album" => {
-                if let Some((id, _)) = track.album {
-                    self.navigate(Route::Album(id), true);
+                if let Some(id) = track.album_id() {
+                    self.navigate(Route::Album(id.to_owned()), true);
                 }
             }
             _ => {}

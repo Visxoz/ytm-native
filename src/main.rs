@@ -4,10 +4,12 @@
 mod api;
 mod app;
 mod audio;
+mod folder_picker;
 mod google_sign_in;
 mod http;
 mod images;
 mod lastfm;
+mod local;
 mod logger;
 mod media_controls;
 mod presence;

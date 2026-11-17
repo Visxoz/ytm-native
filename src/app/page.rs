@@ -9,9 +9,28 @@ use super::{
 };
 use crate::{
     CardItem, RowItem, RowKind,
-    api::{self, CardLayout, Page, Route, Section},
+    api::{self, CardLayout, Header, Page, QueueMode, Route, Section, Track},
     images,
 };
+
+/// A page of `tracks` built on this PC, or `None` without any.
+pub(super) fn track_list_page(label: &str, title: &str, tracks: Vec<Track>) -> Option<Page> {
+    (!tracks.is_empty()).then(|| Page {
+        header: Some(Header {
+            label: label.to_owned(),
+            title: title.to_owned(),
+            meta: api::songs(tracks.len() as u64),
+            ..Default::default()
+        }),
+        sections: vec![Section::Tracks {
+            title: String::new(),
+            tracks,
+            mode: QueueMode::Section,
+            numbered: false,
+        }],
+        more: None,
+    })
+}
 
 type CardArt = (Rc<VecModel<CardItem>>, Vec<Option<String>>, u32);
 
@@ -108,7 +127,9 @@ impl App {
             // Applied as it shows rather than as it loads, so a cached Home
             // also has what played since.
             if state.route == Route::Home && state.signed_in {
-                api::add_recent(&mut page.sections, state.history.tracks());
+                // Local files have no radio to play after them there.
+                let recent = state.history.tracks().filter(|t| !t.is_local());
+                api::add_recent(&mut page.sections, recent);
             }
             (state.page_generation, state.route.clone())
         };

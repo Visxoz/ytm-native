@@ -26,11 +26,30 @@ pub use model::*;
 
 /// Longest playlist loaded in one go.
 const PLAYLIST_LIMIT: usize = 500;
+const VIDEO_ID_LEN: usize = 11;
 
 pub type Result<T> = std::result::Result<T, String>;
 
 fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
+}
+
+/// Whether `id` is a YouTube video's, as a local file's path never is.
+pub fn is_video_id(id: &str) -> bool {
+    id.len() == VIDEO_ID_LEN
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+}
+
+/// `id`, should it be a video's. Every call that sends a track's ID to
+/// YouTube takes it through here, so a local file's path never leaves.
+fn video_id(id: &str) -> Result<&str> {
+    if is_video_id(id) {
+        Ok(id)
+    } else {
+        Err("not a YouTube song".into())
+    }
 }
 
 /// Only the same title by one of the same artists counts, so an edit is
@@ -135,7 +154,11 @@ impl Api {
     }
 
     pub async fn track_radio(&self, video_id: &str) -> Result<Vec<Track>> {
-        let items = self.q().music_radio_track(video_id).await.map_err(err)?;
+        let items = self
+            .q()
+            .music_radio_track(self::video_id(video_id)?)
+            .await
+            .map_err(err)?;
         Ok(tracks(items.items))
     }
 
@@ -154,6 +177,10 @@ impl Api {
     }
 
     pub async fn lyrics(&self, video_id: &str) -> Result<Option<Lyrics>> {
+        // A local file has none on YouTube.
+        if !is_video_id(video_id) {
+            return Ok(None);
+        }
         let details = self.q().music_details(video_id).await.map_err(err)?;
         let Some(lyrics_id) = details.lyrics_id else {
             return Ok(None);

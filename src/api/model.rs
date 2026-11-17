@@ -32,6 +32,19 @@ impl Track {
         self.artists.iter().find_map(|a| a.id.as_deref())
     }
 
+    /// A file on this PC, whose ID is its path; it plays only from there.
+    pub fn is_local(&self) -> bool {
+        std::path::Path::new(&self.id).is_absolute()
+    }
+
+    /// The album's page on YouTube; a local file's album has none.
+    pub fn album_id(&self) -> Option<&str> {
+        self.album
+            .as_ref()
+            .filter(|_| !self.is_local())
+            .map(|(id, _)| id.as_str())
+    }
+
     pub fn album_name(&self) -> &str {
         self.album.as_ref().map_or("", |(_, name)| name.as_str())
     }
@@ -184,6 +197,8 @@ pub enum Route {
     /// The songs played: the account's YouTube Music history when signed
     /// in, otherwise the one kept locally.
     History,
+    /// Songs in the folders the user added.
+    LocalFiles,
     Search(String),
     Album(String),
     Playlist(String),
@@ -198,6 +213,7 @@ impl Route {
             Route::Explore => "explore",
             Route::Library => "library",
             Route::History => "history",
+            Route::LocalFiles => "local",
             _ => "",
         }
     }

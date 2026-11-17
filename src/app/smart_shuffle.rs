@@ -60,12 +60,14 @@ impl Smart {
     }
 }
 
+/// One of the user's own tracks from YouTube, as local files have no radio.
 fn seed(queue: &mut Queue<Track>) -> Option<String> {
-    let own = queue.entries().filter(|(_, r)| !r).count();
+    let seeds = |(t, r): &(&Track, bool)| !r && !t.is_local();
+    let own = queue.entries().filter(seeds).count();
     let pick = queue.random_below(own);
     queue
         .entries()
-        .filter(|(_, r)| !r)
+        .filter(seeds)
         .nth(pick)
         .map(|(t, _)| t.id.clone())
 }

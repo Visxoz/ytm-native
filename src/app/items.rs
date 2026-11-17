@@ -15,7 +15,8 @@ fn track_item(track: &Track, number: usize) -> TrackItem {
         art: images::cached_or_empty(track.thumb.as_deref(), images::ROW),
         number: s(number.to_string()),
         has_artist: track.first_artist_id().is_some(),
-        has_album: track.album.is_some(),
+        has_album: track.album_id().is_some(),
+        local: track.is_local(),
     }
 }
 

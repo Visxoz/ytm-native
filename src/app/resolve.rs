@@ -13,8 +13,8 @@ use std::{
 
 use super::App;
 use crate::{
-    api::Api,
-    audio::{Opening, Source, StreamSpec},
+    api::{self, Api},
+    audio::{Input, Opening, Refresh, Source, StreamSpec},
     settings::Quality,
     streams::{self, ResolvedStream, premium},
 };
@@ -253,6 +253,9 @@ impl Resolver {
             ..
         } = self;
         let video_id = video_id.as_str();
+        if !api::is_video_id(video_id) {
+            return Err("not a YouTube song".into());
+        }
         let started = Instant::now();
         let visitor = api.visitor_data(false).await?;
         let cookie = premium.cookie().filter(|_| *want_premium);
@@ -402,28 +405,52 @@ impl App {
         }
     }
 
+    /// A local file plays from there, ahead of anything prefetched.
     pub(super) fn resolve_future(
         &self,
         video_id: String,
         prefetched: Option<ResolvedStream>,
     ) -> impl Future<Output = Result<ResolvedStream, String>> + Send + 'static {
+        // Only `offline_stream` vouches for a file, which may since have gone.
+        let ready = (self.offline_stream(&video_id)).or(prefetched.filter(|s| s.file.is_none()));
         let resolver = self.resolver(video_id);
         async move {
-            match prefetched {
+            match ready {
                 Some(stream) => Ok(stream),
                 None => resolver.resolve().await,
             }
         }
     }
 
-    /// The player's spec for `video_id`'s stream. Should googlevideo refuse
-    /// its URL partway, the download's thread waits on a fresh one.
+    /// The player's spec for `video_id`'s stream.
     pub(super) fn stream_spec(
         &self,
         video_id: &str,
         mut stream: ResolvedStream,
         start_at: f64,
     ) -> StreamSpec {
+        let opening = Opening {
+            mime: std::mem::take(&mut stream.mime),
+            loudness_db: stream.loudness_db,
+            start_at,
+        };
+        let input = match stream.file.take() {
+            Some(path) => Input::File(path),
+            None => {
+                let (source, refresh) = self.remote_source(video_id, stream);
+                Input::Stream(source, refresh)
+            }
+        };
+        StreamSpec { input, opening }
+    }
+
+    /// Where `video_id`'s stream downloads from. Should googlevideo refuse its
+    /// URL partway, the download's thread waits on a fresh one.
+    pub(super) fn remote_source(
+        &self,
+        video_id: &str,
+        stream: ResolvedStream,
+    ) -> (Source, Refresh) {
         let resolver = Arc::new(self.resolver(video_id.to_owned()));
         let (rt, was_premium) = (self.rt.clone(), stream.premium);
         let refresh = Box::new(move || {
@@ -435,15 +462,7 @@ impl App {
                 .map_err(|_| "the refresh did not finish".to_owned())?
                 .map(source)
         });
-        StreamSpec {
-            opening: Opening {
-                mime: std::mem::take(&mut stream.mime),
-                loudness_db: stream.loudness_db,
-                start_at,
-            },
-            refresh,
-            source: source(stream),
-        }
+        (source(stream), refresh)
     }
 
     /// Prepares the Premium player script in the background, so the first

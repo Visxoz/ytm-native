@@ -1,9 +1,13 @@
 //! Downloads a stream into memory in the background and serves it to the
-//! demuxer as a seekable file, blocking reads until their bytes arrive.
+//! demuxer as a seekable file, blocking reads until their bytes arrive. A
+//! file on disk is served in place.
 
 use std::{
+    fs::File,
     io::{self, Read, Seek, SeekFrom},
-    sync::{Arc, Condvar, Mutex},
+    os::windows::fs::FileExt,
+    path::PathBuf,
+    sync::{Arc, Condvar, Mutex, OnceLock},
     thread,
     time::Duration,
 };
@@ -45,6 +49,8 @@ struct State {
 pub struct Download {
     state: Mutex<State>,
     changed: Condvar,
+    /// A file read in place, set before `done`.
+    file: OnceLock<File>,
 }
 
 impl Download {
@@ -64,6 +70,31 @@ impl Download {
             .name("stream-download".into())
             .spawn(move || worker.run(source, refresh))
             .expect("download thread spawns");
+        download
+    }
+
+    /// Serves `path`; a file that won't open fails the first read. Opened on
+    /// a thread, as a sleeping disk or share can take seconds to answer.
+    pub fn open(path: PathBuf) -> Arc<Self> {
+        let download = Arc::new(Self::default());
+        let worker = Arc::clone(&download);
+        thread::Builder::new()
+            .name("file-open".into())
+            .spawn(move || {
+                let opened = File::open(&path).and_then(|f| Ok((f.metadata()?.len(), f)));
+                let mut state = worker.state.lock().unwrap();
+                match opened {
+                    Ok((len, file)) => {
+                        let _ = worker.file.set(file);
+                        state.total = len;
+                        state.done = true;
+                    }
+                    Err(e) => state.error = Some(format!("couldn't open the file: {e}")),
+                }
+                drop(state);
+                worker.changed.notify_all();
+            })
+            .expect("file thread spawns");
         download
     }
 
@@ -281,6 +312,13 @@ impl Read for StreamReader {
                 // for ever, hanging the engine on a skip.
                 return Err(io::Error::other("download cancelled"));
             }
+            if let Some(file) = self.download.file.get() {
+                drop(state);
+                // Positional, as seeking moves only `pos`.
+                let n = file.seek_read(buf, self.pos)?;
+                self.pos += n as u64;
+                return Ok(n);
+            }
             let available = state.data.len() as u64;
             if self.pos < available {
                 let start = self.pos as usize;
@@ -330,6 +368,16 @@ mod tests {
     use super::*;
 
     const URL: &str = "https://rr1.googlevideo.com/videoplayback?expire=1&itag=251&clen=4171552&lmt=1700000000000000&n=a";
+
+    #[test]
+    fn a_missing_file_fails_to_read() {
+        let path = std::env::temp_dir()
+            .join("lily-no-such-folder")
+            .join("a.flac");
+        let mut reader = Download::open(path).reader();
+        let e = reader.read(&mut [0; 4]).unwrap_err();
+        assert!(e.to_string().contains("couldn't open"), "{e}");
+    }
 
     #[test]
     fn resumes_only_on_the_same_file() {

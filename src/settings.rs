@@ -310,6 +310,8 @@ pub struct Settings {
     pub look: Look,
     pub accent: Accent,
     pub window: Option<WindowGeometry>,
+    /// Where the user's own music is, shown under Local files.
+    pub local_folders: Vec<PathBuf>,
 }
 
 impl Default for Settings {
@@ -337,6 +339,7 @@ impl Default for Settings {
             look: Look::Black,
             accent: Accent::Lily,
             window: None,
+            local_folders: Vec::new(),
         }
     }
 }
@@ -489,14 +492,6 @@ impl History {
         read_json(&history_path()).unwrap_or_default()
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.tracks.is_empty()
-    }
-
-    pub fn len(&self) -> usize {
-        self.tracks.len()
-    }
-
     /// Newest first.
     pub fn tracks(&self) -> impl Iterator<Item = &crate::api::Track> {
         self.tracks.iter()
@@ -640,7 +635,7 @@ mod tests {
         history.record(&track("b"));
         history.saved_up_to(first);
         let (copy, second) = history.unsaved().unwrap();
-        assert_eq!(copy.len(), 2);
+        assert_eq!(copy.tracks().count(), 2);
         history.saved_up_to(second);
         history.saved_up_to(first);
         assert!(history.unsaved().is_none());

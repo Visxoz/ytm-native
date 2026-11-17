@@ -55,13 +55,16 @@ impl App {
         // Signed in, the History page is the account's own, fetched fresh
         // each visit; the local one stands in when plays aren't sent there.
         let online_history = signed_in && self.state.borrow().settings.youtube_history;
-        if route == Route::History && !online_history {
-            ui.set_page_loading(false);
-            match self.history_page() {
-                Some(page) => self.show_page(page),
-                None => ui.set_page_error("Songs you play will show up here.".into()),
+        match route {
+            Route::History if !online_history => {
+                self.show_or_empty(self.history_page(), "Songs you play will show up here.");
+                return;
             }
-            return;
+            Route::LocalFiles => {
+                self.load_local_files(generation);
+                return;
+            }
+            _ => {}
         }
 
         let cached = self
@@ -195,6 +198,24 @@ impl App {
             cache.remove(&oldest);
         }
         cache.insert(route, (page, Instant::now()));
+    }
+
+    /// A page built on this PC, or the message in its place.
+    pub(super) fn show_or_empty(self: &Rc<Self>, page: Option<Page>, empty: &str) {
+        let ui = self.ui();
+        ui.set_page_loading(false);
+        match page {
+            Some(page) => {
+                // Shown again with songs, the page may have been empty.
+                ui.set_page_error(SharedString::new());
+                self.show_page(page)
+            }
+            None => {
+                // No page takes it, so it would scroll the next one.
+                self.state.borrow_mut().restore_scroll = None;
+                ui.set_page_error(empty.into());
+            }
+        }
     }
 
     pub(super) fn reload(self: &Rc<Self>) {

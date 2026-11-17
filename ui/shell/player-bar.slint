@@ -62,7 +62,7 @@ export component PlayerBar inherits Rectangle {
         width: parent.width * 0.3;
         enabled: root.has-track;
         Menu {
-            if Api.signed-in: MenuItem {
+            if Api.signed-in && !Api.playing-local: MenuItem {
                 title: "Save to playlist";
                 activated => { Api.save-to-playlist(Api.playing-id); }
             }
@@ -121,7 +121,7 @@ export component PlayerBar inherits Rectangle {
                 }
             }
 
-            if Api.signed-in && root.has-track && root.rating-buttons: HorizontalLayout {
+            if Api.signed-in && !Api.playing-local && root.has-track && root.rating-buttons: HorizontalLayout {
                 cross-axis-alignment: center;
                 IconButton {
                     icon: Api.playing-rating == 2 ? Icons.thumb-down-filled : Icons.thumb-down;

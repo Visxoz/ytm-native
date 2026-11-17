@@ -1,6 +1,7 @@
-import { Theme } from "../theme.slint";
+import { Icons, Theme } from "../theme.slint";
 import { AccentChoice, Api } from "../types.slint";
-import { PillButton, PillGroup } from "../widgets/buttons.slint";
+import { IconButton, PillButton, PillGroup } from "../widgets/buttons.slint";
+import { ListView } from "../widgets/list.slint";
 import { Toggle } from "../widgets/toggle.slint";
 import { Dialog, SettingRow, ToggleRow } from "dialog.slint";
 
@@ -64,6 +65,7 @@ export component SettingsDialog inherits Dialog {
     in property <bool> lastfm-available;
     in property <string> lastfm-user;
     in property <bool> lastfm-connecting;
+    in property <[string]> local-folders;
     callback set-quality(value: int);
     callback set-normalise(value: bool);
     callback set-crossfade(value: bool);
@@ -78,13 +80,15 @@ export component SettingsDialog inherits Dialog {
     callback lastfm-disconnect();
     callback install-update();
     callback sign-out();
+    callback add-folder();
+    callback remove-folder(index: int);
     property <int> tab;
 
     title: "Settings";
     open: root.settings-open;
     close => { root.settings-open = false; }
     PillGroup {
-        labels: ["Playback", "Appearance", "Account", "About"];
+        labels: ["Playback", "Library", "Appearance", "Account", "About"];
         current: root.tab;
         picked(i) => { root.tab = i; }
     }
@@ -141,6 +145,45 @@ export component SettingsDialog inherits Dialog {
 
     if root.tab == 1: Tab {
         SettingRow {
+            label: "Local files";
+            detail: root.local-folders.length == 0
+                ? "Plays your own music from folders on this PC, under Local files."
+                : "Plays your own music from these folders, under Local files.";
+            PillButton {
+                y: (parent.height - self.height) / 2;
+                text: "Add folder";
+                small: true;
+                clicked => { root.add-folder(); }
+            }
+        }
+
+        // Scrolls, so many folders can't push the dialog past the window.
+        if root.local-folders.length > 0: folders := ListView {
+            height: min(300px, root.local-folders.length * 40px);
+            for folder[i] in root.local-folders: HorizontalLayout {
+                width: folders.visible-width;
+                height: 40px;
+                // Clear of the scroll bar.
+                padding-right: 14px;
+                spacing: 8px;
+                Text {
+                    text: folder;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    font-size: 13px;
+                    color: Theme.text-secondary;
+                }
+                IconButton {
+                    icon: Icons.close;
+                    icon-size: 16px;
+                    clicked => { root.remove-folder(i); }
+                }
+            }
+        }
+    }
+
+    if root.tab == 2: Tab {
+        SettingRow {
             label: "Theme";
             PillGroup {
                 y: (parent.height - self.height) / 2;
@@ -167,7 +210,7 @@ export component SettingsDialog inherits Dialog {
         }
     }
 
-    if root.tab == 2: Tab {
+    if root.tab == 3: Tab {
         SettingRow {
             label: Api.signed-in ? "Signed in" : "Not signed in";
             detail: Api.signed-in ? "Your library and history come from your YouTube account." : "Sign in to see your library and history.";
@@ -228,7 +271,7 @@ export component SettingsDialog inherits Dialog {
         }
     }
 
-    if root.tab == 3: Tab {
+    if root.tab == 4: Tab {
         SettingRow {
             label: "Updates";
             detail: root.update-status;

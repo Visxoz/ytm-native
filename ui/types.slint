@@ -8,6 +8,8 @@ export struct TrackItem {
     number: string,
     has-artist: bool,
     has-album: bool,
+    /// A file on this PC, which YouTube's actions don't apply to.
+    local: bool,
 }
 
 export struct CardItem {
@@ -58,6 +60,7 @@ export struct QueueItem {
     recommended: bool,
     /// Picked with Ctrl- or Shift-click.
     selected: bool,
+    local: bool,
 }
 
 export struct AccentChoice {
@@ -90,6 +93,7 @@ export global Api {
     /// How the account rated the playing song: 0 none, 1 like, 2 dislike.
     in property <int> playing-rating;
     in property <string> playing-id;
+    in property <bool> playing-local;
     in property <bool> is-playing;
     /// Advanced a few times a second while playing; drives the equalisers
     /// without repainting every frame.
