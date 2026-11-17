@@ -27,10 +27,10 @@ struct Listening {
 }
 
 /// What a tick adds to the time heard: forward movement no greater than the
-/// time elapsed, so a seek adds nothing while a tick held up by the UI thread
-/// loses nothing, as the sound plays on its own thread.
-fn played_through(moved: f64, elapsed: Duration) -> Duration {
-    if moved > 0.0 && moved <= (elapsed + TICK).as_secs_f64() {
+/// song time elapsed at `speed`, so a seek adds nothing while a tick held up
+/// by the UI thread loses nothing, as the sound plays on its own thread.
+fn played_through(moved: f64, elapsed: Duration, speed: f64) -> Duration {
+    if moved > 0.0 && moved <= (elapsed + TICK).as_secs_f64() * speed {
         Duration::from_secs_f64(moved)
     } else {
         Duration::ZERO
@@ -126,13 +126,14 @@ impl App {
         {
             let mut state = self.state.borrow_mut();
             let length = Duration::from_secs_f64(state.playback.duration.max(0.0));
+            let speed = f64::from(state.settings.speed);
             let scrobbler = &mut state.scrobbler;
             let Some(listening) = scrobbler.playing.as_mut() else {
                 return;
             };
             let now = Instant::now();
             if let Some((last, at)) = listening.last_tick.replace((position, now)) {
-                listening.heard += played_through(position - last, now - at);
+                listening.heard += played_through(position - last, now - at, speed);
             }
             if !lastfm::counts(listening.heard, length) {
                 return;
@@ -337,14 +338,19 @@ mod tests {
     #[test]
     fn counts_only_time_played_through() {
         let ms = Duration::from_millis;
-        assert_eq!(played_through(0.25, ms(250)), ms(250), "a tick");
+        assert_eq!(played_through(0.25, ms(250), 1.0), ms(250), "a tick");
         assert_eq!(
-            played_through(5.0, ms(5000)),
+            played_through(5.0, ms(5000), 1.0),
             ms(5000),
             "a tick held up by the UI thread"
         );
-        assert_eq!(played_through(30.0, ms(250)), Duration::ZERO, "a seek");
-        assert_eq!(played_through(-30.0, ms(250)), Duration::ZERO, "back");
-        assert_eq!(played_through(0.0, ms(250)), Duration::ZERO, "paused");
+        assert_eq!(played_through(30.0, ms(250), 1.0), Duration::ZERO, "a seek");
+        assert_eq!(played_through(-30.0, ms(250), 1.0), Duration::ZERO, "back");
+        assert_eq!(played_through(0.0, ms(250), 1.0), Duration::ZERO, "paused");
+        assert_eq!(
+            played_through(0.5, ms(250), 2.0),
+            ms(500),
+            "a tick at twice the speed"
+        );
     }
 }

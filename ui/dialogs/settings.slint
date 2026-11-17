@@ -2,6 +2,7 @@ import { Icons, Theme } from "../theme.slint";
 import { AccentChoice, Api } from "../types.slint";
 import { IconButton, PillButton, PillGroup } from "../widgets/buttons.slint";
 import { ListView } from "../widgets/list.slint";
+import { MenuEntry, PopupMenu } from "../widgets/menu.slint";
 import { Toggle } from "../widgets/toggle.slint";
 import { Dialog, SettingRow, ToggleRow } from "dialog.slint";
 
@@ -33,6 +34,39 @@ component Swatch inherits Rectangle {
     }
 }
 
+/// A button opening a list of choices, ticking the one in use.
+component ChoiceButton {
+    in property <string> text;
+    in property <[string]> choices;
+    in property <int> current;
+    in property <length> menu-width: 240px;
+    callback opening();
+    callback picked(index: int);
+    width: button.min-width;
+
+    button := PillButton {
+        y: (parent.height - self.height) / 2;
+        text: root.text;
+        small: true;
+        clicked => {
+            root.opening();
+            menu.show();
+        }
+    }
+
+    menu := PopupMenu {
+        width: root.menu-width;
+        x: button.width - self.width;
+        y: button.y + button.height + 4px;
+        for name[i] in root.choices: MenuEntry {
+            text: name;
+            icon: i == root.current ? Icons.check : "";
+            active: i == root.current;
+            activated => { root.picked(i); }
+        }
+    }
+}
+
 /// One tab's rows, all tabs the same height so the dialog keeps its size
 /// when switching between them.
 component Tab inherits VerticalLayout {
@@ -49,6 +83,11 @@ export component SettingsDialog inherits Dialog {
     in property <string> premium-status;
     in property <bool> normalise;
     in property <bool> crossfade;
+    in property <[string]> output-devices;
+    in property <int> output-device;
+    in property <string> output-detail;
+    in property <[string]> speeds;
+    in property <int> speed;
     in property <bool> equaliser;
     in property <[string]> eq-presets;
     in property <int> eq-preset;
@@ -69,6 +108,9 @@ export component SettingsDialog inherits Dialog {
     callback set-quality(value: int);
     callback set-normalise(value: bool);
     callback set-crossfade(value: bool);
+    callback set-output-device(index: int);
+    callback list-output-devices();
+    callback set-speed(index: int);
     callback set-autoplay(value: bool);
     callback set-youtube-history(value: bool);
     callback set-rating-buttons(value: bool);
@@ -105,6 +147,32 @@ export component SettingsDialog inherits Dialog {
                 labels: ["Low", "Normal", "High"];
                 current: root.quality;
                 picked(i) => { root.set-quality(i); }
+            }
+        }
+
+        SettingRow {
+            label: "Output device";
+            detail: root.output-detail;
+            ChoiceButton {
+                text: "Change";
+                choices: root.output-devices;
+                current: root.output-device;
+                menu-width: 320px;
+                // Listed again, as a device may have been plugged in since.
+                opening => { root.list-output-devices(); }
+                picked(i) => { root.set-output-device(i); }
+            }
+        }
+
+        SettingRow {
+            label: "Speed";
+            detail: "Faster or slower, the pitch moving with it as on a record.";
+            ChoiceButton {
+                text: root.speed >= 0 ? root.speeds[root.speed] : "Custom";
+                choices: root.speeds;
+                current: root.speed;
+                menu-width: 120px;
+                picked(i) => { root.set-speed(i); }
             }
         }
 

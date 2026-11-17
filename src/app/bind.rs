@@ -195,6 +195,7 @@ impl App {
             .update_settings(|s| s.youtube_history = value));
         on!(on_set_rating_buttons, |app, value| app
             .update_settings(|s| s.rating_buttons = value));
+        on!(on_set_speed, |app, index| app.set_speed(index as usize));
         on!(on_set_autoplay, |app, value| app
             .update_settings(|s| s.autoplay = value));
         on!(on_set_check_updates, |app, value| {
@@ -205,6 +206,9 @@ impl App {
             }
         });
         on!(on_install_update, |app| app.install_update());
+        on!(on_list_output_devices, |app| app.list_output_devices());
+        on!(on_set_output_device, |app, index| app
+            .choose_output_device(index as usize));
         on!(on_remove_folder, |app, index| app
             .remove_folder(index as usize));
         on!(on_player_event, |app, kind, message| app
@@ -218,8 +222,9 @@ impl App {
                 "pause" => app.set_paused(true),
                 "next" => app.next(true),
                 "previous" => app.previous(),
-                "seek-by" => app.seek_to(app.player.position() + value as f64),
-                "seek-to" => app.seek_to(value as f64),
+                // The overlay works in clock time.
+                "seek-by" => app.seek_to(app.player.position() + value as f64 * app.speed()),
+                "seek-to" => app.seek_to(value as f64 * app.speed()),
                 _ => {}
             }
         );

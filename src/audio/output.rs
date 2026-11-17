@@ -65,7 +65,8 @@ impl Output {
 }
 
 /// Device callback: drains the queue, fading out into silence while paused.
-pub(super) fn fill(shared: &Shared, data: &mut [f32]) {
+/// The equaliser runs at `device_rate`, the track's rate times the speed.
+pub(super) fn fill(shared: &Shared, data: &mut [f32], device_rate: u32) {
     let paused = shared.paused.load(Ordering::Relaxed);
     let mut output = shared.output.lock().unwrap();
     if paused && output.gain == 0.0 {
@@ -90,8 +91,7 @@ pub(super) fn fill(shared: &Shared, data: &mut [f32]) {
         let gain = from + step * (frame + 1) as f32;
         *out = sample * if frame < split { gain } else { gain * next };
     }
-    let rate = output.rate;
-    output.eq.process(&mut data[..n], rate, channels);
+    output.eq.process(&mut data[..n], device_rate, channels);
     data[n..].fill(0.0);
     let crossed = output.played(frames as u64);
     if let Some(loudness) = crossed {
@@ -160,6 +160,8 @@ mod tests {
             loudness_gain: AtomicU32::new(loudness.to_bits()),
             download: Mutex::new(None),
             next_download: Mutex::new(None),
+            device: Mutex::new(None),
+            speed: AtomicU32::new(1f32.to_bits()),
         }
     }
 
@@ -168,14 +170,14 @@ mod tests {
         let shared = shared(0.25);
         shared.output.lock().unwrap().switch_at = Some(3);
         let mut data = [0.0; 12];
-        fill(&shared, &mut data);
+        fill(&shared, &mut data, 48_000);
         assert_eq!(data[..6], [0.25; 6], "the current track");
         assert_eq!(data[6..], [0.5; 6], "the next, within the same callback");
         assert_eq!(
             f32::from_bits(shared.loudness_gain.load(Ordering::Relaxed)),
             0.5
         );
-        fill(&shared, &mut data);
+        fill(&shared, &mut data, 48_000);
         assert_eq!(data, [0.5; 12], "and on from there");
     }
 
@@ -184,9 +186,9 @@ mod tests {
         let shared = shared(1.0);
         shared.paused.store(true, Ordering::Relaxed);
         let mut data = [0.0; 8];
-        fill(&shared, &mut data);
+        fill(&shared, &mut data, 48_000);
         assert_eq!(data, [0.75, 0.75, 0.5, 0.5, 0.25, 0.25, 0.0, 0.0]);
-        fill(&shared, &mut data);
+        fill(&shared, &mut data, 48_000);
         assert_eq!(data, [0.0; 8], "silent once faded");
         assert_eq!(
             shared.output.lock().unwrap().samples.len(),
@@ -197,7 +199,7 @@ mod tests {
         shared.output.lock().unwrap().reset(0.0);
         shared.output.lock().unwrap().samples = vec![1.0; 8].into();
         shared.paused.store(false, Ordering::Relaxed);
-        fill(&shared, &mut data);
+        fill(&shared, &mut data, 48_000);
         assert_eq!(
             data,
             [0.25, 0.25, 0.5, 0.5, 0.75, 0.75, 1.0, 1.0],

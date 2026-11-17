@@ -33,6 +33,23 @@ const SILENCE: f32 = 0.001;
 const IDLE_POLL: Duration = Duration::from_millis(20);
 /// Long enough for the device to play out its buffer as silence.
 const PAUSE_AFTER: Duration = Duration::from_millis(250);
+/// How often to look for the chosen device while the default stands in.
+const DEVICE_RECHECK: Duration = Duration::from_secs(3);
+/// How soon after starting a lost chosen device counts as one that won't start.
+const START_GRACE: Duration = Duration::from_secs(1);
+/// How often to try opening a device while none will open.
+const DEVICE_RETRY: Duration = Duration::from_secs(1);
+
+/// The output device with this cpal ID, if it is plugged in.
+fn find_device(host: &cpal::Host, id: &str) -> Option<cpal::Device> {
+    host.device_by_id(&id.parse().ok()?)
+}
+
+/// Wait before trying the chosen device again, doubled per failed start in a row,
+/// as each try drops the sound.
+fn recheck_after(failures: u32) -> Duration {
+    DEVICE_RECHECK * 2u32.pow(failures.min(5))
+}
 
 struct Track {
     decoder: Decoder,
@@ -183,6 +200,16 @@ pub(super) struct Engine {
     scratch: Vec<f32>,
     /// When to stop the device after a pause.
     pause_at: Option<Instant>,
+    /// When the chosen device was last looked for, while the default stands in.
+    fallback_since: Option<Instant>,
+    /// When the stream on the chosen device started, while it plays.
+    chosen_since: Option<Instant>,
+    /// Times in a row the chosen device failed to start, spacing out its rechecks.
+    chosen_failures: u32,
+    /// When to try again to open a device, after none would open.
+    retry_at: Option<Instant>,
+    /// When the open stream, on whichever device, started.
+    started_at: Option<Instant>,
 }
 
 impl Engine {
@@ -203,6 +230,11 @@ impl Engine {
             fade: None,
             scratch: Vec::new(),
             pause_at: None,
+            fallback_since: None,
+            chosen_since: None,
+            chosen_failures: 0,
+            retry_at: None,
+            started_at: None,
         }
     }
 
@@ -240,7 +272,18 @@ impl Engine {
                 Some(Command::Seek(secs)) => self.seek(secs),
                 Some(Command::Stop) => self.clear(),
                 Some(Command::Pause) => self.apply_paused(),
+                Some(Command::Reopen) => {
+                    // Asked for, so not a failure to start however soon after one.
+                    self.chosen_since = None;
+                    self.chosen_failures = 0;
+                    self.started_at = None;
+                    if self.stream.is_some() {
+                        self.shared.device_lost.store(true, Ordering::Relaxed);
+                        self.reopen_lost_device();
+                    }
+                }
                 None => {
+                    self.recheck_device();
                     self.pause_when_due();
                     self.poll_next();
                     self.check_advanced();
@@ -658,12 +701,21 @@ impl Engine {
 
     /// Opens the device at the track's format; Windows resamples if needed.
     fn ensure_stream(&mut self, rate: u32, channels: usize) -> Result<(), String> {
+        let lost = self.shared.device_lost.load(Ordering::Relaxed);
+        // cpal starts a stream on its own thread and reports a failure there,
+        // so a chosen device lost this soon is taken as broken, not unplugged.
+        let played = self.chosen_since.map(|at| at.elapsed());
+        let broken = lost && played.is_some_and(|p| p < START_GRACE);
         // A device open at another format closes before the format changes
         // under its callback, and a lost one closes to be opened afresh.
-        if self.shared.device_lost.load(Ordering::Relaxed)
-            || !matches!(&self.stream, Some((_, r, c)) if *r == rate && *c == channels)
-        {
+        if lost || !matches!(&self.stream, Some((_, r, c)) if *r == rate && *c == channels) {
+            if broken {
+                self.chosen_failures = self.chosen_failures.saturating_add(1);
+            } else if played.is_some_and(|p| p >= START_GRACE) {
+                self.chosen_failures = 0;
+            }
             self.stream = None;
+            self.chosen_since = None;
             // Closing waits for the callbacks to end, so nothing of the old
             // stream can report it lost after this.
             self.shared.device_lost.store(false, Ordering::Relaxed);
@@ -682,20 +734,54 @@ impl Engine {
         }
 
         let host = cpal::default_host();
+        let chosen = self.shared.device.lock().unwrap().clone();
+        if let Some(device) = chosen
+            .as_deref()
+            .filter(|_| !broken)
+            .and_then(|id| find_device(&host, id))
+        {
+            match self
+                .build(&device, rate, channels)
+                .and_then(|stream| self.start(stream, rate, channels))
+            {
+                Ok(()) => {
+                    self.fallback_since = None;
+                    self.chosen_since = Some(Instant::now());
+                    return Ok(());
+                }
+                Err(e) => log::warn!("{e}; playing on the default device"),
+            }
+        }
+        // The default stands in until `recheck_device` finds the chosen one working.
+        self.fallback_since = chosen.is_some().then(Instant::now);
         let device = host
             .default_output_device()
             .ok_or("no audio output device")?;
+        let stream = self.build(&device, rate, channels)?;
+        self.start(stream, rate, channels)
+    }
+
+    /// An unstarted stream on `device`, its rate scaled by the speed.
+    fn build(
+        &self,
+        device: &cpal::Device,
+        rate: u32,
+        channels: usize,
+    ) -> Result<cpal::Stream, String> {
+        let speed = f32::from_bits(self.shared.speed.load(Ordering::Relaxed));
+        // Windows' resampler takes 8 to 384 kHz.
+        let device_rate = ((rate as f32 * speed).round() as u32).clamp(8_000, 384_000);
         let config = cpal::StreamConfig {
             channels: channels as u16,
-            sample_rate: rate,
+            sample_rate: device_rate,
             buffer_size: cpal::BufferSize::Default,
         };
         let shared = Arc::clone(&self.shared);
         let lost = Arc::clone(&self.shared);
-        let stream = device
+        device
             .build_output_stream::<f32, _, _>(
                 config,
-                move |data, _| fill(&shared, data),
+                move |data, _| fill(&shared, data, device_rate),
                 move |e| {
                     log::warn!("audio output error: {e}");
                     // The device went or another became the default. Other
@@ -712,11 +798,15 @@ impl Engine {
                 },
                 None,
             )
-            .map_err(|e| format!("could not open audio output: {e}"))?;
+            .map_err(|e| format!("could not open audio output: {e}"))
+    }
+
+    fn start(&mut self, stream: cpal::Stream, rate: u32, channels: usize) -> Result<(), String> {
         stream
             .play()
             .map_err(|e| format!("could not start audio output: {e}"))?;
         self.stream = Some((stream, rate, channels));
+        self.started_at = Some(Instant::now());
         // A format change reached while paused opens a stream that must not run.
         self.apply_paused();
         Ok(())
@@ -726,7 +816,20 @@ impl Engine {
     /// unplugged or another becomes the default, which cpal's stream does
     /// not follow. The queued samples carry on from where the old one stopped.
     fn reopen_lost_device(&mut self) {
-        if !self.shared.device_lost.load(Ordering::Relaxed) {
+        // An open stream reopens at once; with none open, the last try failed.
+        if !self.shared.device_lost.load(Ordering::Relaxed)
+            || (self.stream.is_none() && self.retry_at.is_some_and(|at| Instant::now() < at))
+        {
+            return;
+        }
+        // The default failing to start leaves nothing to fall back on, so it
+        // closes and waits as if there were no device; a track load still tries.
+        if self.stream.is_some()
+            && self.chosen_since.is_none()
+            && self.started_at.is_some_and(|at| at.elapsed() < START_GRACE)
+        {
+            self.stream = None;
+            self.retry_at = Some(Instant::now() + DEVICE_RETRY);
             return;
         }
         let (rate, channels) = {
@@ -734,9 +837,42 @@ impl Engine {
             (output.rate, output.channels)
         };
         if let Err(e) = self.ensure_stream(rate, channels) {
-            // shortcut: asks again every pass, 50 times a second, while
-            // there is no device to open; time the retries if that shows.
             log::debug!("{e}");
+            self.retry_at = Some(Instant::now() + DEVICE_RETRY);
+            self.shared.device_lost.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Moves back to the chosen device once it opens again, as cpal reports no
+    /// device arriving.
+    fn recheck_device(&mut self) {
+        let Some((_, rate, channels)) = self.stream else {
+            return;
+        };
+        if self
+            .fallback_since
+            .is_none_or(|at| at.elapsed() < recheck_after(self.chosen_failures))
+        {
+            return;
+        }
+        self.fallback_since = Some(Instant::now());
+        let chosen = self.shared.device.lock().unwrap().clone();
+        // Built while the default plays, so a failure leaves the sound alone.
+        let Some(stream) = chosen
+            .and_then(|id| find_device(&cpal::default_host(), &id))
+            .and_then(|device| self.build(&device, rate, channels).ok())
+        else {
+            return;
+        };
+        // Closed first, as both would drain the queue; closing waits for its
+        // callbacks, so it can't report itself lost after.
+        self.stream = None;
+        self.shared.device_lost.store(false, Ordering::Relaxed);
+        self.shared.output.lock().unwrap().gain = 0.0;
+        self.fallback_since = None;
+        self.chosen_since = Some(Instant::now());
+        if let Err(e) = self.start(stream, rate, channels) {
+            log::warn!("{e}");
             self.shared.device_lost.store(true, Ordering::Relaxed);
         }
     }
@@ -884,5 +1020,13 @@ mod tests {
     fn hears_silence_below_the_threshold_only() {
         assert!(is_silent(&[0.0, -0.000_5]));
         assert!(!is_silent(&[0.0, 0.01]));
+    }
+
+    #[test]
+    fn rechecks_a_failing_device_ever_more_rarely() {
+        assert_eq!(recheck_after(0), DEVICE_RECHECK);
+        assert_eq!(recheck_after(1), DEVICE_RECHECK * 2);
+        assert_eq!(recheck_after(5), DEVICE_RECHECK * 32);
+        assert_eq!(recheck_after(u32::MAX), recheck_after(5));
     }
 }

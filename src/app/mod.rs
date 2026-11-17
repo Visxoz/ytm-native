@@ -53,6 +53,8 @@ use resolve::PremiumShared;
 use song_version::SongVersion;
 
 const TICK: Duration = Duration::from_millis(250);
+/// In the order Settings lists them.
+const SPEEDS: [f32; 6] = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3];
 /// Equaliser animation step; a few frames a second keeps repaints cheap.
 const EQ_FRAME: Duration = Duration::from_millis(125);
 const TOAST_FOR: Duration = Duration::from_secs(5);
@@ -221,6 +223,8 @@ pub struct App {
     local_check: Cell<Option<bool>>,
     /// The local library's revision Local files last showed.
     local_shown: Cell<u64>,
+    /// Settings' devices after "System default": cpal ID and name.
+    output_devices: RefCell<Vec<(String, String)>>,
 }
 
 pub type HomeAhead = tokio::task::JoinHandle<api::Result<Page>>;
@@ -264,6 +268,8 @@ impl App {
         player.set_volume(if settings.muted { 0.0 } else { settings.volume });
         player.set_normalise(settings.normalise);
         player.set_equaliser(settings.equaliser());
+        player.set_speed(settings.speed);
+        player.set_output_device(settings.output_device.as_ref().map(|d| d.id.clone()));
 
         let premium = PremiumShared::new(
             settings::load_cookie(),
@@ -334,6 +340,7 @@ impl App {
             watcher: RefCell::new(None),
             local_check: Cell::new(None),
             local_shown: Cell::new(0),
+            output_devices: RefCell::default(),
         });
         app.bind(ui);
         app.apply_settings_to_ui(ui);
@@ -370,6 +377,12 @@ impl App {
             .collect();
         ui.set_accents(ModelRc::new(VecModel::from(accents)));
         app.show_recent_searches();
+        app.show_output_device();
+        let speeds: Vec<SharedString> = SPEEDS
+            .iter()
+            .map(|speed| format!("{speed}×").into())
+            .collect();
+        ui.set_speeds(ModelRc::new(VecModel::from(speeds)));
         app
     }
 
@@ -424,6 +437,11 @@ impl App {
         });
     }
 
+    /// How much faster than the clock song time passes.
+    fn speed(&self) -> f64 {
+        f64::from(self.state.borrow().settings.speed)
+    }
+
     fn show_playing(&self, playing: bool) {
         self.ui().global::<ApiGlobal>().set_is_playing(playing);
     }
@@ -458,6 +476,12 @@ impl App {
         ui.set_rating_buttons(settings.rating_buttons);
         ui.set_quality(settings.quality.index());
         ui.set_crossfade(settings.crossfade);
+        ui.set_speed(
+            SPEEDS
+                .iter()
+                .position(|&s| s == settings.speed)
+                .map_or(-1, |i| i as i32),
+        );
         ui.set_sidebar_collapsed(settings.sidebar_collapsed);
         ui.set_check_updates(settings.check_updates);
         ui.set_equaliser(settings.equaliser);
@@ -553,6 +577,69 @@ impl App {
         }
         self.player
             .set_equaliser(self.state.borrow().settings.equaliser());
+    }
+
+    /// Probed on a thread of their own, as cpal sets up COM on it.
+    fn list_output_devices(self: &Rc<Self>) {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        std::thread::spawn(move || {
+            let _ = tx.send(crate::audio::output_devices());
+        });
+        self.spawn(
+            async move { rx.await.unwrap_or_default() },
+            |app, devices| {
+                *app.output_devices.borrow_mut() = devices;
+                app.show_output_device();
+            },
+        );
+    }
+
+    fn show_output_device(&self) {
+        let ui = self.ui();
+        let devices = self.output_devices.borrow();
+        let chosen = &self.state.borrow().settings.output_device;
+        let current = chosen.as_ref().map_or(Some(0), |chosen| {
+            devices
+                .iter()
+                .position(|(id, _)| *id == chosen.id)
+                .map(|i| i + 1)
+        });
+        let detail = match chosen {
+            None => "Follows the default in Windows.".to_owned(),
+            // Plugged in, or not listed yet.
+            Some(chosen) if current.is_some() || devices.is_empty() => chosen.name.clone(),
+            Some(chosen) => format!(
+                "{} isn't plugged in, so the default plays until it is.",
+                chosen.name
+            ),
+        };
+        let names: Vec<SharedString> = std::iter::once(s("System default"))
+            .chain(devices.iter().map(|(_, name)| s(name)))
+            .collect();
+        ui.set_output_devices(ModelRc::new(VecModel::from(names)));
+        ui.set_output_device(current.map_or(-1, |i| i as i32));
+        ui.set_output_detail(detail.into());
+    }
+
+    /// Plays through the device Settings lists at `index`, 0 being the default.
+    fn choose_output_device(&self, index: usize) {
+        let device = match index.checked_sub(1) {
+            None => None,
+            Some(i) => match self.output_devices.borrow().get(i) {
+                Some((id, name)) => Some(settings::OutputDevice {
+                    id: id.clone(),
+                    name: name.clone(),
+                }),
+                None => return,
+            },
+        };
+        if device == self.state.borrow().settings.output_device {
+            return;
+        }
+        self.player
+            .set_output_device(device.as_ref().map(|d| d.id.clone()));
+        self.update_settings(|s| s.output_device = device);
+        self.show_output_device();
     }
 
     pub fn settings(&self) -> Settings {

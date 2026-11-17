@@ -429,6 +429,21 @@ impl App {
         self.report_playback_at(secs);
     }
 
+    /// Plays at the speed Settings lists at `index`.
+    pub(super) fn set_speed(&self, index: usize) {
+        let Some(&speed) = super::SPEEDS.get(index) else {
+            return;
+        };
+        self.update_settings(|s| s.speed = speed);
+        self.player.set_speed(speed);
+        // The overlay and Discord show clock time, which the speed scales.
+        let track = self.state.borrow().queue.current().cloned();
+        if let Some(track) = track {
+            self.show_media_track(&track);
+        }
+        self.report_playback();
+    }
+
     pub(super) fn set_volume(&self, volume: f32) {
         self.player.set_volume(volume);
         let mut state = self.state.borrow_mut();

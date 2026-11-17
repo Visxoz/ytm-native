@@ -131,6 +131,14 @@ export component AppWindow inherits Window {
     /// 0 low, 1 normal, 2 high.
     in property <int> quality: 2;
     in property <bool> crossfade;
+    /// "System default", then each output device; the chosen one's index,
+    /// or -1 while it is unplugged.
+    in property <[string]> output-devices;
+    in property <int> output-device;
+    in property <string> output-detail;
+    /// The speeds offered, and the index of the one playing, or -1.
+    in property <[string]> speeds;
+    in property <int> speed;
     in property <string> premium-status;
     in property <[AccentChoice]> accents;
     in property <int> accent-choice;
@@ -206,6 +214,9 @@ export component AppWindow inherits Window {
     callback set-rating-buttons(value: bool);
     callback set-quality(value: int);
     callback set-crossfade(value: bool);
+    callback list-output-devices();
+    callback set-output-device(index: int);
+    callback set-speed(index: int);
     callback set-look(index: int);
     callback set-accent(index: int);
     callback lastfm-connect();
@@ -219,6 +230,12 @@ export component AppWindow inherits Window {
     callback player-event(kind: string, message: string);
     callback media-action(action: string, value: float);
     callback local-files-changed();
+
+    changed settings-open => {
+        if root.settings-open {
+            root.list-output-devices();
+        }
+    }
 
     changed full-player => {
         root.queue-drawer = false;
@@ -520,6 +537,14 @@ export component AppWindow inherits Window {
             premium-status: root.premium-status;
             normalise: root.normalise;
             crossfade: root.crossfade;
+            output-devices: root.output-devices;
+            output-device: root.output-device;
+            output-detail: root.output-detail;
+            set-output-device(i) => { root.set-output-device(i); }
+            list-output-devices => { root.list-output-devices(); }
+            speeds: root.speeds;
+            speed: root.speed;
+            set-speed(i) => { root.set-speed(i); }
             equaliser: root.equaliser;
             eq-presets: root.eq-presets;
             eq-preset: root.eq-preset;

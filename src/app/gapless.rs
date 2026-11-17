@@ -35,10 +35,12 @@ impl App {
             } else {
                 0.0
             };
+            // Opening takes clock time; the fade and trim are in song time.
+            let open = GAPLESS_LEAD_SECS * f64::from(state.settings.speed);
             let lead = if crossfade > 0.0 {
-                GAPLESS_LEAD_SECS + crossfade + SILENCE_TRIM_SECS
+                open + crossfade + SILENCE_TRIM_SECS
             } else {
-                GAPLESS_LEAD_SECS
+                open
             };
             let next = next.map(|t| t.id.as_str());
             let stale = playback

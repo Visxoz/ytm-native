@@ -303,6 +303,8 @@ pub struct Settings {
     /// on the free stream at once while a background check confirms it.
     pub no_premium: bool,
     pub crossfade: bool,
+    /// Playback speed, the pitch moving with it.
+    pub speed: f32,
     pub check_updates: bool,
     pub equaliser: bool,
     /// Each band's gain in dB, kept while the equaliser is off.
@@ -312,6 +314,15 @@ pub struct Settings {
     pub window: Option<WindowGeometry>,
     /// Where the user's own music is, shown under Local files.
     pub local_folders: Vec<PathBuf>,
+    /// The output device chosen, or `None` to follow Windows' default.
+    pub output_device: Option<OutputDevice>,
+}
+
+/// An output device by cpal's ID, with its name for while it is unplugged.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct OutputDevice {
+    pub id: String,
+    pub name: String,
 }
 
 impl Default for Settings {
@@ -333,6 +344,7 @@ impl Default for Settings {
             premium_account: false,
             no_premium: false,
             crossfade: false,
+            speed: 1.0,
             check_updates: true,
             equaliser: false,
             equaliser_gains: Default::default(),
@@ -340,6 +352,7 @@ impl Default for Settings {
             accent: Accent::Lily,
             window: None,
             local_folders: Vec::new(),
+            output_device: None,
         }
     }
 }
@@ -353,6 +366,10 @@ impl Settings {
         if !settings.premium_audio && settings.quality == Quality::High {
             settings.quality = Quality::Normal;
         }
+        // The app divides by it, so it must agree with the player's.
+        settings.speed = settings
+            .speed
+            .clamp(crate::audio::MIN_SPEED, crate::audio::MAX_SPEED);
         settings
     }
 

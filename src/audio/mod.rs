@@ -25,6 +25,9 @@ use output::Output;
 use source::Download;
 pub use source::{Refresh, Source};
 
+pub const MIN_SPEED: f32 = 0.5;
+pub const MAX_SPEED: f32 = 2.0;
+
 /// The most silence cut from either side of a crossfade, so a quiet
 /// passage or a hidden track is not mistaken for the end.
 pub const SILENCE_TRIM_SECS: f64 = 4.0;
@@ -60,6 +63,23 @@ impl StreamSpec {
     }
 }
 
+/// The output devices plugged in, as cpal ID and name. Slow, and cpal sets up
+/// COM on the calling thread, so best called on one of its own.
+pub fn output_devices() -> Vec<(String, String)> {
+    use cpal::traits::{DeviceTrait, HostTrait};
+    let Ok(devices) = cpal::default_host().output_devices() else {
+        return Vec::new();
+    };
+    devices
+        .filter_map(|d| {
+            Some((
+                d.id().ok()?.to_string(),
+                d.description().ok()?.name().to_owned(),
+            ))
+        })
+        .collect()
+}
+
 /// The whole stream, fetched on this thread, which may block, for keeping.
 pub fn fetch(source: Source, refresh: Refresh) -> Result<Vec<u8>, String> {
     Download::fetch_all(source, refresh)
@@ -89,6 +109,8 @@ enum Command {
     Stop,
     /// Pauses or resumes the device to match `Shared::paused`.
     Pause,
+    /// Opens the device again, as another or a new speed was chosen.
+    Reopen,
 }
 
 /// Empties a download slot and cancels what it held, once the slot's lock
@@ -119,6 +141,10 @@ struct Shared {
     download: Mutex<Option<Arc<Download>>>,
     /// The queued track's download.
     next_download: Mutex<Option<Arc<Download>>>,
+    /// The chosen output device's cpal ID, or `None` for the default.
+    device: Mutex<Option<String>>,
+    /// The playback speed, as f32 bits.
+    speed: AtomicU32,
 }
 
 impl Shared {
@@ -174,6 +200,8 @@ impl Player {
             loudness_gain: AtomicU32::new(1f32.to_bits()),
             download: Mutex::new(None),
             next_download: Mutex::new(None),
+            device: Mutex::new(None),
+            speed: AtomicU32::new(1f32.to_bits()),
         });
         let (tx, rx) = mpsc::channel();
         let engine_shared = Arc::clone(&shared);
@@ -243,6 +271,21 @@ impl Player {
     /// Shapes the sound with each band's gain, or plays it as it is.
     pub fn set_equaliser(&self, gains: Option<eq::Gains>) {
         self.shared.output.lock().unwrap().eq.set(gains);
+    }
+
+    /// Plays through the device with this cpal ID, or the default.
+    pub fn set_output_device(&self, id: Option<String>) {
+        *self.shared.device.lock().unwrap() = id;
+        let _ = self.tx.send(Command::Reopen);
+    }
+
+    /// Record-style: the device opens at the track's rate times the speed and
+    /// Windows resamples, so the engine stays in song time.
+    pub fn set_speed(&self, speed: f32) {
+        let speed = speed.clamp(MIN_SPEED, MAX_SPEED);
+        if self.shared.speed.swap(speed.to_bits(), Ordering::Relaxed) != speed.to_bits() {
+            let _ = self.tx.send(Command::Reopen);
+        }
     }
 
     pub fn set_normalise(&self, normalise: bool) {

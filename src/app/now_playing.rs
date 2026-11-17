@@ -70,16 +70,7 @@ impl App {
         ui.set_np_art(images::cached_or_empty(track.thumb.as_deref(), images::ROW));
         self.load_player_art(track);
 
-        if let Some(media) = self.media.borrow_mut().as_mut() {
-            let large = track.large_thumb();
-            media.set_track(
-                &track.title,
-                &track.artist_names(),
-                track.album_name(),
-                large.as_deref(),
-                track.seconds(),
-            );
-        }
+        self.show_media_track(track);
         self.refresh_queue();
         self.persist_soon();
         self.update_presence();
@@ -94,6 +85,20 @@ impl App {
         }
         // The same song again keeps its lyrics; light the line it starts at.
         self.show_lyric_line(position);
+    }
+
+    /// Gives the overlay the length in clock time, which Windows advances the position by.
+    pub(super) fn show_media_track(&self, track: &Track) {
+        if let Some(media) = self.media.borrow_mut().as_mut() {
+            let large = track.large_thumb();
+            media.set_track(
+                &track.title,
+                &track.artist_names(),
+                track.album_name(),
+                large.as_deref(),
+                track.seconds() / self.speed(),
+            );
+        }
     }
 
     fn is_current(&self, id: &str) -> bool {
@@ -195,7 +200,7 @@ impl App {
             None
         };
         if let Some(media) = self.media.borrow_mut().as_mut() {
-            media.set_state(playing, position);
+            media.set_state(playing, position / self.speed());
         }
     }
 
@@ -217,6 +222,8 @@ impl App {
 
     fn update_presence_at(&self, position: f64) {
         let state = self.state.borrow();
+        // Discord counts the time left on the clock.
+        let speed = f64::from(state.settings.speed);
         let track = match state.queue.current() {
             // A local file has no YouTube page to show; the last song's goes too.
             Some(track)
@@ -228,8 +235,8 @@ impl App {
                     artist: track.artist_names(),
                     album: track.album.as_ref().map(|(_, name)| name.clone()),
                     artwork_url: track.large_thumb(),
-                    duration: state.playback.duration,
-                    position: position.min(state.playback.duration.max(0.0)),
+                    duration: state.playback.duration / speed,
+                    position: position.min(state.playback.duration.max(0.0)) / speed,
                     paused: self.player.is_paused() || !state.playback.started,
                 })
             }
@@ -444,7 +451,10 @@ impl App {
             let line = starts.partition_point(|&start| start <= position);
             (
                 line as i32 - 1,
-                starts.get(line).map(|start| start - position),
+                // On the clock, as the timer counts.
+                starts
+                    .get(line)
+                    .map(|start| (start - position) / self.speed()),
             )
         };
         ui.set_lyrics_current(line);
