@@ -4,6 +4,7 @@ import { SettingsDialog } from "dialogs/settings.slint";
 import { SignInDialog } from "dialogs/sign-in.slint";
 import { SidePanel } from "panel/side-panel.slint";
 import { FullPlayer } from "shell/full-player.slint";
+import { MiniPlayer } from "mini-player.slint";
 import { PageView } from "shell/page-view.slint";
 import { PlayerBar } from "shell/player-bar.slint";
 import { Sidebar } from "shell/sidebar.slint";
@@ -13,6 +14,7 @@ import { AccentChoice, Api, CardItem, PlaylistChoice, QueueItem, RowItem, RowKin
 import { Palette } from "std-widgets.slint";
 
 export {
+    MiniPlayer,
     Api,
     Theme,
     TrackItem,
@@ -94,6 +96,7 @@ export component AppWindow inherits Window {
     in property <bool> smart-shuffle;
     in property <int> repeat-mode;
     in-out property <bool> full-player <=> root.full-screen;
+    in property <bool> mini-open;
     /// The queue's drawer over the full player's lyrics.
     out property <bool> queue-drawer;
     /// The queue entry that plays after this one, as `Queue::next_index`
@@ -198,6 +201,7 @@ export component AppWindow inherits Window {
     callback panel-tab-changed(tab: int);
     callback lyric-clicked(index: int);
     callback full-player-changed();
+    callback toggle-mini-player();
     callback sidebar-changed(collapsed: bool);
     callback np-go-artist();
     callback np-go-album();
@@ -489,6 +493,8 @@ export component AppWindow inherits Window {
                 smart-shuffle: root.smart-shuffle;
                 repeat-mode: root.repeat-mode;
                 full-player <=> root.full-player;
+                mini-open: root.mini-open;
+                toggle-mini-player => { root.toggle-mini-player(); }
                 queue-active: root.queue-shown;
                 lyrics-active: root.full-player ? !root.queue-drawer : root.lyrics-shown;
                 toggle-play => { root.toggle-play(); }

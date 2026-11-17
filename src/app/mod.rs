@@ -7,6 +7,7 @@ mod bind;
 mod gapless;
 mod items;
 mod library;
+mod mini;
 mod navigation;
 mod now_playing;
 mod offline;
@@ -37,7 +38,7 @@ use slint::{
 use tokio::runtime::Handle;
 
 use crate::{
-    AccentChoice, Api as ApiGlobal, AppWindow, CardItem, QueueItem, RowItem, Theme,
+    AccentChoice, Api as ApiGlobal, AppWindow, CardItem, MiniPlayer, QueueItem, RowItem, Theme,
     api::{self, Api, Page, Route, Track},
     audio::{Player, PlayerEvent, eq},
     downloads::Downloads,
@@ -50,6 +51,7 @@ use crate::{
     streams::ResolvedStream,
     update,
 };
+pub(crate) use mini::window_attributes as mini_window_attributes;
 use resolve::PremiumShared;
 use song_version::SongVersion;
 
@@ -229,6 +231,7 @@ pub struct App {
     tray: OnceCell<crate::tray::Tray>,
     /// Set as the window minimises on its way to the tray.
     hide_pending: Cell<bool>,
+    mini: RefCell<Option<MiniPlayer>>,
 }
 
 pub type HomeAhead = tokio::task::JoinHandle<api::Result<Page>>;
@@ -347,6 +350,7 @@ impl App {
             output_devices: RefCell::default(),
             tray: OnceCell::new(),
             hide_pending: Cell::new(false),
+            mini: RefCell::new(None),
         });
         app.bind(ui);
         app.attach_tray();
@@ -451,6 +455,7 @@ impl App {
 
     fn show_playing(&self, playing: bool) {
         self.ui().global::<ApiGlobal>().set_is_playing(playing);
+        self.sync_mini();
     }
 
     fn toast(self: &Rc<Self>, message: impl Into<String>) {
@@ -550,6 +555,8 @@ impl App {
             .unwrap_or_else(|| opaque(settings::LILY));
         ui.global::<Theme>()
             .set_accent(images::readable(accent, settings.look == Look::Light));
+        drop(state);
+        self.theme_mini();
     }
 
     /// Keeps the playing artwork's colour, recolouring the window only when

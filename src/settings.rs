@@ -314,6 +314,8 @@ pub struct Settings {
     pub look: Look,
     pub accent: Accent,
     pub window: Option<WindowGeometry>,
+    /// Where the mini player was last put, in physical pixels.
+    pub mini_position: Option<(i32, i32)>,
     /// Where the user's own music is, shown under Local files.
     pub local_folders: Vec<PathBuf>,
     /// The output device chosen, or `None` to follow Windows' default.
@@ -354,6 +356,7 @@ impl Default for Settings {
             look: Look::Black,
             accent: Accent::Lily,
             window: None,
+            mini_position: None,
             local_folders: Vec::new(),
             output_device: None,
         }

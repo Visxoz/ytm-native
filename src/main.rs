@@ -269,7 +269,7 @@ fn main() {
             .backend_name("winit".into())
             .renderer_name("skia".into())
             .with_winit_window_attributes_hook(move |attributes| {
-                let attributes = with_exe_icon(attributes);
+                let attributes = app::mini_window_attributes(with_exe_icon(attributes));
                 if main_window.replace(false) {
                     attributes
                         .with_theme(Some(title_bar))

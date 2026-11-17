@@ -77,6 +77,7 @@ impl App {
                 app.load_lyrics();
             }
         });
+        on!(on_toggle_mini_player, |app| app.toggle_mini_player());
         on!(on_full_player_changed, |app| {
             app.load_cover();
             let ui = app.ui();

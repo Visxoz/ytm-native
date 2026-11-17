@@ -527,11 +527,8 @@ impl App {
                 });
             }
         }
-        if !ui.get_has_track() {
-            return;
-        }
         let started = self.state.borrow().playback.started;
-        if started {
+        if ui.get_has_track() && started {
             let position = self.player.position();
             ui.set_np_position(position as f32);
             self.show_lyric_line(position);
@@ -542,5 +539,6 @@ impl App {
             ui.set_np_loading(stalled && buffered < 1.0);
             self.update_gapless(position);
         }
+        self.sync_mini();
     }
 }

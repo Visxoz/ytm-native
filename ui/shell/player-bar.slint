@@ -27,6 +27,7 @@ export component PlayerBar inherits Rectangle {
     in property <bool> lyrics-active;
     in property <bool> queue-active;
     in property <bool> rating-buttons;
+    in property <bool> mini-open;
     in-out property <bool> full-player;
 
     callback toggle-play();
@@ -40,6 +41,7 @@ export component PlayerBar inherits Rectangle {
     callback np-go-artist();
     callback np-go-album();
     callback open-panel(tab: int);
+    callback toggle-mini-player();
 
     pure function fmt(secs: float) -> string {
         if secs < 0 {
@@ -315,6 +317,12 @@ export component PlayerBar inherits Rectangle {
             icon: Icons.queue;
             active: root.queue-active;
             clicked => { root.open-panel(0); }
+        }
+
+        IconButton {
+            icon: Icons.mini-player;
+            active: root.mini-open;
+            clicked => { root.toggle-mini-player(); }
         }
 
         IconButton {

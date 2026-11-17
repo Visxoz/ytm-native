@@ -1,0 +1,155 @@
+import { Icons, Theme } from "theme.slint";
+import { Art } from "widgets/art.slint";
+import { IconButton, PlayButton } from "widgets/buttons.slint";
+import { Spinner } from "widgets/spinner.slint";
+
+/// Its globals are its own, so Rust sets its `Theme` too.
+export component MiniPlayer inherits Window {
+    title: "Lily";
+    no-frame: true;
+    width: 360px;
+    // As tall as its contents, so the controls never reach the progress bar.
+    height: body.preferred-height;
+    background: Theme.elevated;
+    default-font-family: "Segoe UI Variable Text";
+    default-font-size: 14px;
+
+    in property <bool> has-track;
+    in property <string> song;
+    in property <string> artists;
+    in property <image> art;
+    in property <bool> playing;
+    in property <bool> loading;
+    /// 0 to 1.
+    in property <float> progress;
+    callback toggle-play();
+    callback next();
+    callback previous();
+    /// Back to the main window.
+    callback expand();
+    callback dismiss();
+    /// Starts moving the window with the pointer.
+    callback drag();
+
+    TouchArea {
+        property <bool> dragged;
+        // Slint counts a click after a drag as its double-click too.
+        property <bool> was-dragged;
+        pointer-event(ev) => {
+            if ev.button == PointerEventButton.left && ev.kind == PointerEventKind.down {
+                self.was-dragged = self.dragged;
+                self.dragged = false;
+            }
+        }
+        // Only once the pointer moves: Windows' move loop would swallow a still double-click.
+        moved => {
+            if self.pressed && !self.dragged && (abs(self.mouse-x - self.pressed-x) > 4px || abs(self.mouse-y - self.pressed-y) > 4px) {
+                self.dragged = true;
+                root.drag();
+            }
+        }
+        double-clicked => {
+            if !self.dragged && !self.was-dragged {
+                root.expand();
+            }
+        }
+    }
+
+    body := HorizontalLayout {
+        padding: 12px;
+        // Clear of the progress bar.
+        padding-bottom: 15px;
+        spacing: 12px;
+        Art {
+            y: (parent.height - self.height) / 2;
+            width: 64px;
+            height: 64px;
+            source: root.art;
+        }
+
+        VerticalLayout {
+            alignment: center;
+            spacing: 2px;
+            // Clear of the buttons in the corner.
+            padding-right: 52px;
+            Text {
+                text: root.has-track ? root.song : "Nothing playing";
+                overflow: elide;
+                font-weight: 600;
+                color: Theme.text;
+            }
+
+            Text {
+                text: root.artists;
+                overflow: elide;
+                font-size: 12px;
+                color: Theme.text-secondary;
+            }
+
+            HorizontalLayout {
+                alignment: start;
+                spacing: 8px;
+                padding-top: 4px;
+                IconButton {
+                    icon: Icons.previous;
+                    icon-size: 20px;
+                    enabled: root.has-track;
+                    clicked => { root.previous(); }
+                }
+
+                Rectangle {
+                    width: 32px;
+                    height: 32px;
+                    if root.loading: Spinner {
+                        size: 24px;
+                    }
+                    if !root.loading: PlayButton {
+                        size: 32px;
+                        playing: root.playing;
+                        color: Theme.text;
+                        icon-color: Theme.text-inverse;
+                        clicked => { root.toggle-play(); }
+                    }
+                }
+
+                IconButton {
+                    icon: Icons.next;
+                    icon-size: 20px;
+                    enabled: root.has-track;
+                    clicked => { root.next(); }
+                }
+            }
+        }
+    }
+
+    HorizontalLayout {
+        x: parent.width - self.width - 6px;
+        y: 6px;
+        width: self.preferred-width;
+        height: self.preferred-height;
+        IconButton {
+            size: 28px;
+            icon: Icons.open-full;
+            icon-size: 16px;
+            clicked => { root.expand(); }
+        }
+
+        IconButton {
+            size: 28px;
+            icon: Icons.close;
+            icon-size: 16px;
+            clicked => { root.dismiss(); }
+        }
+    }
+
+    Rectangle {
+        y: parent.height - self.height;
+        height: 3px;
+        background: Theme.ink.with-alpha(0.1);
+        Rectangle {
+            x: 0;
+            width: parent.width * clamp(root.progress, 0, 1);
+            background: Theme.accent;
+        }
+    }
+}

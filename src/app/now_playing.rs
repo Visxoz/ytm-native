@@ -85,6 +85,7 @@ impl App {
         }
         // The same song again keeps its lyrics; light the line it starts at.
         self.show_lyric_line(position);
+        self.sync_mini();
     }
 
     /// Gives the overlay the length in clock time, which Windows advances the position by.
@@ -126,6 +127,7 @@ impl App {
             }
             let ui = app.ui();
             ui.set_np_art(image);
+            app.sync_mini();
             if let Some(color) = images::accent(&url, images::PLAYER) {
                 ui.set_np_accent(color);
                 app.set_artwork_accent(images::vivid(color));
