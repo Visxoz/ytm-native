@@ -2,11 +2,14 @@ import { Icons, Theme } from "../theme.slint";
 import { Api, TrackItem } from "../types.slint";
 import { Art } from "../widgets/art.slint";
 import { Icon } from "../widgets/buttons.slint";
+import { MenuDivider, MenuEntry, PopupMenu } from "../widgets/menu.slint";
 import { Equalizer } from "../widgets/spinner.slint";
 
 export component Link inherits Text {
     in property <bool> enabled: true;
     callback clicked();
+    /// At the pointer, in window coordinates, for the row's menu.
+    callback right-clicked(x: length, y: length);
     overflow: elide;
     color: touch.has-hover && root.enabled ? Theme.text : Theme.text-secondary;
     font-size: 13px;
@@ -14,6 +17,11 @@ export component Link inherits Text {
         enabled: root.enabled;
         mouse-cursor: root.enabled ? pointer : default;
         clicked => { root.clicked(); }
+        pointer-event(ev) => {
+            if ev.button == PointerEventButton.right && ev.kind == PointerEventKind.up {
+                root.right-clicked(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
+        }
     }
 }
 
@@ -32,177 +40,204 @@ export component TrackRow inherits Rectangle {
     background: root.hot ? Theme.hover : transparent;
     animate background { duration: Theme.fast; }
 
-    menu := ContextMenuArea {
-        Menu {
-            MenuItem {
-                title: "Play next";
-                activated => { Api.track-action("next", root.section, root.index); }
-            }
+    /// Where the menu was asked for, in window coordinates.
+    property <Point> menu-at;
 
-            MenuItem {
-                title: "Add to queue";
-                activated => { Api.track-action("queue", root.section, root.index); }
-            }
+    function open-menu(x: length, y: length) {
+        root.menu-at = { x: x, y: y };
+        menu.show();
+    }
 
-            if !root.track.local: MenuItem {
-                title: "Start radio";
-                activated => { Api.track-action("radio", root.section, root.index); }
-            }
+    menu := PopupMenu {
+        x: root.menu-at.x - root.absolute-position.x;
+        y: root.menu-at.y - root.absolute-position.y;
+        MenuEntry {
+            text: "Play next";
+            icon: Icons.play-next;
+            activated => { Api.track-action("next", root.section, root.index); }
+        }
 
-            if !root.track.local: MenuItem {
-                title: root.track.downloaded ? "Remove download" : "Download";
-                activated => {
-                    Api.track-action(root.track.downloaded ? "remove-download" : "download", root.section, root.index);
-                }
-            }
+        MenuEntry {
+            text: "Add to queue";
+            icon: Icons.add-to-queue;
+            activated => { Api.track-action("queue", root.section, root.index); }
+        }
 
-            if root.youtube: MenuSeparator { }
+        if !root.track.local: MenuEntry {
+            text: "Start radio";
+            icon: Icons.radio;
+            activated => { Api.track-action("radio", root.section, root.index); }
+        }
 
-            if root.youtube: MenuItem {
-                title: Api.rating-of(root.track.id) == 1 ? "Remove from liked songs" : "Like";
-                activated => { Api.rate(root.track.id, 1); }
-            }
-
-            if root.youtube: MenuItem {
-                title: Api.rating-of(root.track.id) == 2 ? "Remove dislike" : "Dislike";
-                activated => { Api.rate(root.track.id, 2); }
-            }
-
-            if root.youtube && root.track.id != Api.playing-id: MenuItem {
-                title: "Remove rating";
-                activated => { Api.rate(root.track.id, 0); }
-            }
-
-            if root.youtube: MenuItem {
-                title: "Save to playlist";
-                activated => { Api.save-to-playlist(root.track.id); }
-            }
-
-            MenuSeparator { }
-
-            MenuItem {
-                title: "Go to artist";
-                enabled: root.track.has-artist;
-                activated => { Api.track-action("artist", root.section, root.index); }
-            }
-
-            MenuItem {
-                title: "Go to album";
-                enabled: root.track.has-album;
-                activated => { Api.track-action("album", root.section, root.index); }
+        if !root.track.local: MenuEntry {
+            text: root.track.downloaded ? "Remove download" : "Download";
+            icon: root.track.downloaded ? Icons.delete : Icons.download;
+            activated => {
+                Api.track-action(root.track.downloaded ? "remove-download" : "download", root.section, root.index);
             }
         }
 
-        touch := TouchArea {
-            mouse-cursor: pointer;
-            clicked => { Api.play-track(root.section, root.index); }
+        if root.youtube: MenuDivider { }
+
+        if root.youtube: MenuEntry {
+            text: Api.rating-of(root.track.id) == 1 ? "Remove from liked songs" : "Like";
+            icon: Api.rating-of(root.track.id) == 1 ? Icons.thumb-up-filled : Icons.thumb-up;
+            active: Api.rating-of(root.track.id) == 1;
+            activated => { Api.rate(root.track.id, 1); }
+        }
+
+        if root.youtube: MenuEntry {
+            text: Api.rating-of(root.track.id) == 2 ? "Remove dislike" : "Dislike";
+            icon: Api.rating-of(root.track.id) == 2 ? Icons.thumb-down-filled : Icons.thumb-down;
+            active: Api.rating-of(root.track.id) == 2;
+            activated => { Api.rate(root.track.id, 2); }
+        }
+
+        if root.youtube && root.track.id != Api.playing-id: MenuEntry {
+            text: "Remove rating";
+            icon: Icons.close;
+            activated => { Api.rate(root.track.id, 0); }
+        }
+
+        if root.youtube: MenuEntry {
+            text: "Save to playlist";
+            icon: Icons.save-to-playlist;
+            activated => { Api.save-to-playlist(root.track.id); }
+        }
+
+        MenuDivider { }
+
+        MenuEntry {
+            text: "Go to artist";
+            icon: Icons.account;
+            enabled: root.track.has-artist;
+            activated => { Api.track-action("artist", root.section, root.index); }
+        }
+
+        MenuEntry {
+            text: "Go to album";
+            icon: Icons.album;
+            enabled: root.track.has-album;
+            activated => { Api.track-action("album", root.section, root.index); }
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { Api.play-track(root.section, root.index); }
+        pointer-event(ev) => {
+            if ev.button == PointerEventButton.right && ev.kind == PointerEventKind.up {
+                root.open-menu(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
+        }
+    }
+
+    HorizontalLayout {
+        padding-left: 16px;
+        padding-right: 16px;
+        spacing: 16px;
+
+        Rectangle {
+            width: 24px;
+            if root.playing && !root.hot: Equalizer {
+                active: Api.is-playing;
+            }
+            // No touch area of its own: one would steal the row's hover and
+            // make the row flicker between states. The row click plays.
+            if root.hot: Icon {
+                path: root.playing && Api.is-playing ? Icons.pause : Icons.play;
+                size: 18px;
+            }
+            if !root.playing && !root.hot: Text {
+                text: root.track.number;
+                font-size: 15px;
+                color: Theme.text-secondary;
+            }
         }
 
         HorizontalLayout {
-            padding-left: 16px;
-            padding-right: 16px;
-            spacing: 16px;
-
-            Rectangle {
-                width: 24px;
-                if root.playing && !root.hot: Equalizer {
-                    active: Api.is-playing;
-                }
-                // No touch area of its own: one would steal the row's hover and
-                // make the row flicker between states. The row click plays.
-                if root.hot: Icon {
-                    path: root.playing && Api.is-playing ? Icons.pause : Icons.play;
-                    size: 18px;
-                }
-                if !root.playing && !root.hot: Text {
-                    text: root.track.number;
+            spacing: 12px;
+            horizontal-stretch: 3;
+            // Zero preferred width so columns split by stretch alone and line up.
+            preferred-width: 0px;
+            min-width: 0px;
+            if !root.numbered: Art {
+                y: (parent.height - self.height) / 2;
+                width: 40px;
+                height: 40px;
+                source: root.track.art;
+            }
+            VerticalLayout {
+                alignment: center;
+                spacing: 2px;
+                Text {
+                    text: root.track.title;
+                    overflow: elide;
                     font-size: 15px;
-                    color: Theme.text-secondary;
+                    font-weight: 500;
+                    color: root.playing ? Theme.accent : Theme.text;
                 }
-            }
-
-            HorizontalLayout {
-                spacing: 12px;
-                horizontal-stretch: 3;
-                // Zero preferred width so columns split by stretch alone and line up.
-                preferred-width: 0px;
-                min-width: 0px;
-                if !root.numbered: Art {
-                    y: (parent.height - self.height) / 2;
-                    width: 40px;
-                    height: 40px;
-                    source: root.track.art;
-                }
-                VerticalLayout {
-                    alignment: center;
-                    spacing: 2px;
-                    Text {
-                        text: root.track.title;
-                        overflow: elide;
-                        font-size: 15px;
-                        font-weight: 500;
-                        color: root.playing ? Theme.accent : Theme.text;
+                // Only the text is a link, so the rest of the row still plays.
+                HorizontalLayout {
+                    alignment: start;
+                    spacing: 4px;
+                    if root.track.downloaded: Icon {
+                        y: (parent.height - self.height) / 2;
+                        path: Icons.downloaded;
+                        size: 14px;
+                        color: Theme.accent;
                     }
-                    // Only the text is a link, so the rest of the row still plays.
-                    HorizontalLayout {
-                        alignment: start;
-                        spacing: 4px;
-                        if root.track.downloaded: Icon {
-                            y: (parent.height - self.height) / 2;
-                            path: Icons.downloaded;
-                            size: 14px;
-                            color: Theme.accent;
-                        }
-                        Link {
-                            max-width: self.preferred-width;
-                            text: root.track.artists;
-                            enabled: root.track.has-artist;
-                            clicked => { Api.track-action("artist", root.section, root.index); }
-                        }
+                    Link {
+                        max-width: self.preferred-width;
+                        text: root.track.artists;
+                        enabled: root.track.has-artist;
+                        clicked => { Api.track-action("artist", root.section, root.index); }
+                        right-clicked(x, y) => { root.open-menu(x, y); }
                     }
                 }
             }
+        }
 
-            if root.show-album: HorizontalLayout {
-                horizontal-stretch: 2;
-                preferred-width: 0px;
-                min-width: 0px;
-                alignment: start;
-                Link {
-                    vertical-alignment: center;
-                    max-width: self.preferred-width;
-                    text: root.track.album;
-                    font-size: 14px;
-                    enabled: root.track.has-album;
-                    clicked => { Api.track-action("album", root.section, root.index); }
-                }
-            }
-
-            more := Rectangle {
-                width: 32px;
-                property <bool> has-hover: more-touch.has-hover;
-                opacity: root.hot ? 1 : 0;
-                animate opacity { duration: Theme.fast; }
-                Icon {
-                    path: Icons.more;
-                    size: 20px;
-                    color: more-touch.has-hover ? Theme.text : Theme.text-secondary;
-                }
-
-                more-touch := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => { menu.show({ x: more.x, y: more.y + more.height - 8px }); }
-                }
-            }
-
-            Text {
-                width: 44px;
-                text: root.track.duration;
-                color: Theme.text-secondary;
-                horizontal-alignment: right;
+        if root.show-album: HorizontalLayout {
+            horizontal-stretch: 2;
+            preferred-width: 0px;
+            min-width: 0px;
+            alignment: start;
+            Link {
                 vertical-alignment: center;
+                max-width: self.preferred-width;
+                text: root.track.album;
                 font-size: 14px;
+                enabled: root.track.has-album;
+                clicked => { Api.track-action("album", root.section, root.index); }
+                right-clicked(x, y) => { root.open-menu(x, y); }
             }
+        }
+
+        more := Rectangle {
+            width: 32px;
+            property <bool> has-hover: more-touch.has-hover;
+            opacity: root.hot ? 1 : 0;
+            animate opacity { duration: Theme.fast; }
+            Icon {
+                path: Icons.more;
+                size: 20px;
+                color: more-touch.has-hover ? Theme.text : Theme.text-secondary;
+            }
+
+            more-touch := TouchArea {
+                mouse-cursor: pointer;
+                clicked => { root.open-menu(self.absolute-position.x, self.absolute-position.y + self.height - 8px); }
+            }
+        }
+
+        Text {
+            width: 44px;
+            text: root.track.duration;
+            color: Theme.text-secondary;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+            font-size: 14px;
         }
     }
 }

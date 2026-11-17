@@ -1,7 +1,8 @@
-import { Theme } from "../theme.slint";
+import { Icons, Theme } from "../theme.slint";
 import { Api, CardItem } from "../types.slint";
 import { Art } from "../widgets/art.slint";
 import { PlayButton } from "../widgets/buttons.slint";
+import { MenuEntry, PopupMenu } from "../widgets/menu.slint";
 import { Layout } from "layout.slint";
 
 export component Card {
@@ -15,103 +16,119 @@ export component Card {
     property <length> art-size: root.width - 2 * Layout.card-padding;
     property <bool> hot: touch.has-hover || play-button.has-hover;
 
-    ContextMenuArea {
-        Menu {
-            MenuItem {
-                title: "Play";
-                activated => { Api.play-card(root.card.kind, root.card.id); }
-            }
+    /// Where the menu was asked for, in window coordinates.
+    property <Point> menu-at;
 
-            MenuItem {
-                title: "Start radio";
-                activated => { Api.card-radio(root.card.kind, root.card.id); }
-            }
+    menu := PopupMenu {
+        x: root.menu-at.x - root.absolute-position.x;
+        y: root.menu-at.y - root.absolute-position.y;
+        MenuEntry {
+            text: "Play";
+            icon: Icons.play;
+            activated => { Api.play-card(root.card.kind, root.card.id); }
         }
 
-        Rectangle {
-            border-radius: 8px;
-            background: root.hot ? Theme.elevated : transparent;
-            animate background { duration: Theme.normal; }
+        MenuEntry {
+            text: "Start radio";
+            icon: Icons.radio;
+            activated => { Api.card-radio(root.card.kind, root.card.id); }
         }
 
-        touch := TouchArea {
-            // Measured in window coordinates: the card itself moves with
-            // the carousel as it is dragged, so its own would cancel out.
-            property <length> pointer-x: self.absolute-position.x + self.mouse-x;
-            property <length> pressed-at;
-            property <bool> dragging;
-            mouse-cursor: self.dragging ? MouseCursor.grabbing : MouseCursor.pointer;
-            pointer-event(ev) => {
-                if ev.button != PointerEventButton.left {
-                    return;
-                }
-                if ev.kind == PointerEventKind.down {
-                    self.pressed-at = self.pointer-x;
-                } else if self.dragging {
-                    self.dragging = false;
-                    root.drag-ended();
-                } else if ev.kind == PointerEventKind.up {
-                    Api.navigate(root.card.kind, root.card.id);
-                }
+    }
+
+    Rectangle {
+        border-radius: 8px;
+        background: root.hot ? Theme.elevated : transparent;
+        animate background { duration: Theme.normal; }
+    }
+
+    touch := TouchArea {
+        // Measured in window coordinates: the card itself moves with
+        // the carousel as it is dragged, so its own would cancel out.
+        property <length> pointer-x: self.absolute-position.x + self.mouse-x;
+        property <length> pressed-at;
+        property <bool> dragging;
+        /// Pressed here: closing a menu takes the press, and its release alone isn't a click.
+        property <bool> held;
+        mouse-cursor: self.dragging ? MouseCursor.grabbing : MouseCursor.pointer;
+        pointer-event(ev) => {
+            if ev.button == PointerEventButton.right && ev.kind == PointerEventKind.up && !self.dragging {
+                root.menu-at = { x: self.pointer-x, y: self.absolute-position.y + self.mouse-y };
+                menu.show();
             }
-            moved => {
-                if self.pressed && (self.dragging || abs(self.pointer-x - self.pressed-at) > 6px) {
-                    self.dragging = true;
-                    root.dragged(self.pointer-x - self.pressed-at);
-                }
+            if ev.button != PointerEventButton.left {
+                return;
+            }
+            if ev.kind == PointerEventKind.down {
+                self.pressed-at = self.pointer-x;
+                self.held = true;
+                return;
+            }
+            if self.dragging {
+                self.dragging = false;
+                root.drag-ended();
+            } else if ev.kind == PointerEventKind.up && self.held {
+                Api.navigate(root.card.kind, root.card.id);
+            }
+            self.held = false;
+        }
+        moved => {
+            if self.pressed && (self.dragging || abs(self.pointer-x - self.pressed-at) > 6px) {
+                self.dragging = true;
+                root.dragged(self.pointer-x - self.pressed-at);
             }
         }
+    }
 
-        Art {
-            x: Layout.card-padding;
-            y: Layout.card-padding;
-            width: root.art-size;
-            height: root.art-size;
-            source: root.card.art;
-            round: root.card.round;
-            radius: 6px;
-            drop-shadow-blur: 16px;
-            drop-shadow-offset-y: 6px;
-            drop-shadow-color: #00000060;
+    Art {
+        x: Layout.card-padding;
+        y: Layout.card-padding;
+        width: root.art-size;
+        height: root.art-size;
+        source: root.card.art;
+        round: root.card.round;
+        radius: 6px;
+        drop-shadow-blur: 16px;
+        drop-shadow-offset-y: 6px;
+        drop-shadow-color: #00000060;
+    }
+
+    Rectangle {
+        x: Layout.card-padding + root.art-size - self.width - 8px;
+        y: Layout.card-padding + root.art-size - self.height - (root.hot ? 8px : 0px);
+        width: 48px;
+        height: 48px;
+        opacity: root.hot ? 1 : 0;
+        animate y, opacity {
+            duration: Theme.normal;
+            easing: ease-out;
+        }
+        play-button := PlayButton {
+            size: 48px;
+            clicked => { Api.play-card(root.card.kind, root.card.id); }
+        }
+    }
+
+    VerticalLayout {
+        x: Layout.card-padding;
+        y: Layout.card-padding + root.art-size + 8px;
+        width: root.art-size;
+        height: Layout.card-text - 4px;
+        spacing: 4px;
+        alignment: start;
+        Text {
+            text: root.card.title;
+            overflow: elide;
+            font-size: 15px;
+            font-weight: 600;
+            color: Theme.text;
         }
 
-        Rectangle {
-            x: Layout.card-padding + root.art-size - self.width - 8px;
-            y: Layout.card-padding + root.art-size - self.height - (root.hot ? 8px : 0px);
-            width: 48px;
-            height: 48px;
-            opacity: root.hot ? 1 : 0;
-            animate y, opacity {
-                duration: Theme.normal;
-                easing: ease-out;
-            }
-            play-button := PlayButton {
-                size: 48px;
-                clicked => { Api.play-card(root.card.kind, root.card.id); }
-            }
-        }
-
-        VerticalLayout {
-            x: Layout.card-padding;
-            y: Layout.card-padding + root.art-size + 8px;
-            width: root.art-size;
-            height: Layout.card-text - 4px;
-            spacing: 4px;
-            alignment: start;
-            Text {
-                text: root.card.title;
-                overflow: elide;
-                font-size: 15px;
-                font-weight: 600;
-                color: Theme.text;
-            }
-
-            Text {
-                text: root.card.subtitle;
-                overflow: elide;
-                font-size: 13px;
-                color: Theme.text-secondary;
-            }
+        Text {
+            text: root.card.subtitle;
+            overflow: elide;
+            font-size: 13px;
+            color: Theme.text-secondary;
         }
     }
 }

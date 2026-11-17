@@ -2,6 +2,7 @@ import { Icons, Theme } from "../theme.slint";
 import { Api } from "../types.slint";
 import { Art } from "../widgets/art.slint";
 import { IconButton, PlayButton } from "../widgets/buttons.slint";
+import { MenuEntry, PopupMenu } from "../widgets/menu.slint";
 import { Slider } from "../widgets/slider.slint";
 import { Spinner } from "../widgets/spinner.slint";
 
@@ -57,24 +58,46 @@ export component PlayerBar inherits Rectangle {
 
     height: Theme.player-bar;
 
-    ContextMenuArea {
+    /// Where the menu was asked for, in window coordinates.
+    property <Point> menu-at;
+
+    function open-menu(x: length, y: length) {
+        if root.has-track {
+            root.menu-at = { x: x, y: y };
+            menu.show();
+        }
+    }
+
+    menu := PopupMenu {
+        x: root.menu-at.x - root.absolute-position.x;
+        y: root.menu-at.y - root.absolute-position.y;
+        if Api.signed-in && !Api.playing-local: MenuEntry {
+            text: "Save to playlist";
+            icon: Icons.save-to-playlist;
+            activated => { Api.save-to-playlist(Api.playing-id); }
+        }
+
+        MenuEntry {
+            text: "Go to artist";
+            icon: Icons.account;
+            enabled: root.np-has-artist;
+            activated => { root.np-go-artist(); }
+        }
+
+        MenuEntry {
+            text: "Go to album";
+            icon: Icons.album;
+            enabled: root.np-has-album;
+            activated => { root.np-go-album(); }
+        }
+    }
+
+    TouchArea {
         x: 8px;
         width: parent.width * 0.3;
-        enabled: root.has-track;
-        Menu {
-            if Api.signed-in && !Api.playing-local: MenuItem {
-                title: "Save to playlist";
-                activated => { Api.save-to-playlist(Api.playing-id); }
-            }
-            MenuItem {
-                title: "Go to artist";
-                enabled: root.np-has-artist;
-                activated => { root.np-go-artist(); }
-            }
-            MenuItem {
-                title: "Go to album";
-                enabled: root.np-has-album;
-                activated => { root.np-go-album(); }
+        pointer-event(ev) => {
+            if ev.button == PointerEventButton.right && ev.kind == PointerEventKind.up {
+                root.open-menu(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
             }
         }
 
@@ -106,6 +129,11 @@ export component PlayerBar inherits Rectangle {
                     TouchArea {
                         mouse-cursor: root.np-has-album ? pointer : default;
                         clicked => { root.np-go-album(); }
+                        pointer-event(ev) => {
+                            if ev.button == PointerEventButton.right && ev.kind == PointerEventKind.up {
+                                root.open-menu(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                            }
+                        }
                     }
                 }
 
@@ -117,6 +145,11 @@ export component PlayerBar inherits Rectangle {
                     a-touch := TouchArea {
                         mouse-cursor: root.np-has-artist ? pointer : default;
                         clicked => { root.np-go-artist(); }
+                        pointer-event(ev) => {
+                            if ev.button == PointerEventButton.right && ev.kind == PointerEventKind.up {
+                                root.open-menu(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+                            }
+                        }
                     }
                 }
             }

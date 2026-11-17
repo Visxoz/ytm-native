@@ -1,0 +1,74 @@
+import { Theme } from "../theme.slint";
+import { Icon } from "buttons.slint";
+
+/// Lily's own context menu, drawn like the search dropdown rather than as the
+/// system's. It opens where its `x` and `y` put it, kept inside the window.
+export component PopupMenu inherits PopupWindow {
+    width: 240px;
+    Rectangle {
+        border-radius: 10px;
+        background: Theme.menu;
+        border-width: 1px;
+        border-color: Theme.divider;
+        drop-shadow-blur: 24px;
+        drop-shadow-offset-y: 8px;
+        drop-shadow-color: #000000a0;
+    }
+
+    VerticalLayout {
+        padding: 6px;
+        @children
+    }
+}
+
+export component MenuEntry {
+    in property <string> text;
+    /// Empty leaves the space, so the labels line up.
+    in property <string> icon;
+    in property <bool> enabled: true;
+    /// Draws the icon in the accent, for what is already on.
+    in property <bool> active;
+    callback activated();
+    height: 36px;
+
+    Rectangle {
+        border-radius: 6px;
+        background: touch.has-hover && root.enabled ? Theme.hover : transparent;
+    }
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 12px;
+        spacing: 12px;
+        Icon {
+            y: (parent.height - self.height) / 2;
+            path: root.icon;
+            size: 18px;
+            color: !root.enabled ? Theme.text-dim : root.active ? Theme.accent : touch.has-hover ? Theme.text : Theme.text-secondary;
+        }
+
+        Text {
+            text: root.text;
+            overflow: elide;
+            vertical-alignment: center;
+            font-size: 14px;
+            color: root.enabled ? Theme.text : Theme.text-dim;
+        }
+    }
+
+    touch := TouchArea {
+        enabled: root.enabled;
+        clicked => { root.activated(); }
+    }
+}
+
+export component MenuDivider {
+    height: 9px;
+    Rectangle {
+        x: 6px;
+        y: 4px;
+        width: parent.width - 12px;
+        height: 1px;
+        background: Theme.divider;
+    }
+}

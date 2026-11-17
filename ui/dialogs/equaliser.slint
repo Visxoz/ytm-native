@@ -1,5 +1,6 @@
-import { Theme } from "../theme.slint";
+import { Icons, Theme } from "../theme.slint";
 import { PillButton } from "../widgets/buttons.slint";
+import { MenuEntry, PopupMenu } from "../widgets/menu.slint";
 import { Slider } from "../widgets/slider.slint";
 import { Toggle } from "../widgets/toggle.slint";
 import { Dialog, SettingRow } from "dialog.slint";
@@ -24,11 +25,14 @@ export component EqualiserDialog inherits Dialog {
     SettingRow {
         label: "Preset";
         detail: "A starting point; the bands below fine-tune it.";
-        preset-menu := ContextMenuArea {
+        Rectangle {
             width: preset-button.preferred-width;
-            Menu {
-                for name[i] in root.eq-presets: MenuItem {
-                    title: name;
+            preset-menu := PopupMenu {
+                y: preset-button.y + preset-button.height + 4px;
+                for name[i] in root.eq-presets: MenuEntry {
+                    text: name;
+                    icon: i == root.eq-preset ? Icons.check : "";
+                    active: true;
                     activated => { root.set-eq-preset(i); }
                 }
             }
@@ -37,7 +41,7 @@ export component EqualiserDialog inherits Dialog {
                 y: (parent.height - self.height) / 2;
                 text: root.eq-preset >= 0 ? root.eq-presets[root.eq-preset] : "Custom";
                 small: true;
-                clicked => { preset-menu.show({ x: 0, y: self.y + self.height }); }
+                clicked => { preset-menu.show(); }
             }
         }
 
