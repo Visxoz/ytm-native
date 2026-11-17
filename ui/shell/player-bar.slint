@@ -62,6 +62,9 @@ export component PlayerBar inherits Rectangle {
 
     /// Where the menu was asked for, in window coordinates.
     property <Point> menu-at;
+    // Too narrow for the centre to clear everything on the right, so the
+    // quality badge goes and the volume slider shortens.
+    property <bool> narrow: root.width < 1270px;
 
     function open-menu(x: length, y: length) {
         if root.has-track {
@@ -162,25 +165,18 @@ export component PlayerBar inherits Rectangle {
                 }
             }
 
-            if !Api.playing-local && root.has-track: HorizontalLayout {
+            if !Api.playing-local && root.has-track && Api.signed-in && root.rating-buttons: HorizontalLayout {
                 cross-axis-alignment: center;
-                if Api.signed-in && root.rating-buttons: IconButton {
+                IconButton {
                     icon: Api.playing-rating == 2 ? Icons.thumb-down-filled : Icons.thumb-down;
                     color: Api.playing-rating == 2 ? Theme.text : Theme.text-secondary;
                     clicked => { Api.rate(Api.playing-id, 2); }
                 }
 
-                if Api.signed-in && root.rating-buttons: IconButton {
+                IconButton {
                     icon: Api.playing-rating == 1 ? Icons.thumb-up-filled : Icons.thumb-up;
                     color: Api.playing-rating == 1 ? Theme.text : Theme.text-secondary;
                     clicked => { Api.rate(Api.playing-id, 1); }
-                }
-
-                // Removing is in the menu, so a stray click can't lose the file.
-                IconButton {
-                    icon: Api.playing-downloaded ? Icons.downloaded : Icons.download;
-                    active: Api.playing-downloaded;
-                    clicked => { Api.download(Api.playing-id, false); }
                 }
             }
         }
@@ -188,7 +184,8 @@ export component PlayerBar inherits Rectangle {
 
     VerticalLayout {
         x: (parent.width - self.width) / 2;
-        width: min(640px, parent.width * 0.4);
+        // Narrows to clear the buttons on the right, down to what its controls need.
+        width: max(280px, min(640px, parent.width * 0.4, 2 * extras.x - parent.width - 32px));
         alignment: center;
         spacing: 4px;
         HorizontalLayout {
@@ -267,12 +264,12 @@ export component PlayerBar inherits Rectangle {
         }
     }
 
-    HorizontalLayout {
+    extras := HorizontalLayout {
         x: parent.width - self.width - 8px;
         width: self.preferred-width;
         spacing: 4px;
         cross-axis-alignment: center;
-        if root.np-quality != "": Rectangle {
+        if root.np-quality != "" && !root.narrow: Rectangle {
             width: badge.preferred-width;
             height: 20px;
             border-radius: 4px;
@@ -307,6 +304,14 @@ export component PlayerBar inherits Rectangle {
             width: 4px;
         }
 
+        // Not by the title, which it would cut short. Removing is in the
+        // menu, so a stray click can't lose the file.
+        if !Api.playing-local && root.has-track: IconButton {
+            icon: Api.playing-downloaded ? Icons.downloaded : Icons.download;
+            active: Api.playing-downloaded;
+            clicked => { Api.download(Api.playing-id, false); }
+        }
+
         IconButton {
             icon: Icons.lyrics;
             active: root.lyrics-active;
@@ -336,7 +341,7 @@ export component PlayerBar inherits Rectangle {
         }
 
         Slider {
-            width: 100px;
+            width: root.narrow ? 60px : 100px;
             value: root.muted ? 0 : root.volume;
             changed(v) => { root.set-volume(v); }
             seek(v) => { root.set-volume(v); }
