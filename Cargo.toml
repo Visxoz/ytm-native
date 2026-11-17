@@ -1,6 +1,6 @@
 [package]
 name = "lily"
-version = "0.1.16"
+version = "0.1.17"
 description = "Lily, a native YouTube Music client for Windows"
 # rustypipe is GPL-3.0, so the app is too.
 license = "GPL-3.0-only"
