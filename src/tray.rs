@@ -271,8 +271,14 @@ impl Tray {
 
 impl Drop for Tray {
     fn drop(&mut self) {
-        self.set_visible(false);
-        if let Some(handler) = HANDLER.take() {
+        // Can run during thread-local teardown, as the app outlives `main`.
+        let Ok(handler) = HANDLER.try_with(RefCell::take) else {
+            return;
+        };
+        if let Some(handler) = handler {
+            if handler.added.get() {
+                handler.notify(self.hwnd, NIM_DELETE);
+            }
             // SAFETY: the icon was loaded in `new` and is destroyed once.
             unsafe { DestroyIcon(handler.icon) };
         }
