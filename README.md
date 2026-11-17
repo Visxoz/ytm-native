@@ -15,6 +15,8 @@
 
 <a href="https://github.com/Visxoz/lily/releases/latest"><img src="docs/download.svg" width="300" alt="Download for Windows"></a>
 
+<sub>On an iPhone? There's <a href="https://github.com/Visxoz/Lily-ios">Lily for iPhone</a> too.</sub>
+
 <br>
 
 <img src="docs/hero.png" width="100%" alt="Lily in the black look, with an artist page, and synced lyrics tinted from the artwork">
@@ -71,6 +73,12 @@ Media keys, the Windows media overlay, Discord, Last.fm. Reopens on the song you
 </td>
 </tr>
 </table>
+
+## Also on iPhone
+
+<a href="https://github.com/Visxoz/Lily-ios"><img src="docs/ios.svg" width="100%" alt="Lily for iPhone: the same Lily, built again in Swift and SwiftUI, free for iOS 26 and later"></a>
+
+[Lily for iPhone](https://github.com/Visxoz/Lily-ios) is Lily built again in Swift and SwiftUI, on Apple's own audio engine, with the same orchid look, Premium streams, gapless playback, crossfade, equaliser and synced lyrics. It adds offline downloads, the lock screen and Control Center, your AirPods and a Liquid Glass tab bar. Add it to AltStore, SideStore or Feather for updates as they come, or grab it from its [releases](https://github.com/Visxoz/Lily-ios/releases/latest).
 
 ## Full screen
 

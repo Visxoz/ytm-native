@@ -1,0 +1,134 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="440" viewBox="0 0 1280 440">
+  <title>Lily for iPhone: a native YouTube Music client in Swift and SwiftUI, free for iOS 26 and later</title>
+  <defs>
+    <radialGradient id="glow" cx="80%" cy="50%" r="50%">
+      <stop offset="0" stop-color="#d65db1" stop-opacity="0.38"/>
+      <stop offset="0.5" stop-color="#d65db1" stop-opacity="0.08"/>
+      <stop offset="1" stop-color="#d65db1" stop-opacity="0"/>
+    </radialGradient>
+    <radialGradient id="glow2" cx="4%" cy="100%" r="48%">
+      <stop offset="0" stop-color="#9b5cff" stop-opacity="0.18"/>
+      <stop offset="1" stop-color="#9b5cff" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="1" stop-color="#f6c4ea"/>
+    </linearGradient>
+    <linearGradient id="art" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#f472d0"/>
+      <stop offset="1" stop-color="#9b5cff"/>
+    </linearGradient>
+    <!-- Now Playing takes on the artwork's colours. -->
+    <linearGradient id="np" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#5b2066"/>
+      <stop offset="0.55" stop-color="#26112f"/>
+      <stop offset="1" stop-color="#0f0913"/>
+    </linearGradient>
+    <radialGradient id="npglow" cx="28%" cy="18%" r="75%">
+      <stop offset="0" stop-color="#f472d0" stop-opacity="0.4"/>
+      <stop offset="1" stop-color="#f472d0" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ly" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#3a1550"/>
+      <stop offset="1" stop-color="#110a17"/>
+    </linearGradient>
+    <filter id="shadow" x="-40%" y="-20%" width="180%" height="150%">
+      <feGaussianBlur stdDeviation="16"/>
+    </filter>
+    <style>
+      text { font-family: 'SF Pro Display', -apple-system, 'Segoe UI Variable Display', 'Segoe UI', system-ui, Inter, 'Helvetica Neue', Arial, sans-serif; }
+      .pill { fill: #ffffff; fill-opacity: 0.07; stroke: #ffffff; stroke-opacity: 0.14; }
+      .pt { font-size: 17px; font-weight: 600; fill: #e8e8ec; }
+      .body { fill: #1b1b20; stroke: #ffffff; stroke-opacity: 0.16; stroke-width: 1.5; }
+    </style>
+  </defs>
+
+  <rect width="1280" height="440" rx="28" fill="#0c0a10"/>
+  <rect width="1280" height="440" rx="28" fill="url(#glow)"/>
+  <rect width="1280" height="440" rx="28" fill="url(#glow2)"/>
+  <rect x="0.5" y="0.5" width="1279" height="439" rx="27.5" fill="none" stroke="#ffffff" stroke-opacity="0.08"/>
+
+  <text x="90" y="92" font-size="15" font-weight="700" letter-spacing="3" fill="#f472d0">ALSO ON IPHONE</text>
+  <text x="86" y="164" font-size="72" font-weight="700" letter-spacing="-1.5" fill="url(#title)">Lily for iPhone</text>
+  <text x="90" y="210" font-size="26" font-weight="600" fill="#f0f0f3">The same Lily, built again in Swift and SwiftUI.</text>
+  <text x="90" y="246" font-size="19" fill="#9a9aa3">No web views, no wrappers. Free, for iOS 26 and later.</text>
+
+  <g>
+    <rect class="pill" x="90" y="276" width="232" height="40" rx="20"/>
+    <text class="pt" x="206" y="302" text-anchor="middle">Lock screen &amp; AirPods</text>
+    <rect class="pill" x="334" y="276" width="196" height="40" rx="20"/>
+    <text class="pt" x="432" y="302" text-anchor="middle">Offline downloads</text>
+    <rect class="pill" x="542" y="276" width="150" height="40" rx="20"/>
+    <text class="pt" x="617" y="302" text-anchor="middle">Liquid Glass</text>
+  </g>
+
+  <g>
+    <rect x="90" y="344" width="214" height="48" rx="24" fill="#d65db1"/>
+    <text x="197" y="375" text-anchor="middle" font-size="18" font-weight="700" fill="#ffffff">Get it on GitHub  →</text>
+    <text x="324" y="375" font-size="17" fill="#9a9aa3">or add it to AltStore, SideStore or Feather</text>
+  </g>
+
+  <!-- Behind: the lyrics, as the app shows them, the current line lit. -->
+  <g transform="translate(852 72) rotate(-7 84 172)">
+    <rect x="10" y="26" width="148" height="320" rx="30" fill="#000000" opacity="0.6" filter="url(#shadow)"/>
+    <rect class="body" width="168" height="344" rx="31"/>
+    <rect x="6" y="6" width="156" height="332" rx="26" fill="url(#ly)"/>
+    <rect x="6" y="6" width="156" height="332" rx="26" fill="url(#npglow)" opacity="0.6"/>
+    <rect x="56" y="15" width="56" height="16" rx="8" fill="#000000"/>
+    <rect x="20" y="50" width="36" height="36" rx="7" fill="url(#art)"/>
+    <rect x="64" y="57" width="62" height="8" rx="4" fill="#ffffff" fill-opacity="0.85"/>
+    <rect x="64" y="71" width="40" height="6" rx="3" fill="#ffffff" fill-opacity="0.45"/>
+    <rect x="20" y="114" width="104" height="10" rx="5" fill="#ffffff" fill-opacity="0.3"/>
+    <rect x="20" y="144" width="88" height="10" rx="5" fill="#ffffff" fill-opacity="0.3"/>
+    <rect x="20" y="172" width="126" height="14" rx="7" fill="#ffffff"/>
+    <rect x="20" y="206" width="98" height="10" rx="5" fill="#ffffff" fill-opacity="0.5"/>
+    <rect x="20" y="236" width="76" height="10" rx="5" fill="#ffffff" fill-opacity="0.5"/>
+    <rect x="20" y="266" width="114" height="10" rx="5" fill="#ffffff" fill-opacity="0.5"/>
+    <rect x="20" y="296" width="66" height="10" rx="5" fill="#ffffff" fill-opacity="0.5"/>
+  </g>
+
+  <!-- In front: Now Playing, in the artwork's colours. -->
+  <g transform="translate(1000 30)">
+    <rect x="12" y="30" width="164" height="360" rx="34" fill="#000000" opacity="0.7" filter="url(#shadow)"/>
+    <rect class="body" width="188" height="388" rx="34"/>
+    <rect x="6" y="6" width="176" height="376" rx="29" fill="url(#np)"/>
+    <rect x="6" y="6" width="176" height="376" rx="29" fill="url(#npglow)"/>
+    <rect x="64" y="16" width="60" height="18" rx="9" fill="#000000"/>
+
+    <rect x="26" y="56" width="136" height="136" rx="14" fill="url(#art)"/>
+    <!-- The lily from the app's icon. -->
+    <g transform="translate(27.5 56.4) scale(0.13)">
+      <path fill="none" stroke="#ffffff" stroke-opacity="0.92" stroke-width="30" stroke-linecap="round" stroke-linejoin="round" d="M 478 845 C 494 786 500 726 498 677 C 520 674 543 669 564 661 C 644 635 716 585 753 518 C 774 479 813 474 844 503 C 826 431 778 380 729 392 C 688 401 629 548 564 661 M 476 655 C 374 627 290 553 265 458 C 255 415 218 401 180 420 C 215 357 273 317 319 341 C 363 364 405 578 476 655 M 474 536 C 449 459 429 340 425 225 M 503 528 C 514 439 536 320 565 213 M 532 540 C 579 469 631 374 690 283"/>
+      <path fill="#ffffff" fill-opacity="0.92" d="M 390 225 A 35 35 0 1 0 460 225 A 35 35 0 1 0 390 225 Z M 530 213 A 35 35 0 1 0 600 213 A 35 35 0 1 0 530 213 Z M 655 283 A 35 35 0 1 0 725 283 A 35 35 0 1 0 655 283 Z"/>
+    </g>
+
+    <rect x="26" y="212" width="100" height="10" rx="5" fill="#ffffff" fill-opacity="0.92"/>
+    <rect x="26" y="230" width="64" height="8" rx="4" fill="#ffffff" fill-opacity="0.5"/>
+
+    <rect x="26" y="258" width="136" height="4" rx="2" fill="#ffffff" fill-opacity="0.2"/>
+    <rect x="26" y="258" width="56" height="4" rx="2" fill="#ffffff" fill-opacity="0.9"/>
+    <circle cx="82" cy="260" r="6" fill="#ffffff"/>
+    <rect x="26" y="272" width="22" height="6" rx="3" fill="#ffffff" fill-opacity="0.35"/>
+    <rect x="140" y="272" width="22" height="6" rx="3" fill="#ffffff" fill-opacity="0.35"/>
+
+    <g fill="#ffffff">
+      <rect x="39" y="301" width="3.5" height="22" rx="1.5"/>
+      <path d="M 60 301 L 44 312 L 60 323 Z"/>
+      <circle cx="94" cy="312" r="24"/>
+      <path d="M 128 301 L 144 312 L 128 323 Z"/>
+      <rect x="145.5" y="301" width="3.5" height="22" rx="1.5"/>
+    </g>
+    <g fill="#2a1233">
+      <rect x="86" y="302" width="5" height="20" rx="1.5"/>
+      <rect x="97" y="302" width="5" height="20" rx="1.5"/>
+    </g>
+
+    <!-- The Liquid Glass tab bar. -->
+    <rect x="22" y="342" width="144" height="32" rx="16" fill="#ffffff" fill-opacity="0.1" stroke="#ffffff" stroke-opacity="0.24"/>
+    <rect x="28" y="346" width="36" height="24" rx="12" fill="#ffffff" fill-opacity="0.14"/>
+    <circle cx="46" cy="358" r="4.5" fill="#f472d0"/>
+    <circle cx="78" cy="358" r="4.5" fill="#ffffff" fill-opacity="0.55"/>
+    <circle cx="110" cy="358" r="4.5" fill="#ffffff" fill-opacity="0.55"/>
+    <circle cx="142" cy="358" r="4.5" fill="#ffffff" fill-opacity="0.55"/>
+  </g>
+</svg>
