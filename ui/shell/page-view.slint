@@ -3,11 +3,13 @@ import { Api, RowItem } from "../types.slint";
 import { PageRow } from "../page/page-row.slint";
 import { PillButton, PlayButton } from "../widgets/buttons.slint";
 import { ListView } from "../widgets/list.slint";
-import { Spinner } from "../widgets/spinner.slint";
+import { PagePlaceholder } from "../widgets/skeleton.slint";
 
 export component PageView inherits Rectangle {
     in property <[RowItem]> rows;
     in property <bool> page-loading;
+    /// What the loading page looks like: see `PagePlaceholder`.
+    in property <string> page-shape;
     in property <string> page-error;
     in property <string> page-title;
     in property <bool> page-can-play;
@@ -32,15 +34,16 @@ export component PageView inherits Rectangle {
         animate background { duration: 500ms; }
     }
 
+    // Beneath the page, and kept while the page fades in over it.
+    if (root.page-loading || content.opacity < 1) && root.page-error == "": PagePlaceholder {
+        shape: root.page-shape;
+        loading: root.page-loading;
+    }
+
     content := Rectangle {
         opacity: root.page-loading || root.page-error != "" ? 0 : 1;
         visible: self.opacity > 0;
-        y: root.page-loading ? 16px : 0px;
         animate opacity { duration: 260ms; }
-        animate y {
-            duration: 320ms;
-            easing: ease-out;
-        }
         list := ListView {
             width: 100%;
             height: 100%;
@@ -57,7 +60,7 @@ export component PageView inherits Rectangle {
         y: 0;
         height: 64px;
         background: Theme.tint(root.tint.darker(0.35));
-        opacity: root.page-title != "" && -root.page-scroll > 280px ? 1 : 0;
+        opacity: root.page-title != "" && -root.page-scroll > 280px && !root.page-loading ? 1 : 0;
         visible: self.opacity > 0;
         animate opacity { duration: Theme.normal; }
         TouchArea { }
@@ -82,9 +85,6 @@ export component PageView inherits Rectangle {
         }
     }
 
-    if root.page-loading: Spinner {
-        size: 40px;
-    }
     if !root.page-loading && root.page-error != "": VerticalLayout {
         alignment: center;
         spacing: 20px;

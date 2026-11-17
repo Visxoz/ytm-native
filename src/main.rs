@@ -340,6 +340,7 @@ fn main() {
             let Some(ui) = weak.upgrade() else { return };
             let minimized = is_minimized(&ui);
             let was = was_minimized.replace(minimized);
+            ui.global::<Api>().set_minimised(minimized);
             if minimized && !was {
                 // The patched renderer drops its GPU surface on this frame. Asked
                 // of winit, as Slint drops its own requests while one is pending.

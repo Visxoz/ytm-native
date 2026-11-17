@@ -1,7 +1,7 @@
 import { Theme } from "../theme.slint";
 import { Lyrics } from "../panel/lyrics.slint";
 import { Art } from "../widgets/art.slint";
-import { Spinner } from "../widgets/spinner.slint";
+import { LyricsPlaceholder } from "../widgets/skeleton.slint";
 
 export component FullPlayer inherits Rectangle {
     in property <image> art;
@@ -85,8 +85,10 @@ export component FullPlayer inherits Rectangle {
 
         Rectangle {
             horizontal-stretch: 1;
-            if root.lyrics-loading: Spinner {
-                size: 32px;
+            if root.lyrics-loading: LyricsPlaceholder {
+                x: (parent.width - self.width) / 2;
+                width: min(parent.width, 800px);
+                line-size: 34px;
             }
             // Lines much wider than this are hard to follow.
             if !root.lyrics-loading: Lyrics {

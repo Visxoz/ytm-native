@@ -2,7 +2,7 @@ import { Icons, Theme } from "../theme.slint";
 import { Api, QueueItem } from "../types.slint";
 import { Icon, IconButton, PillGroup } from "../widgets/buttons.slint";
 import { ListView } from "../widgets/list.slint";
-import { Spinner } from "../widgets/spinner.slint";
+import { LyricsPlaceholder } from "../widgets/skeleton.slint";
 import { Lyrics } from "lyrics.slint";
 import { Drag, PanelAction, QueueRow } from "queue.slint";
 
@@ -196,9 +196,7 @@ export component SidePanel inherits Rectangle {
             }
             if root.tab == 1: Rectangle {
                 vertical-stretch: 1;
-                if root.lyrics-loading: Spinner {
-                    size: 32px;
-                }
+                if root.lyrics-loading: LyricsPlaceholder { }
                 if !root.lyrics-loading: Lyrics {
                     lines: root.lyrics;
                     synced: root.lyrics-synced;

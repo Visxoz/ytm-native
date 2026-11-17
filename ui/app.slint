@@ -58,6 +58,7 @@ export component AppWindow inherits Window {
 
     in property <[RowItem]> rows;
     in property <bool> page-loading;
+    in property <string> page-shape;
     in property <string> page-error;
     in property <string> page-title;
     in property <bool> page-can-play;
@@ -405,6 +406,7 @@ export component AppWindow inherits Window {
                     visible: !root.full-player;
                     rows: root.rows;
                     page-loading: root.page-loading;
+                    page-shape: root.page-shape;
                     page-error: root.page-error;
                     page-title: root.page-title;
                     page-can-play: root.page-can-play;

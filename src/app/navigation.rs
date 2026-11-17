@@ -38,6 +38,24 @@ impl App {
         };
         self.update_nav(&ui);
         ui.invoke_close_search();
+        let signed_in = self.state.borrow().signed_in;
+        ui.set_page_shape(
+            match route {
+                Route::Album(_) => "album",
+                // Song lists with a header, as a playlist's.
+                Route::Playlist(_) | Route::History | Route::LocalFiles | Route::Downloads => {
+                    "playlist"
+                }
+                Route::Artist(_) => "artist",
+                Route::Genre(_) => "genre",
+                Route::Home if signed_in => "home",
+                Route::Home => "trending",
+                Route::Explore => "chips",
+                Route::Library => "grid",
+                Route::Search(_) => "search",
+            }
+            .into(),
+        );
         ui.set_page_loading(true);
         ui.set_page_error(SharedString::new());
         match &route {
@@ -45,7 +63,6 @@ impl App {
             _ => ui.set_search_text(SharedString::new()),
         }
 
-        let signed_in = self.state.borrow().signed_in;
         if route == Route::Library && !signed_in {
             ui.set_page_loading(false);
             ui.set_page_error("Sign in to see your playlists, albums and artists.".into());

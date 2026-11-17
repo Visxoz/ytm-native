@@ -2,7 +2,7 @@ import { Icons, Theme } from "../theme.slint";
 import { PlaylistChoice } from "../types.slint";
 import { Icon } from "../widgets/buttons.slint";
 import { ListView } from "../widgets/list.slint";
-import { Spinner } from "../widgets/spinner.slint";
+import { ListPlaceholder } from "../widgets/skeleton.slint";
 import { Dialog } from "dialog.slint";
 
 export component PlaylistPicker inherits Dialog {
@@ -15,10 +15,7 @@ export component PlaylistPicker inherits Dialog {
     dialog-width: 420px;
     open: root.picker-open;
     close => { root.picker-open = false; }
-    if root.picker-loading: Rectangle {
-        height: 64px;
-        Spinner { }
-    }
+    if root.picker-loading: ListPlaceholder { }
     if !root.picker-loading && root.playlist-choices.length == 0: Text {
         text: "You have no playlists of your own yet.";
         color: Theme.text-secondary;

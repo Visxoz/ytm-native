@@ -1,0 +1,208 @@
+import { Theme } from "../theme.slint";
+import { Api } from "../types.slint";
+import { Layout } from "../page/layout.slint";
+
+/// Shown once a load has taken 150 ms, so quick ones don't flash.
+/// A Rectangle, so it fills its parent.
+component Placeholder inherits Rectangle {
+    in property <bool> loading: true;
+    property <bool> due;
+    out property <float> pulse: root.due && !Api.minimised ? 0.5 - 0.5 * cos(mod(animation-tick() / 1600ms, 1) * 360deg) : 0;
+    opacity: root.due && root.loading ? 1 : 0;
+    clip: true;
+    animate opacity { duration: 260ms; }
+    Timer {
+        interval: 150ms;
+        running: !root.due && root.loading;
+        triggered => { root.due = true; }
+    }
+    @children
+}
+
+component Block inherits Rectangle {
+    in property <float> pulse;
+    border-radius: 4px;
+    background: Theme.ink.with-alpha(0.06 + 0.05 * root.pulse);
+}
+
+/// A page's shape, placed as `PageRow` places what replaces it.
+export component PagePlaceholder inherits Placeholder {
+    /// "album", "playlist", "artist", "genre", "home", "trending", "chips",
+    /// "grid" or "search".
+    in property <string> shape;
+    property <length> pad: Theme.page-padding;
+    property <length> inner: root.width - 2 * root.pad;
+    property <bool> numbered: root.shape == "album";
+    property <bool> listed: root.numbered || root.shape == "playlist";
+    property <bool> played: root.listed || root.shape == "artist";
+    property <bool> carousel: root.shape == "home" || root.shape == "genre";
+    property <bool> chips: root.shape == "chips";
+    property <bool> grid: root.shape == "grid";
+    property <bool> songs: !root.carousel && !root.chips && !root.grid;
+    property <bool> greeted: root.shape == "home" || root.shape == "trending";
+    // Search's top result, titled, above its songs.
+    property <bool> top-result: root.shape == "search";
+    // A section title before the first row.
+    property <bool> titled: !root.carousel && !root.listed;
+    property <length> art-height: root.listed ? Layout.header-height
+        : root.shape == "artist" ? Layout.banner-height : root.shape == "genre" ? 160px : 0;
+    property <length> header: root.art-height
+        + (root.played ? Layout.actions-height : root.shape == "genre" ? 8px : 0)
+        + (root.listed ? 52px : 0) + (root.greeted ? 76px : 0) + (root.titled ? 68px : 0)
+        + (root.top-result ? 68px + Layout.top-height : 0);
+    property <length> gap: root.chips ? Layout.chip-gap : Layout.card-gap;
+    property <length> cell: root.chips ? (root.inner - (root.columns - 1) * Layout.chip-gap) / root.columns
+        : root.grid ? Layout.card-cell(root.inner) : Layout.card-width;
+    property <int> columns: root.chips ? Layout.chip-columns(root.inner)
+        : root.grid ? Layout.card-columns(root.inner)
+        : root.carousel ? root.inner / (Layout.card-width + Layout.card-gap) + 1 : 0;
+    property <length> step: root.chips ? Layout.chip-height + Layout.chip-gap
+        : root.grid ? Layout.card-height(root.cell) + Layout.card-gap
+        : root.carousel ? 68px + Layout.card-height(Layout.card-width) + 8px : 56px;
+    property <int> count: max(0, (root.height - root.header) / root.step + 1);
+    property <length> title-x: root.listed ? root.pad + 256px : root.pad;
+    // Past the number column, then the art unless numbered.
+    property <length> text-x: root.pad + (root.numbered ? 56px : 108px);
+
+    if root.listed: Block {
+        x: root.pad;
+        y: Layout.header-height - 232px - 24px;
+        width: 232px;
+        height: 232px;
+        border-radius: 6px;
+        pulse: root.pulse;
+    }
+    if root.art-height > 0: Block {
+        x: root.title-x;
+        // Lower with no line below it, as on Genre's.
+        y: root.art-height - (root.played ? 96px : 74px);
+        width: min(360px, (root.width - self.x - root.pad) * 0.6);
+        height: 44px;
+        pulse: root.pulse;
+    }
+    if root.played: Block {
+        x: root.title-x;
+        y: root.art-height - 40px;
+        width: min(200px, (root.width - self.x - root.pad) * 0.4);
+        height: 14px;
+        pulse: root.pulse;
+    }
+    if root.played: Block {
+        x: root.pad;
+        y: root.art-height + (Layout.actions-height - self.height) / 2;
+        width: 56px;
+        height: 56px;
+        border-radius: 28px;
+        pulse: root.pulse;
+    }
+    if root.greeted: Block {
+        x: root.pad;
+        y: 38px;
+        width: 280px;
+        height: 24px;
+        pulse: root.pulse;
+    }
+    if root.top-result: Block {
+        x: root.pad;
+        y: 36px;
+        width: 200px;
+        height: 18px;
+        pulse: root.pulse;
+    }
+    if root.top-result: Block {
+        x: root.pad;
+        y: 68px + 12px;
+        width: min(root.inner, 520px);
+        height: Layout.top-height - 36px;
+        border-radius: 8px;
+        pulse: root.pulse;
+    }
+    if root.top-result: Block {
+        x: root.pad + 20px;
+        y: 68px + 12px + 20px;
+        width: 96px;
+        height: 96px;
+        border-radius: 6px;
+        pulse: root.pulse;
+    }
+    if root.titled: Block {
+        x: root.pad;
+        y: root.header - 32px;
+        width: 200px;
+        height: 18px;
+        pulse: root.pulse;
+    }
+
+    for i in root.count: Rectangle {
+        // Set, as a sized element is otherwise centred.
+        x: 0;
+        y: root.header + i * root.step;
+        height: root.step;
+        // Where a carousel clips its cards.
+        width: root.carousel ? root.width - root.pad + Layout.card-padding : root.width;
+        clip: root.carousel;
+        if root.carousel: Block {
+            x: root.pad;
+            y: 36px;
+            width: 200px;
+            height: 18px;
+            pulse: root.pulse;
+        }
+        for c in root.columns: Block {
+            x: root.pad + c * (root.cell + root.gap);
+            y: root.chips ? 0 : (root.carousel ? 68px : 0) + Layout.card-padding;
+            width: root.chips ? root.cell : root.cell - 2 * Layout.card-padding;
+            height: root.chips ? Layout.chip-height : self.width;
+            border-radius: root.chips ? 8px : 6px;
+            pulse: root.pulse;
+        }
+        if root.songs && !root.numbered: Block {
+            x: root.pad + 56px;
+            y: 8px;
+            width: 40px;
+            height: 40px;
+            pulse: root.pulse;
+        }
+        if root.songs: Block {
+            x: root.text-x;
+            y: 12px;
+            width: (root.width - self.x - root.pad) * (0.3 + 0.08 * mod(i * 5, 4));
+            height: 14px;
+            pulse: root.pulse;
+        }
+        if root.songs: Block {
+            x: root.text-x;
+            y: 32px;
+            width: (root.width - self.x - root.pad) * 0.18;
+            height: 12px;
+            pulse: root.pulse;
+        }
+    }
+}
+
+export component LyricsPlaceholder inherits Placeholder {
+    in property <length> line-size: 22px;
+    property <[float]> widths: [0.72, 0.5, 0.84, 0.62, 0.4, 0.78, 0.56, 0.68, 0.46, 0.8];
+    for share[i] in root.widths: Block {
+        x: 24px;
+        // The lyrics' padding, then a line and its gap each.
+        y: 16px + i * (root.line-size * 1.33 + 12px) + root.line-size * 0.2;
+        width: (root.width - 48px) * share;
+        height: root.line-size * 0.9;
+        pulse: root.pulse;
+    }
+}
+
+/// The playlist picker's rows.
+export component ListPlaceholder inherits Placeholder {
+    property <length> row-height: 44px;
+    property <int> rows: 5;
+    height: root.rows * root.row-height;
+    for i in root.rows: Block {
+        x: 12px;
+        y: i * root.row-height + (root.row-height - self.height) / 2;
+        width: (root.width - 24px) * (0.45 + 0.1 * mod(i * 3, 4));
+        height: 14px;
+        pulse: root.pulse;
+    }
+}

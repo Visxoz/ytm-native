@@ -107,6 +107,8 @@ export global Api {
     /// Advanced a few times a second while playing; drives the equalisers
     /// without repainting every frame.
     in property <int> eq-phase;
+    /// Minimised or in the tray: stills the placeholders' pulse.
+    in property <bool> minimised;
 
     /// The rating known for `id`: only the playing song's is.
     public pure function rating-of(id: string) -> int {
