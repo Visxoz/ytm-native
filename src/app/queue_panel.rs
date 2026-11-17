@@ -160,7 +160,7 @@ impl App {
                 return;
             };
             let current = state.queue.current_index() == Some(index);
-            queue_item(track, current, false, false)
+            queue_item(track, &state.downloads, current, false, false)
         };
         self.queue_model.insert(index, item);
         if let Some(url) = art {
@@ -193,7 +193,7 @@ impl App {
                 let Some(track) = state.queue.get(i) else {
                     continue;
                 };
-                let (item, art) = queue_item(track, false, true, false);
+                let (item, art) = queue_item(track, &state.downloads, false, true, false);
                 missing.extend(art.map(|url| (i, url)));
                 self.queue_model.insert(i, item);
                 if let Some(anchor) = selection.anchor.as_mut()

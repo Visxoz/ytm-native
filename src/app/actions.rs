@@ -3,6 +3,15 @@ use std::{collections::HashSet, rc::Rc};
 use super::App;
 use crate::api::{CardKind, QueueMode, Route, Section, Track};
 
+fn card_kind(kind: &str) -> Option<CardKind> {
+    match kind {
+        "album" => Some(CardKind::Album),
+        "playlist" => Some(CardKind::Playlist),
+        "artist" => Some(CardKind::Artist),
+        _ => None,
+    }
+}
+
 impl App {
     fn section_track(&self, section: usize, index: usize) -> Option<Track> {
         match self.state.borrow().page.sections.get(section)? {
@@ -186,9 +195,8 @@ impl App {
         );
     }
 
-    pub(super) fn play_song_card(self: &Rc<Self>, id: &str) {
-        let track = self
-            .state
+    fn song_card(&self, id: &str) -> Option<Track> {
+        self.state
             .borrow()
             .page
             .sections
@@ -199,8 +207,11 @@ impl App {
                     .find(|c| c.id == id)
                     .and_then(|c| c.track.clone()),
                 Section::Tracks { .. } => None,
-            });
-        if let Some(track) = track {
+            })
+    }
+
+    pub(super) fn play_song_card(self: &Rc<Self>, id: &str) {
+        if let Some(track) = self.song_card(id) {
             self.play_with_radio(track);
         }
     }
@@ -210,11 +221,8 @@ impl App {
             self.play_song_card(&id);
             return;
         }
-        let kind = match kind {
-            "album" => CardKind::Album,
-            "playlist" => CardKind::Playlist,
-            "artist" => CardKind::Artist,
-            _ => return,
+        let Some(kind) = card_kind(kind) else {
+            return;
         };
         if radio && kind == CardKind::Playlist {
             self.play_radio(format!("RDAMPL{id}"));
@@ -232,6 +240,44 @@ impl App {
                 Err(e) => app.toast(format!("Couldn't load: {e}")),
             },
         );
+    }
+
+    pub(super) fn download_card(self: &Rc<Self>, kind: &str, id: String) {
+        if kind == "song" {
+            if let Some(track) = self.song_card(&id) {
+                self.download(vec![track]);
+            }
+            return;
+        }
+        let Some(kind) = card_kind(kind) else {
+            return;
+        };
+        let api = self.api.clone();
+        self.spawn(
+            async move { api.card_tracks(kind, &id).await },
+            |app, result| match result {
+                Ok(tracks) => app.download(tracks),
+                Err(e) => app.toast(format!("Couldn't load: {e}")),
+            },
+        );
+    }
+
+    /// A song in the queue, from its row or the player bar.
+    pub(super) fn download_queued(self: &Rc<Self>, id: &str, remove: bool) {
+        if remove {
+            self.remove_download(id);
+            return;
+        }
+        let track = self
+            .state
+            .borrow()
+            .queue
+            .items()
+            .find(|t| t.id == id)
+            .cloned();
+        if let Some(track) = track {
+            self.download(vec![track]);
+        }
     }
 
     pub(super) fn track_action(self: &Rc<Self>, action: &str, section: usize, index: usize) {

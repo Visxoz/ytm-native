@@ -101,6 +101,12 @@ export component QueueRow inherits Rectangle {
             }
         }
 
+        if !root.many && !root.item.local: MenuEntry {
+            text: root.item.downloaded ? "Remove download" : "Download";
+            icon: root.item.downloaded ? Icons.delete : Icons.download;
+            activated => { Api.download(root.item.id, root.item.downloaded); }
+        }
+
         if root.youtube: MenuDivider { }
 
         if root.youtube: MenuEntry {

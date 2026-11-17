@@ -11,7 +11,7 @@ use slint::{ComponentHandle, Model};
 
 use super::{App, page::track_list_page};
 use crate::{
-    RowKind,
+    Api as ApiGlobal, RowKind,
     api::{self, Route, Track},
     downloads::Saved,
     local,
@@ -54,19 +54,21 @@ impl App {
     /// Queues `tracks` to download one after another, skipping those
     /// downloaded or on their way.
     pub(super) fn download(self: &Rc<Self>, tracks: Vec<Track>) {
-        let added = {
+        let (added, waiting) = {
             let mut state = self.state.borrow_mut();
             let before = state.download_queue.len();
+            let mut waiting = false;
             for track in tracks {
-                let known = state.downloads.contains(&track.id)
-                    || state.download_queue.iter().any(|t| t.id == track.id);
-                if !known && api::is_video_id(&track.id) {
+                if state.download_queue.iter().any(|t| t.id == track.id) {
+                    waiting = true;
+                } else if !state.downloads.contains(&track.id) && api::is_video_id(&track.id) {
                     state.download_queue.push_back(track);
                 }
             }
-            state.download_queue.len() - before
+            (state.download_queue.len() - before, waiting)
         };
         match added {
+            0 if waiting => self.toast("Already downloading"),
             0 => self.toast("Already downloaded"),
             1 => self.toast("Downloading the song"),
             n => self.toast(format!("Downloading {}", api::songs(n as u64))),
@@ -150,9 +152,20 @@ impl App {
         self.refresh_downloads_page();
     }
 
-    /// Marks the rows shown as downloaded or not, after one changed.
+    /// Marks the rows and the playing song as downloaded or not, after one changed.
     fn show_downloaded(&self) {
         let state = self.state.borrow();
+        let ui = self.ui();
+        let api = ui.global::<ApiGlobal>();
+        api.set_playing_downloaded(state.downloads.contains(&api.get_playing_id()));
+        for i in 0..self.queue_model.row_count() {
+            if let Some(mut item) = self.queue_model.row_data(i) {
+                let downloaded = state.downloads.contains(&item.id);
+                if std::mem::replace(&mut item.downloaded, downloaded) != downloaded {
+                    self.queue_model.set_row_data(i, item);
+                }
+            }
+        }
         let header = state.page.header_tracks();
         let all = !header.is_empty() && header.iter().all(|t| state.downloads.contains(&t.id));
         for i in 0..self.rows.row_count() {

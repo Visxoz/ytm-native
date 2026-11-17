@@ -34,6 +34,11 @@ export component Card {
             activated => { Api.card-radio(root.card.kind, root.card.id); }
         }
 
+        if root.card.kind == "song" || root.card.kind == "album" || root.card.kind == "playlist": MenuEntry {
+            text: "Download";
+            icon: Icons.download;
+            activated => { Api.card-download(root.card.kind, root.card.id); }
+        }
     }
 
     Rectangle {

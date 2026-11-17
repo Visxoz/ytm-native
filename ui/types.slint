@@ -65,6 +65,7 @@ export struct QueueItem {
     /// Picked with Ctrl- or Shift-click.
     selected: bool,
     local: bool,
+    downloaded: bool,
 }
 
 export struct AccentChoice {
@@ -88,6 +89,9 @@ export global Api {
     callback track-action(action: string, section: int, index: int);
     callback play-card(kind: string, id: string);
     callback card-radio(kind: string, id: string);
+    callback card-download(kind: string, id: string);
+    /// Downloads a song in the queue, or removes its download.
+    callback download(id: string, remove: bool);
     callback header-action(action: string);
     /// Likes (1) or dislikes (2) a song, or takes that back if it had it;
     /// 0 removes either.
@@ -98,6 +102,7 @@ export global Api {
     in property <int> playing-rating;
     in property <string> playing-id;
     in property <bool> playing-local;
+    in property <bool> playing-downloaded;
     in property <bool> is-playing;
     /// Advanced a few times a second while playing; drives the equalisers
     /// without repainting every frame.

@@ -71,6 +71,12 @@ export component PlayerBar inherits Rectangle {
     menu := PopupMenu {
         x: root.menu-at.x - root.absolute-position.x;
         y: root.menu-at.y - root.absolute-position.y;
+        if !Api.playing-local: MenuEntry {
+            text: Api.playing-downloaded ? "Remove download" : "Download";
+            icon: Api.playing-downloaded ? Icons.delete : Icons.download;
+            activated => { Api.download(Api.playing-id, Api.playing-downloaded); }
+        }
+
         if Api.signed-in && !Api.playing-local: MenuEntry {
             text: "Save to playlist";
             icon: Icons.save-to-playlist;
@@ -154,18 +160,25 @@ export component PlayerBar inherits Rectangle {
                 }
             }
 
-            if Api.signed-in && !Api.playing-local && root.has-track && root.rating-buttons: HorizontalLayout {
+            if !Api.playing-local && root.has-track: HorizontalLayout {
                 cross-axis-alignment: center;
-                IconButton {
+                if Api.signed-in && root.rating-buttons: IconButton {
                     icon: Api.playing-rating == 2 ? Icons.thumb-down-filled : Icons.thumb-down;
                     color: Api.playing-rating == 2 ? Theme.text : Theme.text-secondary;
                     clicked => { Api.rate(Api.playing-id, 2); }
                 }
 
-                IconButton {
+                if Api.signed-in && root.rating-buttons: IconButton {
                     icon: Api.playing-rating == 1 ? Icons.thumb-up-filled : Icons.thumb-up;
                     color: Api.playing-rating == 1 ? Theme.text : Theme.text-secondary;
                     clicked => { Api.rate(Api.playing-id, 1); }
+                }
+
+                // Removing is in the menu, so a stray click can't lose the file.
+                IconButton {
+                    icon: Api.playing-downloaded ? Icons.downloaded : Icons.download;
+                    active: Api.playing-downloaded;
+                    clicked => { Api.download(Api.playing-id, false); }
                 }
             }
         }

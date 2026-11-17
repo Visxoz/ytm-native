@@ -9,6 +9,7 @@ use super::{App, TICK, s};
 use crate::{
     Api as ApiGlobal, AppWindow, QueueItem,
     api::{self, Track},
+    downloads::Downloads,
     images, presence,
     streams::ResolvedStream,
 };
@@ -28,6 +29,7 @@ fn quality_label(stream: &ResolvedStream) -> String {
 /// The queue row for `track`, and the artwork it still has to load.
 pub(super) fn queue_item(
     track: &Track,
+    downloads: &Downloads,
     current: bool,
     recommended: bool,
     selected: bool,
@@ -51,6 +53,7 @@ pub(super) fn queue_item(
         recommended,
         selected,
         local: track.is_local(),
+        downloaded: downloads.contains(&track.id),
     };
     (item, missing)
 }
@@ -162,6 +165,7 @@ impl App {
         let api = ui.global::<ApiGlobal>();
         api.set_playing_id(s(&track.id));
         api.set_playing_local(track.is_local());
+        api.set_playing_downloaded(self.state.borrow().downloads.contains(&track.id));
     }
 
     /// Shows the stream's quality, and fills in a length the track lacked.
@@ -259,18 +263,20 @@ impl App {
         self.queue_shown.set(Some(revision));
 
         let mut missing = Vec::new();
-        let items: Vec<QueueItem> = self
-            .state
-            .borrow()
-            .queue
-            .entries()
-            .enumerate()
-            .map(|(i, (t, recommended))| {
-                let (item, art) = queue_item(t, i as i32 == current, recommended, false);
-                missing.extend(art.map(|url| (i, url)));
-                item
-            })
-            .collect();
+        let items: Vec<QueueItem> = {
+            let state = self.state.borrow();
+            state
+                .queue
+                .entries()
+                .enumerate()
+                .map(|(i, (t, recommended))| {
+                    let (item, art) =
+                        queue_item(t, &state.downloads, i as i32 == current, recommended, false);
+                    missing.extend(art.map(|url| (i, url)));
+                    item
+                })
+                .collect()
+        };
         self.queue_model.set_vec(items);
         self.forget_selection();
         for (i, url) in missing {
@@ -300,6 +306,7 @@ impl App {
                     .is_some_and(|item| item.selected);
                 let (item, art) = queue_item(
                     track,
+                    &state.downloads,
                     i as i32 == current,
                     state.queue.is_recommended(i),
                     selected,
