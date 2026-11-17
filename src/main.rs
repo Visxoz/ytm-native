@@ -199,6 +199,18 @@ fn with_exe_icon(attributes: WindowAttributes) -> WindowAttributes {
 
 fn main() {
     add_fallback_fonts();
+    if std::env::var_os("WGPU_DX12_PRESENTATION_SYSTEM").is_none() {
+        // Slint 1.19's composition swap chain leaves the window see-through
+        // while it remakes its surface; Lily has no translucent windows.
+        // SAFETY: as in `add_fallback_fonts`, before any other thread starts.
+        unsafe { std::env::set_var("WGPU_DX12_PRESENTATION_SYSTEM", "Hwnd") };
+    }
+    if cfg!(debug_assertions) && std::env::var_os("WGPU_VALIDATION").is_none() {
+        // wgpu turns on D3D12's debug layer in debug builds, which shadows its
+        // million-entry descriptor heap in about 150 MB of RAM.
+        // SAFETY: as above.
+        unsafe { std::env::set_var("WGPU_VALIDATION", "0") };
+    }
     logger::init();
     let Some(instance) = single_instance::acquire(WINDOW_CLASS) else {
         return;
@@ -329,9 +341,10 @@ fn main() {
             let minimized = is_minimized(&ui);
             let was = was_minimized.replace(minimized);
             if minimized && !was {
-                // Minimising asks for no frame, so ask for one: the patched
-                // renderer drops its GPU surface on it (patches/).
-                ui.window().request_redraw();
+                // The patched renderer drops its GPU surface on this frame. Asked
+                // of winit, as Slint drops its own requests while one is pending.
+                ui.window()
+                    .with_winit_window(|window| window.request_redraw());
             }
             if was && !minimized {
                 // Again after the restore animation, which can swallow frames.

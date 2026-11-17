@@ -1,65 +1,8 @@
-diff --git a/font_cache.rs b/font_cache.rs
-index 640a0cd..d4705b0 100644
---- a/font_cache.rs
-+++ b/font_cache.rs
-@@ -5,6 +5,7 @@ use clru::CLruCache;
- use i_slint_common::sharedfontique::HashedBlob;
- use i_slint_core::textlayout::sharedparley::{fontique, parley};
- use std::cell::RefCell;
-+use std::collections::HashSet;
- use std::collections::hash_map::DefaultHasher;
- use std::hash::{Hash, Hasher};
- use std::num::NonZeroUsize;
-@@ -17,11 +18,17 @@ pub struct FontCache {
-     // preventing eviction from fontique's shared cache (see commit 30a03cf).
-     // The u64 is a hash of variation settings (0 for base typefaces).
-     fonts: CLruCache<(HashedBlob, u32, u64), Option<skia_safe::Typeface>>,
-+    /// Blobs leaked so Skia can borrow their bytes; see `load_typeface_internal`.
-+    pinned: HashSet<u64>,
- }
- 
- impl Default for FontCache {
-     fn default() -> Self {
--        Self { font_mgr: skia_safe::FontMgr::new(), fonts: CLruCache::new(FONT_CACHE_CAPACITY) }
-+        Self {
-+            font_mgr: skia_safe::FontMgr::new(),
-+            fonts: CLruCache::new(FONT_CACHE_CAPACITY),
-+            pinned: HashSet::new(),
-+        }
-     }
- }
- 
-@@ -76,11 +83,20 @@ impl FontCache {
-         typeface
-     }
- 
--    fn load_typeface_internal(&self, font: &parley::FontData) -> Option<skia_safe::Typeface> {
--        let typeface = self.font_mgr.new_from_data(
--            skia_safe::Data::new_copy(font.data.as_ref()),
--            if font.index > 0 { Some(font.index as _) } else { None },
--        );
-+    fn load_typeface_internal(&mut self, font: &parley::FontData) -> Option<skia_safe::Typeface> {
-+        // Patched for ytm-native: system fonts arrive memory-mapped, and a
-+        // copy of each made the process privately hold every fallback font
-+        // it touched, some 10 to 35 MB apiece for CJK and emoji. The blob is
-+        // kept alive for the life of the process instead, so Skia can read
-+        // the mapping directly; typefaces may outlive this cache's entries.
-+        if self.pinned.insert(font.data.id()) {
-+            std::mem::forget(font.data.clone());
-+        }
-+        // SAFETY: the blob was leaked above, so its bytes are never freed.
-+        let data = unsafe { skia_safe::Data::new_bytes(font.data.as_ref()) };
-+        let typeface = self
-+            .font_mgr
-+            .new_from_data(data, if font.index > 0 { Some(font.index as _) } else { None });
- 
-         // Due to  https://issues.skia.org/issues/310510989, fonts from true type collections
-         // with an index > 0 fail to load on macOS. As a workaround, we manually extract the font from the
 diff --git a/lib.rs b/lib.rs
-index 3451a0b..1d9477e 100644
+index ba9ed30..3732bb5 100644
 --- a/lib.rs
 +++ b/lib.rs
-@@ -377,6 +377,9 @@ pub struct SkiaRenderer {
+@@ -443,6 +443,9 @@ pub struct SkiaRenderer {
      rendering_first_time: Cell<bool>,
      surface: RefCell<Option<Box<dyn Surface>>>,
      surface_factory: SurfaceFactoryFn,
@@ -69,7 +12,7 @@ index 3451a0b..1d9477e 100644
      pre_present_callback: RefCell<Option<Box<dyn FnMut()>>>,
      partial_rendering_state: Option<PartialRenderingState>,
      dirty_region_debug_mode: DirtyRegionDebugMode,
-@@ -385,6 +388,14 @@ pub struct SkiaRenderer {
+@@ -451,6 +454,14 @@ pub struct SkiaRenderer {
      shared_context: SkiaSharedContext,
  }
  
@@ -84,7 +27,7 @@ index 3451a0b..1d9477e 100644
  /// Function pointer for creating the surface to render on, when needed.
  type SurfaceFactoryFn = fn(
      &SkiaSharedContext,
-@@ -424,6 +435,7 @@ impl SkiaRenderer {
+@@ -493,6 +504,7 @@ impl SkiaRenderer {
              rendering_first_time: Default::default(),
              surface: Default::default(),
              surface_factory,
@@ -92,7 +35,7 @@ index 3451a0b..1d9477e 100644
              pre_present_callback: Default::default(),
              partial_rendering_state,
              dirty_region_debug_mode: Default::default(),
-@@ -590,6 +602,8 @@ impl SkiaRenderer {
+@@ -668,6 +680,8 @@ impl SkiaRenderer {
          // the vivante drivers using zwp_linux_explicit_synchronization_v1 and
          // trying to create a second synchronization object and that's not allowed.
          self.clear_surface();
@@ -101,7 +44,7 @@ index 3451a0b..1d9477e 100644
          Ok(())
      }
  
-@@ -604,6 +618,12 @@ impl SkiaRenderer {
+@@ -682,6 +696,12 @@ impl SkiaRenderer {
      ) -> Result<(), PlatformError> {
          // just in case
          self.suspend()?;
@@ -114,39 +57,28 @@ index 3451a0b..1d9477e 100644
          let surface = (self.surface_factory)(
              &self.shared_context,
              window_handle,
-@@ -613,12 +633,16 @@ impl SkiaRenderer {
+@@ -691,6 +711,7 @@ impl SkiaRenderer {
+             transparent,
          )?;
-         surface.set_transparent(transparent)?;
          self.set_surface(surface);
 +        *self.window_handles.borrow_mut() = Some(handles);
          Ok(())
      }
  
-     /// Adjusts the surface for a window that became transparent or opaque after it was created,
-     /// so that the scene's alpha is kept or discarded to match.
-     pub fn set_transparent(&self, transparent: bool) -> Result<(), PlatformError> {
-+        if let Some(handles) = self.window_handles.borrow_mut().as_mut() {
-+            handles.transparent = transparent;
-+        }
-         match self.surface.borrow().as_ref() {
-             Some(surface) => surface.set_transparent(transparent),
-             None => Ok(()),
-@@ -660,6 +684,28 @@ impl SkiaRenderer {
+@@ -744,6 +765,26 @@ impl SkiaRenderer {
+         translation: (f32, f32),
          surface_size: PhysicalWindowSize,
-         post_render_cb: Option<&dyn Fn(&mut dyn ItemRenderer)>,
      ) -> Result<DrawOutcome, i_slint_core::platform::PlatformError> {
 +        // A minimised window shows nothing, so drop the surface and the GPU
 +        // caches (tens of MB of RAM, hundreds of MB of video memory) until it's
 +        // back. Only a surface made from window handles can be made again.
-+        let can_remake = self.window_handles.borrow().is_some();
-+        if can_remake {
++        let handles = self.window_handles.borrow().clone();
++        if let Some(h) = handles {
 +            if self.window_adapter()?.window().is_minimized() {
 +                self.clear_surface();
 +                return Ok(DrawOutcome::Success);
 +            }
-+            let missing = self.surface.borrow().is_none();
-+            let handles = if missing { self.window_handles.borrow().clone() } else { None };
-+            if let Some(h) = handles {
++            if self.surface.borrow().is_none() {
 +                self.set_window_handle(
 +                    h.window,
 +                    h.display,

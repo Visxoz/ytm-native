@@ -18,12 +18,11 @@ fn vendored_version(dir: &str, name: &str) -> Option<String> {
 /// Cargo silently ignores a `[patch]` whose version no longer matches, which
 /// would quietly drop the fixes in `patches/`, so fail the build instead.
 /// CI vendors outside the repo and names the folder in `YTM_PATCHED_CRATES`.
-fn check_vendored() {
+fn check_vendored(lock: &str) {
     println!("cargo:rerun-if-env-changed=YTM_PATCHED_CRATES");
     let dir = std::env::var("YTM_PATCHED_CRATES").unwrap_or_else(|_| "vendor".into());
-    let lock = read("Cargo.lock");
     let manifest = read("Cargo.toml");
-    let slint = quoted_after(&lock, "name = \"i-slint-core\"\nversion = \"");
+    let slint = quoted_after(lock, "name = \"i-slint-core\"\nversion = \"");
     let wanted = [
         ("i-slint-common", slint.clone()),
         ("i-slint-renderer-skia", slint),
@@ -44,8 +43,20 @@ fn check_vendored() {
     }
 }
 
+/// wgpu reads `WGPU_DX12_PRESENTATION_SYSTEM` only with wgpu-types' `std`, which
+/// only Lily's dependency turns on, so it must be the version Slint's wgpu uses.
+fn check_wgpu_types(lock: &str) {
+    if lock.matches("name = \"wgpu-types\"\n").count() > 1 {
+        panic!(
+            "Cargo.lock has two versions of wgpu-types; move the wgpu-types dependency in Cargo.toml to Slint's"
+        );
+    }
+}
+
 fn main() {
-    check_vendored();
+    let lock = read("Cargo.lock");
+    check_vendored(&lock);
+    check_wgpu_types(&lock);
 
     let config = slint_build::CompilerConfiguration::new().with_style("fluent".into());
     slint_build::compile_with_config("ui/app.slint", config).expect("Slint UI compiles");

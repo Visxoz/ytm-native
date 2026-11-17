@@ -101,6 +101,7 @@ export component SettingsDialog inherits Dialog {
                 : root.premium-status;
             PillGroup {
                 y: (parent.height - self.height) / 2;
+                height: self.preferred-height;
                 labels: ["Low", "Normal", "High"];
                 current: root.quality;
                 picked(i) => { root.set-quality(i); }
@@ -187,6 +188,7 @@ export component SettingsDialog inherits Dialog {
             label: "Theme";
             PillGroup {
                 y: (parent.height - self.height) / 2;
+                height: self.preferred-height;
                 labels: ["Dark", "Light", "Black"];
                 current: Theme.look;
                 picked(i) => { root.set-look(i); }

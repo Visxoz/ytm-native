@@ -27,7 +27,7 @@ $crates = @(
         # crates.io.
         Name    = 'i-slint-renderer-skia'
         Version = $slintVersion
-        Hint    = 'Slint changed the renderer. Check whether it still copies font data and keeps its surface while minimised, and update or drop the patch.'
+        Hint    = 'Slint changed the renderer. Check whether it still keeps its surface while minimised, and update or drop the patch.'
     },
     @{
         # Pinned with "=" in Cargo.toml.

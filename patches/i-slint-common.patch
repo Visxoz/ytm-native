@@ -1,16 +1,16 @@
 diff --git a/Cargo.toml b/Cargo.toml
-index e4d1e28..e9520da 100644
+index 4d941b0..81d5cb4 100644
 --- a/Cargo.toml
 +++ b/Cargo.toml
-@@ -49,6 +49,7 @@ markdown = [
+@@ -55,6 +55,7 @@ serde = [
  ]
  shared-fontique = [
      "dep:fontique",
 +    "dep:memmap2",
      "dep:skrifa",
+     "dep:objc2",
  ]
- svg-text = ["dep:resvg"]
-@@ -96,6 +97,10 @@ optional = true
+@@ -107,6 +108,10 @@ optional = true
  version = "2"
  optional = true
  
@@ -22,10 +22,10 @@ index e4d1e28..e9520da 100644
  version = "0.13.0"
  optional = true
 diff --git a/sharedfontique.rs b/sharedfontique.rs
-index fb03530..831d123 100644
+index 8c90bde..23349b4 100644
 --- a/sharedfontique.rs
 +++ b/sharedfontique.rs
-@@ -60,8 +60,13 @@ pub fn create_collection(shared: bool) -> Collection {
+@@ -78,8 +78,14 @@ pub fn init_collection(mut collection: fontique::Collection, shared: bool) -> Co
              if !registered_paths.insert(path.clone()) {
                  return;
              }
@@ -36,6 +36,7 @@ index fb03530..831d123 100644
 +            // as Segoe UI Emoji are many megabytes, of which few pages are used.
 +            let Ok(file) = std::fs::File::open(&path) else { return };
 +            // SAFETY: fonts are not modified while mapped, as with fontique's own.
++            #[allow(unsafe_code)]
 +            let Ok(mapped) = (unsafe { memmap2::Mmap::map(&file) }) else { return };
 +            let fonts = collection.register_fonts(fontique::Blob::new(Arc::new(mapped)), None);
              if fonts.is_empty() {
