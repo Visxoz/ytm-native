@@ -1,28 +1,100 @@
-use std::{rc::Rc, time::Duration};
+use std::{
+    rc::Rc,
+    time::{Duration, Instant},
+};
 
 use slint::TimerMode;
 
-use super::{App, State};
+use super::{App, State, TICK};
 use crate::{api::Page, settings};
 
 /// How long after the last change the session and history are written.
 /// Skipping through songs then costs one write, after the sound starts.
 const PERSIST_AFTER: Duration = Duration::from_secs(2);
+/// Heard this long, or half a shorter song, a play reaches Listen again.
+const PLAY_COUNTS_AFTER: Duration = Duration::from_secs(30);
+
+/// The song playing, and how much of it has been heard.
+#[derive(Default)]
+pub(super) struct Listening {
+    /// The song's ID, until its play counts.
+    unheard: Option<String>,
+    heard: Duration,
+    /// The position at the last tick, and when that was, so only time
+    /// played through counts, not stalls or seeks.
+    last_tick: Option<(f64, Instant)>,
+}
+
+/// What a tick adds to the time heard: forward movement no greater than the
+/// song time elapsed at `speed`, so a seek adds nothing while a tick held up
+/// by the UI thread loses nothing, as the sound plays on its own thread.
+fn played_through(moved: f64, elapsed: Duration, speed: f64) -> Duration {
+    if moved > 0.0 && moved <= (elapsed + TICK).as_secs_f64() * speed {
+        Duration::from_secs_f64(moved)
+    } else {
+        Duration::ZERO
+    }
+}
+
+/// A song of unknown length counts after the full 30 s.
+fn play_counts(heard: Duration, length: Duration) -> bool {
+    let needed = match length {
+        Duration::ZERO => PLAY_COUNTS_AFTER,
+        length => PLAY_COUNTS_AFTER.min(length / 2),
+    };
+    heard >= needed
+}
 
 impl App {
     /// Run as the track's sound starts: the one place a play is recorded.
     pub(super) fn record_play(self: &Rc<Self>) {
         {
             let mut state = self.state.borrow_mut();
-            let State { history, queue, .. } = &mut *state;
+            let State {
+                history,
+                queue,
+                playback,
+                ..
+            } = &mut *state;
             let Some(track) = queue.current() else {
                 return;
             };
             history.record(track);
+            playback.listening = Listening {
+                unheard: Some(track.id.clone()),
+                ..Listening::default()
+            };
         }
         self.persist_soon();
         self.scrobble_started();
         self.report_play();
+    }
+
+    /// Counts what was heard since the last tick, letting the play into
+    /// Listen again once it counts; saved with the next play or on exit.
+    pub(super) fn listened(self: &Rc<Self>, position: f64) {
+        let (heard, length) = {
+            let mut state = self.state.borrow_mut();
+            let State {
+                playback,
+                settings,
+                history,
+                ..
+            } = &mut *state;
+            let length = Duration::from_secs_f64(playback.duration.max(0.0));
+            let listening = &mut playback.listening;
+            let now = Instant::now();
+            if let Some((last, at)) = listening.last_tick.replace((position, now)) {
+                let speed = f64::from(settings.speed);
+                listening.heard += played_through(position - last, now - at, speed);
+            }
+            let heard = listening.heard;
+            if let Some(id) = listening.unheard.take_if(|_| play_counts(heard, length)) {
+                history.mark_heard(&id);
+            }
+            (heard, length)
+        };
+        self.scrobble_heard(heard, length);
     }
 
     /// As YouTube Music does, so the account's recommendations and Listen
@@ -163,5 +235,40 @@ impl App {
         self.show_playing(false);
         self.load_player_art(&track);
         self.refresh_queue();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn counts_only_time_played_through() {
+        let ms = Duration::from_millis;
+        assert_eq!(played_through(0.25, ms(250), 1.0), ms(250), "a tick");
+        assert_eq!(
+            played_through(5.0, ms(5000), 1.0),
+            ms(5000),
+            "a tick held up by the UI thread"
+        );
+        assert_eq!(played_through(30.0, ms(250), 1.0), Duration::ZERO, "a seek");
+        assert_eq!(played_through(-30.0, ms(250), 1.0), Duration::ZERO, "back");
+        assert_eq!(played_through(0.0, ms(250), 1.0), Duration::ZERO, "paused");
+        assert_eq!(
+            played_through(0.5, ms(250), 2.0),
+            ms(500),
+            "a tick at twice the speed"
+        );
+    }
+
+    #[test]
+    fn a_play_counts_after_thirty_seconds_or_half_a_short_song() {
+        let secs = Duration::from_secs;
+        assert!(!play_counts(secs(1), secs(200)), "a skip");
+        assert!(!play_counts(secs(29), secs(200)));
+        assert!(play_counts(secs(30), secs(200)));
+        assert!(play_counts(secs(10), secs(20)), "half a short song");
+        assert!(!play_counts(secs(0), Duration::ZERO), "an unknown length");
+        assert!(play_counts(secs(30), Duration::ZERO));
     }
 }

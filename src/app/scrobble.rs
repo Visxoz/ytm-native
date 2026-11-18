@@ -8,7 +8,7 @@ use std::{
 
 use slint::{Timer, TimerMode};
 
-use super::{App, TICK};
+use super::App;
 use crate::lastfm::{self, Error, Play};
 
 /// Polling for access allowed in the browser. The token lasts an hour, and
@@ -17,31 +17,12 @@ const POLL_EVERY: Duration = Duration::from_secs(3);
 const POLL_FOR: Duration = Duration::from_secs(20 * 60);
 const RETRY_AFTER: Duration = Duration::from_secs(60);
 
-/// The song playing, until enough of it has been heard to count.
-struct Listening {
-    play: Play,
-    heard: Duration,
-    /// The position at the last tick, and when that was, so only time
-    /// played through counts, not stalls or seeks.
-    last_tick: Option<(f64, Instant)>,
-}
-
-/// What a tick adds to the time heard: forward movement no greater than the
-/// song time elapsed at `speed`, so a seek adds nothing while a tick held up
-/// by the UI thread loses nothing, as the sound plays on its own thread.
-fn played_through(moved: f64, elapsed: Duration, speed: f64) -> Duration {
-    if moved > 0.0 && moved <= (elapsed + TICK).as_secs_f64() * speed {
-        Duration::from_secs_f64(moved)
-    } else {
-        Duration::ZERO
-    }
-}
-
 #[derive(Default)]
 pub(super) struct Scrobbler {
     session: Option<lastfm::Session>,
     pending: lastfm::Pending,
-    playing: Option<Listening>,
+    /// The song playing, until enough of it has been heard to count.
+    playing: Option<Play>,
     sending: bool,
     /// Last.fm refused a batch as invalid, so this many of its plays go one
     /// at a time, to find the one it refuses and drop it alone.
@@ -107,11 +88,7 @@ impl App {
             if play.artist.is_empty() || play.track.is_empty() {
                 return;
             }
-            state.scrobbler.playing = Some(Listening {
-                play: play.clone(),
-                heard: Duration::ZERO,
-                last_tick: None,
-            });
+            state.scrobbler.playing = Some(play.clone());
             (session, play, state.scrobbler.generation)
         };
         self.spawn(
@@ -120,28 +97,14 @@ impl App {
         );
     }
 
-    /// Counts what was heard since the last tick, and logs the song once that
-    /// is half of it or four minutes.
-    pub(super) fn scrobble_heard(self: &Rc<Self>, position: f64) {
+    /// Logs the song once half of it or four minutes has been heard.
+    pub(super) fn scrobble_heard(self: &Rc<Self>, heard: Duration, length: Duration) {
         {
-            let mut state = self.state.borrow_mut();
-            let length = Duration::from_secs_f64(state.playback.duration.max(0.0));
-            let speed = f64::from(state.settings.speed);
-            let scrobbler = &mut state.scrobbler;
-            let Some(listening) = scrobbler.playing.as_mut() else {
+            let scrobbler = &mut self.state.borrow_mut().scrobbler;
+            let Some(play) = scrobbler.playing.take_if(|_| lastfm::counts(heard, length)) else {
                 return;
             };
-            let now = Instant::now();
-            if let Some((last, at)) = listening.last_tick.replace((position, now)) {
-                listening.heard += played_through(position - last, now - at, speed);
-            }
-            if !lastfm::counts(listening.heard, length) {
-                return;
-            }
-            let Some(listening) = scrobbler.playing.take() else {
-                return;
-            };
-            scrobbler.pending.push(listening.play);
+            scrobbler.pending.push(play);
         }
         self.send_scrobbles();
     }
@@ -328,29 +291,5 @@ impl App {
         lastfm::remove_session();
         self.ui().set_lastfm_connecting(false);
         self.show_lastfm();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn counts_only_time_played_through() {
-        let ms = Duration::from_millis;
-        assert_eq!(played_through(0.25, ms(250), 1.0), ms(250), "a tick");
-        assert_eq!(
-            played_through(5.0, ms(5000), 1.0),
-            ms(5000),
-            "a tick held up by the UI thread"
-        );
-        assert_eq!(played_through(30.0, ms(250), 1.0), Duration::ZERO, "a seek");
-        assert_eq!(played_through(-30.0, ms(250), 1.0), Duration::ZERO, "back");
-        assert_eq!(played_through(0.0, ms(250), 1.0), Duration::ZERO, "paused");
-        assert_eq!(
-            played_through(0.5, ms(250), 2.0),
-            ms(500),
-            "a tick at twice the speed"
-        );
     }
 }

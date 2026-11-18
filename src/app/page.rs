@@ -134,7 +134,7 @@ impl App {
             // also has what played since.
             if state.route == Route::Home && state.signed_in {
                 // Local files have no radio to play after them there.
-                let recent = state.history.tracks().filter(|t| !t.is_local());
+                let recent = state.history.heard().filter(|t| !t.is_local());
                 api::add_recent(&mut page.sections, recent);
             }
             (state.page_generation, state.route.clone())

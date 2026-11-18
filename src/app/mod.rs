@@ -88,6 +88,7 @@ struct Playback {
     /// The generation whose play is already recorded: a free-stream retry
     /// carrying on a song, so its start is not a second play.
     play_recorded: Option<u64>,
+    listening: session::Listening,
     /// The next track, queued in the player for gapless playback, and when
     /// its stream was resolved.
     queued: Option<(String, ResolvedStream, Instant)>,

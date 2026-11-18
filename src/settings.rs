@@ -1,5 +1,5 @@
 use std::{
-    collections::VecDeque,
+    collections::{HashSet, VecDeque},
     io,
     ops::Range,
     path::{Path, PathBuf},
@@ -529,6 +529,9 @@ pub fn save_visitor(id: &str) {
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct History {
     tracks: VecDeque<crate::api::Track>,
+    /// Songs whose latest play was too short to count.
+    #[serde(default, skip_serializing_if = "HashSet::is_empty")]
+    skipped: HashSet<String>,
     /// Bumped with each play, and how far a save is known to have got: a
     /// copy handed to a background save counts only once it is written, so
     /// the save on exit still writes plays that one never did.
@@ -554,12 +557,29 @@ impl History {
         self.tracks.iter()
     }
 
-    /// Puts `track` first, dropping an earlier play of it.
+    /// Those heard long enough to count, newest first.
+    pub fn heard(&self) -> impl Iterator<Item = &crate::api::Track> {
+        self.tracks.iter().filter(|t| !self.skipped.contains(&t.id))
+    }
+
+    /// Puts `track` first, dropping an earlier play of it; it is left out of
+    /// `heard` until `mark_heard`.
     pub fn record(&mut self, track: &crate::api::Track) {
         self.tracks.retain(|t| t.id != track.id);
+        self.skipped.insert(track.id.clone());
         self.tracks.push_front(track.clone());
-        self.tracks.truncate(HISTORY_LIMIT);
+        if self.tracks.len() > HISTORY_LIMIT
+            && let Some(dropped) = self.tracks.pop_back()
+        {
+            self.skipped.remove(&dropped.id);
+        }
         self.revision += 1;
+    }
+
+    pub fn mark_heard(&mut self, id: &str) {
+        if self.skipped.remove(id) {
+            self.revision += 1;
+        }
     }
 
     /// A copy to save and the revision it holds, if there are plays not
@@ -568,6 +588,7 @@ impl History {
         (self.revision != self.saved).then(|| {
             let copy = Self {
                 tracks: self.tracks.clone(),
+                skipped: self.skipped.clone(),
                 ..Self::default()
             };
             (copy, self.revision)
@@ -706,6 +727,23 @@ mod tests {
         history.saved_up_to(second);
         history.saved_up_to(first);
         assert!(history.unsaved().is_none());
+    }
+
+    #[test]
+    fn only_songs_heard_long_enough_reach_listen_again() {
+        let track = |id: &str| crate::api::Track {
+            id: id.into(),
+            ..Default::default()
+        };
+        let mut history = History::default();
+        history.record(&track("a"));
+        history.record(&track("b"));
+        history.mark_heard("a");
+        let heard = |h: &History| h.heard().map(|t| t.id.clone()).collect::<Vec<_>>();
+        assert_eq!(heard(&history), ["a"]);
+        assert_eq!(history.tracks().count(), 2, "both are in the history");
+        history.record(&track("a"));
+        assert!(heard(&history).is_empty(), "a skipped replay");
     }
 
     #[test]
