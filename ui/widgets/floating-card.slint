@@ -1,0 +1,21 @@
+import { Theme } from "../theme.slint";
+
+/// A card over the page that fades and lifts in while `shown`. `lift`, not
+/// `y`, animates, so the card stays put as its height or the window's changes.
+export component FloatingCard inherits Rectangle {
+    in property <bool> shown;
+    out property <length> lift: root.shown ? 2 * Theme.gap : 0px;
+    border-radius: 12px;
+    background: Theme.menu;
+    border-width: 1px;
+    border-color: Theme.divider;
+    drop-shadow-blur: 24px;
+    drop-shadow-offset-y: 8px;
+    drop-shadow-color: #00000080;
+    opacity: root.shown ? 1 : 0;
+    visible: self.opacity > 0;
+    animate opacity, lift {
+        duration: Theme.normal;
+        easing: ease-out;
+    }
+}

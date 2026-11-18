@@ -1,0 +1,29 @@
+import { Theme } from "../theme.slint";
+import { FloatingCard } from "../widgets/floating-card.slint";
+
+export component Toast inherits FloatingCard {
+    in property <string> text;
+    in property <length> limit;
+    width: min(row.preferred-width, root.limit);
+    height: row.preferred-height;
+
+    row := HorizontalLayout {
+        padding: 12px;
+        padding-right: 18px;
+        spacing: 12px;
+        // A petal of the icon's gradient.
+        Rectangle {
+            width: 4px;
+            border-radius: 2px;
+            background: Theme.lily;
+        }
+
+        Text {
+            text: root.text;
+            font-size: 14px;
+            font-weight: 600;
+            color: Theme.text;
+            wrap: word-wrap;
+        }
+    }
+}

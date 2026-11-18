@@ -9,6 +9,7 @@ import { PageView } from "shell/page-view.slint";
 import { PlayerBar } from "shell/player-bar.slint";
 import { Sidebar } from "shell/sidebar.slint";
 import { TopBar } from "shell/top-bar.slint";
+import { Toast } from "shell/toast.slint";
 import { UpdateCard } from "shell/update-card.slint";
 import { Theme } from "theme.slint";
 import { AccentChoice, Api, CardItem, PlaylistChoice, QueueItem, RowItem, RowKind, TrackItem } from "types.slint";
@@ -518,48 +519,22 @@ export component AppWindow inherits Window {
         // Beneath the toast, which stays readable over it.
         UpdateCard {
             x: root.width - self.width - 2 * Theme.gap;
-            // Only the lift animates, so the card stays on the player bar as
-            // its height or the window's changes.
-            property <length> lift: root.update-prompt ? 2 * Theme.gap : 0px;
             y: root.height - Theme.player-bar - self.height - self.lift;
             width: 360px;
+            shown: root.update-prompt;
             status: root.update-status;
             busy: root.update-busy;
             progress: root.update-progress;
-            opacity: root.update-prompt ? 1 : 0;
-            visible: self.opacity > 0;
-            animate opacity, lift {
-                duration: Theme.normal;
-                easing: ease-out;
-            }
             install => { root.install-update(); }
             later => { root.update-prompt = false; }
         }
 
-        Rectangle {
+        Toast {
             x: (root.width - self.width) / 2;
-            y: root.height - Theme.player-bar - self.height - (root.toast-visible ? 20px : 0px);
-            width: min(toast-text.preferred-width + 40px, root.width - 64px);
-            height: toast-text.preferred-height + 22px;
-            border-radius: 8px;
-            background: Theme.text;
-            drop-shadow-blur: 16px;
-            drop-shadow-color: #00000080;
-            opacity: root.toast-visible ? 1 : 0;
-            visible: self.opacity > 0;
-            animate opacity, y {
-                duration: Theme.normal;
-                easing: ease-out;
-            }
-            toast-text := Text {
-                width: parent.width - 40px;
-                text: root.toast;
-                wrap: word-wrap;
-                horizontal-alignment: center;
-                font-size: 14px;
-                font-weight: 600;
-                color: Theme.text-inverse;
-            }
+            y: root.height - Theme.player-bar - self.height - self.lift;
+            limit: min(480px, root.width - 64px);
+            shown: root.toast-visible;
+            text: root.toast;
         }
 
         if settings-linger.shown: SettingsDialog {

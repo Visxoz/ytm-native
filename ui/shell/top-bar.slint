@@ -7,9 +7,6 @@ import { Icon, IconButton } from "../widgets/buttons.slint";
 export component Logo {
     width: 32px;
     height: 32px;
-    // The SVG's gradient runs from (240,180) to (784,864), which across the
-    // whole square is this angle with these stops.
-    property <brush> ink: @linear-gradient(141deg, #f472d0 20%, #9b5cff 80%);
     Rectangle {
         border-radius: self.width * 225 / 1024;
         background: @linear-gradient(180deg, #17111d 0%, #0b0a0f 100%);
@@ -26,7 +23,7 @@ export component Logo {
         viewbox-height: 1024;
         // Not scaled by the viewbox.
         stroke-width: root.width * 38 / 1024;
-        stroke: root.ink;
+        stroke: Theme.lily;
         stroke-line-cap: round;
         stroke-line-join: round;
         commands: "M478,845 C494,786 500,726 498,677 C520,674 543,669 564,661 C644,635 716,585 753,518 C774,479 813,474 844,503 C826,431 778,380 729,392 C688,401 629,548 564,661 M476,655 C374,627 290,553 265,458 C255,415 218,401 180,420 C215,357 273,317 319,341 C363,364 405,578 476,655 M474,536 C449,459 429,340 425,225 M503,528 C514,439 536,320 565,213 M532,540 C579,469 631,374 690,283";
@@ -35,7 +32,7 @@ export component Logo {
     Path {
         viewbox-width: 1024;
         viewbox-height: 1024;
-        fill: root.ink;
+        fill: Theme.lily;
         commands: "M390,225 A35,35 0 1 0 460,225 A35,35 0 1 0 390,225 Z M530,213 A35,35 0 1 0 600,213 A35,35 0 1 0 530,213 Z M655,283 A35,35 0 1 0 725,283 A35,35 0 1 0 655,283 Z";
     }
 }

@@ -1,23 +1,17 @@
 import { Theme } from "../theme.slint";
 import { PillButton } from "../widgets/buttons.slint";
+import { FloatingCard } from "../widgets/floating-card.slint";
 import { Logo } from "top-bar.slint";
 
 /// Offers a newer version, then shows its download.
-export component UpdateCard inherits Rectangle {
+export component UpdateCard inherits FloatingCard {
     in property <string> status;
     in property <bool> busy;
     in property <float> progress;
     callback install();
     callback later();
     height: body.preferred-height;
-    border-radius: 12px;
-    background: Theme.menu;
-    border-width: 1px;
-    border-color: Theme.divider;
-    drop-shadow-blur: 24px;
-    drop-shadow-offset-y: 8px;
-    drop-shadow-color: #00000080;
-    // Keeps clicks on the card from reaching the page beneath.
+    // Keeps clicks off the page beneath.
     TouchArea { }
 
     body := VerticalLayout {
