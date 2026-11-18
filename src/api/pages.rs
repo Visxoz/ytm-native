@@ -1,4 +1,5 @@
 use rustypipe::{
+    client::RustyPipeQuery,
     model::{AlbumType, MusicGenreItem, MusicItem},
     param::AlbumOrder,
 };
@@ -56,21 +57,38 @@ impl Api {
 
     /// The moods & genres list, kept for the session once fetched. A failure
     /// isn't kept, so the next page to want it asks again.
-    async fn genres(&self) -> Result<Vec<MusicGenreItem>> {
+    async fn genres(&self, q: &RustyPipeQuery) -> Result<Vec<MusicGenreItem>> {
         self.genres
-            .get_or_try_init(|| async { self.q().music_genres().await.map_err(err) })
+            .get_or_try_init(|| async { q.music_genres().await.map_err(err) })
             .await
             .cloned()
     }
 
     /// The personal feed when signed in, otherwise the charts. Should the feed
     /// fail before its first shelf, the app decides what stands in for it.
+    ///
+    /// The first Home sends last run's visitor ID rather than wait for a fresh
+    /// one; everything else keeps rustypipe's rotation.
     async fn home(&self, signed_in: bool) -> Result<Page> {
-        if !signed_in {
-            return self.public_home().await;
+        let saved = self.saved_visitor.lock().ok().and_then(|mut v| v.take());
+        if signed_in {
+            // The feed's retries cover refusals, so another round with a fresh
+            // ID would only hold back the saved feed standing in.
+            return self.personal_home(saved.as_deref()).await;
         }
+        if let Some(visitor) = saved {
+            // A set ID stops rustypipe drawing another on a refusal.
+            match self.public_home(&self.q().visitor_data(visitor)).await {
+                Ok(page) => return Ok(page),
+                Err(e) => log::debug!("home with last run's visitor ID failed: {e}"),
+            }
+        }
+        self.public_home(&self.q()).await
+    }
+
+    async fn personal_home(&self, visitor: Option<&str>) -> Result<Page> {
         let q = self.user_q();
-        let mut feed = home_feed::Feed::first(&q).await?;
+        let mut feed = home_feed::Feed::first(&q, visitor).await?;
         let mut sections = feed.release();
         while sections.is_empty() && !feed.done() {
             feed.next(&q).await?;
@@ -86,9 +104,8 @@ impl Api {
         })
     }
 
-    async fn public_home(&self) -> Result<Page> {
-        let genres = async { genre_section(self.genres().await.unwrap_or_default()) };
-        let q = self.q();
+    async fn public_home(&self, q: &RustyPipeQuery) -> Result<Page> {
+        let genres = async { genre_section(self.genres(q).await.unwrap_or_default()) };
         let (charts, new_albums, genres) =
             tokio::join!(q.music_charts(None), q.music_new_albums(), genres);
         let charts = charts.map_err(err)?;
@@ -140,7 +157,7 @@ impl Api {
     async fn explore(&self) -> Result<Page> {
         let q = self.q();
         let (genres, new_albums, new_videos) =
-            tokio::join!(self.genres(), q.music_new_albums(), q.music_new_videos());
+            tokio::join!(self.genres(&q), q.music_new_albums(), q.music_new_videos());
         let genres = genres?;
         let (moods, genres): (Vec<_>, Vec<_>) = genres.into_iter().partition(|g| g.is_mood);
         let mut sections = Vec::new();

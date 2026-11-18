@@ -535,18 +535,24 @@ pub struct Feed {
     pages_left: usize,
     /// The place in `SHELVES` of the next shelf to show.
     next: usize,
+    /// A visitor ID set for the first page, kept for the rest, as their
+    /// tokens may be tied to it.
+    visitor: Option<String>,
 }
 
 impl Feed {
     /// The first page. `q` must send the sign-in cookie: the feed is personal.
-    pub async fn first(q: &RustyPipeQuery) -> Result<Self, String> {
+    /// `visitor` replaces one from rustypipe's pool.
+    pub async fn first(q: &RustyPipeQuery, visitor: Option<&str>) -> Result<Self, String> {
         let body = serde_json::json!({ "browseId": "FEmusic_home" });
-        let (held, token) = first_page(&browse(q, &body, ATTEMPTS).await?)?;
+        let q = q.clone().visitor_data_opt(visitor);
+        let (held, token) = first_page(&browse(&q, &body, ATTEMPTS).await?)?;
         Ok(Self {
             held,
             token,
             pages_left: CONTINUATIONS,
             next: 0,
+            visitor: visitor.map(str::to_owned),
         })
     }
 
@@ -560,7 +566,8 @@ impl Feed {
             return Ok(());
         };
         let body = serde_json::json!({ "continuation": token });
-        let (more, token) = next_page(&browse(q, &body, ATTEMPTS).await?)?;
+        let q = q.clone().visitor_data_opt(self.visitor.as_deref());
+        let (more, token) = next_page(&browse(&q, &body, ATTEMPTS).await?)?;
         self.held.extend(more);
         self.pages_left -= 1;
         self.token = token.filter(|_| self.pages_left > 0);
@@ -613,6 +620,7 @@ pub fn arrange(sections: Vec<Section>) -> Vec<Section> {
         token: None,
         pages_left: 0,
         next: 0,
+        visitor: None,
     };
     feed.release()
 }
@@ -783,6 +791,7 @@ mod tests {
             token: Some("next".to_owned()),
             pages_left: 3,
             next: 0,
+            visitor: None,
         }
     }
 

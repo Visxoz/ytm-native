@@ -7,6 +7,7 @@ use std::{
         Mutex, OnceLock, PoisonError,
         atomic::{AtomicU64, Ordering},
     },
+    time::Duration,
 };
 
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
@@ -484,10 +485,43 @@ pub fn save_home(sections: &[crate::api::Section]) {
     save_json(&home_path(), &sections, "the home feed");
 }
 
-/// Drops the saved feed, which belongs to the account signed in when it was
-/// saved.
+/// Drops the saved feed and visitor ID, which belong to the account signed in
+/// when they were saved.
 pub fn remove_home() {
     let _ = std::fs::remove_file(home_path());
+    let _ = std::fs::remove_file(visitor_path());
+}
+
+/// Each run saves a fresh visitor ID, so only a copy left closed this long
+/// finds its saved one too old to send.
+const VISITOR_FOR: Duration = Duration::from_secs(24 * 60 * 60);
+
+fn visitor_path() -> PathBuf {
+    data_dir().join("visitor.txt")
+}
+
+/// The visitor ID the last run fetched, while under a day old by the file's
+/// time; checked, as it goes into a request header.
+pub fn load_visitor() -> Option<String> {
+    let path = visitor_path();
+    let age = std::fs::metadata(&path)
+        .ok()?
+        .modified()
+        .ok()?
+        .elapsed()
+        .ok()?;
+    usable_visitor(std::fs::read_to_string(&path).ok()?, age)
+}
+
+fn usable_visitor(id: String, age: Duration) -> Option<String> {
+    let plausible = (1..=1024).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_graphic());
+    (plausible && age < VISITOR_FOR).then_some(id)
+}
+
+pub fn save_visitor(id: &str) {
+    if let Err(e) = write_atomic(&visitor_path(), id.as_bytes()) {
+        log::warn!("could not save the visitor ID: {e}");
+    }
 }
 
 /// The songs played, newest first, one entry per song. Kept in memory until
@@ -623,6 +657,16 @@ impl Searches {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_saved_visitor_stands_in_for_a_day_only() {
+        let usable = |id: &str, age| usable_visitor(id.into(), age);
+        let minute = Duration::from_secs(60);
+        assert_eq!(usable("Cgt%3D", minute).as_deref(), Some("Cgt%3D"));
+        assert_eq!(usable("Cgt%3D", VISITOR_FOR), None);
+        assert_eq!(usable("a\r\nb", minute), None, "not a header value");
+        assert_eq!(usable("", minute), None);
+    }
 
     #[test]
     fn an_unreadable_setting_resets_only_itself() {

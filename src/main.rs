@@ -237,11 +237,12 @@ fn main() {
         }
     };
     // Every YouTube request waits for a visitor ID; fetching one now does it
-    // while the window is made, and the first page's requests share it.
+    // while the window is made. It is saved for the next run's first Home.
     let warm = api.clone();
     runtime.spawn(async move {
-        if let Err(e) = warm.visitor_data(false).await {
-            log::debug!("could not fetch a visitor ID ahead: {e}");
+        match warm.visitor_data(false).await {
+            Ok(visitor) => settings::save_visitor(&visitor),
+            Err(e) => log::debug!("could not fetch a visitor ID ahead: {e}"),
         }
     });
 

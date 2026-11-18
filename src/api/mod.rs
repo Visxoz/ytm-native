@@ -74,6 +74,8 @@ pub struct Api {
     /// Moods & genres, asked for once a session: the list is the same for
     /// every account and barely changes, and Home and Explore both show it.
     genres: Arc<OnceCell<Vec<MusicGenreItem>>>,
+    /// Last run's visitor ID, which the first Home request takes.
+    saved_visitor: Arc<std::sync::Mutex<Option<String>>>,
 }
 
 impl Api {
@@ -91,6 +93,7 @@ impl Api {
         Ok(Self {
             rp,
             genres: Default::default(),
+            saved_visitor: Arc::new(std::sync::Mutex::new(crate::settings::load_visitor())),
         })
     }
 
