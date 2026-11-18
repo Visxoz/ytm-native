@@ -6,6 +6,12 @@ import { MenuEntry, PopupMenu } from "../widgets/menu.slint";
 import { Slider } from "../widgets/slider.slint";
 import { Spinner } from "../widgets/spinner.slint";
 
+// Below lyrics and queue, which people reach for most.
+component MinorButton inherits IconButton {
+    size: 28px;
+    icon-size: 16px;
+}
+
 export component PlayerBar inherits Rectangle {
     in property <bool> has-track;
     in property <string> np-title;
@@ -306,33 +312,41 @@ export component PlayerBar inherits Rectangle {
 
         // Not by the title, which it would cut short. Removing is in the
         // menu, so a stray click can't lose the file.
-        if !Api.playing-local && root.has-track: IconButton {
+        if !Api.playing-local && root.has-track: MinorButton {
             icon: Api.playing-downloaded ? Icons.downloaded : Icons.download;
             active: Api.playing-downloaded;
             clicked => { Api.download(Api.playing-id, false); }
         }
 
+        MinorButton {
+            icon: Icons.mini-player;
+            active: root.mini-open;
+            clicked => { root.toggle-mini-player(); }
+        }
+
+        MinorButton {
+            icon: root.full-player ? Icons.fullscreen-exit : Icons.fullscreen;
+            clicked => { root.full-player = !root.full-player; }
+        }
+
+        Rectangle {
+            width: 8px;
+        }
+
         IconButton {
             icon: Icons.lyrics;
+            icon-size: 20px;
+            color: Theme.text;
             active: root.lyrics-active;
             clicked => { root.open-panel(1); }
         }
 
         IconButton {
             icon: Icons.queue;
+            icon-size: 20px;
+            color: Theme.text;
             active: root.queue-active;
             clicked => { root.open-panel(0); }
-        }
-
-        IconButton {
-            icon: Icons.mini-player;
-            active: root.mini-open;
-            clicked => { root.toggle-mini-player(); }
-        }
-
-        IconButton {
-            icon: root.full-player ? Icons.fullscreen-exit : Icons.fullscreen;
-            clicked => { root.full-player = !root.full-player; }
         }
 
         IconButton {
