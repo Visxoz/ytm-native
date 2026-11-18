@@ -25,6 +25,40 @@ component Block inherits Rectangle {
     background: Theme.ink.with-alpha(0.06 + 0.05 * root.pulse);
 }
 
+/// A section's title.
+component Heading inherits Block {
+    x: Theme.page-padding;
+    width: 200px;
+    height: 18px;
+}
+
+/// A titled carousel.
+component Shelf inherits Rectangle {
+    in property <float> pulse;
+    /// Artists' round artwork.
+    in property <bool> round;
+    property <length> pad: Theme.page-padding;
+    property <length> step: Layout.card-width + Layout.card-gap;
+    // Where the carousel clips its cards.
+    Rectangle {
+        x: 0;
+        width: root.width - root.pad + Layout.card-padding;
+        clip: true;
+        Heading {
+            y: 36px;
+            pulse: root.pulse;
+        }
+        for c in (root.width - root.pad) / root.step + 1: Block {
+            x: root.pad + c * root.step;
+            y: 68px + Layout.card-padding;
+            width: Layout.card-width - 2 * Layout.card-padding;
+            height: self.width;
+            border-radius: root.round ? self.width / 2 : 6px;
+            pulse: root.pulse;
+        }
+    }
+}
+
 /// A page's shape, placed as `PageRow` places what replaces it.
 export component PagePlaceholder inherits Placeholder {
     /// "album", "playlist", "artist", "genre", "home", "trending", "chips",
@@ -35,31 +69,38 @@ export component PagePlaceholder inherits Placeholder {
     property <bool> numbered: root.shape == "album";
     property <bool> listed: root.numbered || root.shape == "playlist";
     property <bool> played: root.listed || root.shape == "artist";
-    property <bool> carousel: root.shape == "home" || root.shape == "genre";
+    property <bool> genre: root.shape == "genre";
+    // Signed in, Listen again above Quick picks' songs.
+    property <bool> home: root.shape == "home";
+    // Signed out, 10 trending songs (`public_home`), then New releases and
+    // Top artists.
+    property <bool> charts: root.shape == "trending";
     property <bool> chips: root.shape == "chips";
     property <bool> grid: root.shape == "grid";
-    property <bool> songs: !root.carousel && !root.chips && !root.grid;
-    property <bool> greeted: root.shape == "home" || root.shape == "trending";
+    property <bool> songs: !root.genre && !root.chips && !root.grid;
+    property <bool> greeted: root.home || root.charts;
     // Search's top result, titled, above its songs.
     property <bool> top-result: root.shape == "search";
     // A section title before the first row.
-    property <bool> titled: !root.carousel && !root.listed;
+    property <bool> titled: !root.genre && !root.listed;
     property <length> art-height: root.listed ? Layout.header-height
-        : root.shape == "artist" ? Layout.banner-height : root.shape == "genre" ? 160px : 0;
+        : root.shape == "artist" ? Layout.banner-height : root.genre ? 160px : 0;
     property <length> header: root.art-height
-        + (root.played ? Layout.actions-height : root.shape == "genre" ? 8px : 0)
+        + (root.played ? Layout.actions-height : root.genre ? 8px : 0)
         + (root.listed ? 52px : 0) + (root.greeted ? 76px : 0) + (root.titled ? 68px : 0)
+        + (root.home ? root.shelf-height : 0)
         + (root.top-result ? 68px + Layout.top-height : 0);
     property <length> gap: root.chips ? Layout.chip-gap : Layout.card-gap;
     property <length> cell: root.chips ? (root.inner - (root.columns - 1) * Layout.chip-gap) / root.columns
-        : root.grid ? Layout.card-cell(root.inner) : Layout.card-width;
+        : Layout.card-cell(root.inner);
     property <int> columns: root.chips ? Layout.chip-columns(root.inner)
-        : root.grid ? Layout.card-columns(root.inner)
-        : root.carousel ? root.inner / (Layout.card-width + Layout.card-gap) + 1 : 0;
+        : root.grid ? Layout.card-columns(root.inner) : 0;
+    property <length> shelf-height: 68px + Layout.card-height(Layout.card-width) + 8px;
     property <length> step: root.chips ? Layout.chip-height + Layout.chip-gap
         : root.grid ? Layout.card-height(root.cell) + Layout.card-gap
-        : root.carousel ? 68px + Layout.card-height(Layout.card-width) + 8px : 56px;
-    property <int> count: max(0, (root.height - root.header) / root.step + 1);
+        : root.genre ? root.shelf-height : 56px;
+    property <int> fits: max(0, (root.height - root.header) / root.step + 1);
+    property <int> count: root.charts ? min(10, root.fits) : root.fits;
     property <length> title-x: root.listed ? root.pad + 256px : root.pad;
     // Past the number column, then the art unless numbered.
     property <length> text-x: root.pad + (root.numbered ? 56px : 108px);
@@ -102,11 +143,8 @@ export component PagePlaceholder inherits Placeholder {
         height: 24px;
         pulse: root.pulse;
     }
-    if root.top-result: Block {
-        x: root.pad;
+    if root.top-result: Heading {
         y: 36px;
-        width: 200px;
-        height: 18px;
         pulse: root.pulse;
     }
     if root.top-result: Block {
@@ -125,32 +163,35 @@ export component PagePlaceholder inherits Placeholder {
         border-radius: 6px;
         pulse: root.pulse;
     }
-    if root.titled: Block {
-        x: root.pad;
+    if root.titled: Heading {
         y: root.header - 32px;
-        width: 200px;
-        height: 18px;
         pulse: root.pulse;
     }
 
+    if root.home: Shelf {
+        // Below the greeting.
+        y: 76px;
+        height: root.shelf-height;
+        pulse: root.pulse;
+    }
+
+    // Below the songs, once all 10 fit.
+    for i in root.charts && root.fits > 10 ? 2 : 0: Shelf {
+        y: root.header + root.count * root.step + i * root.shelf-height;
+        height: root.shelf-height;
+        pulse: root.pulse;
+        round: i == 1;
+    }
+
     for i in root.count: Rectangle {
-        // Set, as a sized element is otherwise centred.
-        x: 0;
         y: root.header + i * root.step;
         height: root.step;
-        // Where a carousel clips its cards.
-        width: root.carousel ? root.width - root.pad + Layout.card-padding : root.width;
-        clip: root.carousel;
-        if root.carousel: Block {
-            x: root.pad;
-            y: 36px;
-            width: 200px;
-            height: 18px;
+        if root.genre: Shelf {
             pulse: root.pulse;
         }
         for c in root.columns: Block {
             x: root.pad + c * (root.cell + root.gap);
-            y: root.chips ? 0 : (root.carousel ? 68px : 0) + Layout.card-padding;
+            y: root.chips ? 0 : Layout.card-padding;
             width: root.chips ? root.cell : root.cell - 2 * Layout.card-padding;
             height: root.chips ? Layout.chip-height : self.width;
             border-radius: root.chips ? 8px : 6px;
