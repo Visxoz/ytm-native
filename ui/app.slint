@@ -9,6 +9,7 @@ import { PageView } from "shell/page-view.slint";
 import { PlayerBar } from "shell/player-bar.slint";
 import { Sidebar } from "shell/sidebar.slint";
 import { TopBar } from "shell/top-bar.slint";
+import { UpdateCard } from "shell/update-card.slint";
 import { Theme } from "theme.slint";
 import { AccentChoice, Api, CardItem, PlaylistChoice, QueueItem, RowItem, RowKind, TrackItem } from "types.slint";
 import { Palette } from "std-widgets.slint";
@@ -166,6 +167,9 @@ export component AppWindow inherits Window {
     in property <string> update-version;
     in property <string> update-status;
     in property <bool> update-busy;
+    in property <float> update-progress;
+    /// The update card, until "Later".
+    in-out property <bool> update-prompt;
     in property <bool> check-updates;
     in property <[string]> local-folders;
 
@@ -509,6 +513,27 @@ export component AppWindow inherits Window {
                 np-go-album => { root.np-go-album(); }
                 open-panel(tab) => { root.open-panel(tab); }
             }
+        }
+
+        // Beneath the toast, which stays readable over it.
+        UpdateCard {
+            x: root.width - self.width - 2 * Theme.gap;
+            // Only the lift animates, so the card stays on the player bar as
+            // its height or the window's changes.
+            property <length> lift: root.update-prompt ? 2 * Theme.gap : 0px;
+            y: root.height - Theme.player-bar - self.height - self.lift;
+            width: 360px;
+            status: root.update-status;
+            busy: root.update-busy;
+            progress: root.update-progress;
+            opacity: root.update-prompt ? 1 : 0;
+            visible: self.opacity > 0;
+            animate opacity, lift {
+                duration: Theme.normal;
+                easing: ease-out;
+            }
+            install => { root.install-update(); }
+            later => { root.update-prompt = false; }
         }
 
         Rectangle {

@@ -1,0 +1,81 @@
+import { Theme } from "../theme.slint";
+import { PillButton } from "../widgets/buttons.slint";
+import { Logo } from "top-bar.slint";
+
+/// Offers a newer version, then shows its download.
+export component UpdateCard inherits Rectangle {
+    in property <string> status;
+    in property <bool> busy;
+    in property <float> progress;
+    callback install();
+    callback later();
+    height: body.preferred-height;
+    border-radius: 12px;
+    background: Theme.menu;
+    border-width: 1px;
+    border-color: Theme.divider;
+    drop-shadow-blur: 24px;
+    drop-shadow-offset-y: 8px;
+    drop-shadow-color: #00000080;
+    // Keeps clicks on the card from reaching the page beneath.
+    TouchArea { }
+
+    body := VerticalLayout {
+        padding: 16px;
+        spacing: 14px;
+        HorizontalLayout {
+            spacing: 12px;
+            VerticalLayout {
+                alignment: start;
+                Logo { }
+            }
+
+            VerticalLayout {
+                spacing: 2px;
+                Text {
+                    text: "Update available";
+                    font-size: 15px;
+                    font-weight: 700;
+                    color: Theme.text;
+                }
+
+                Text {
+                    text: root.status;
+                    font-size: 13px;
+                    color: Theme.text-secondary;
+                    wrap: word-wrap;
+                }
+            }
+        }
+
+        if root.busy: Rectangle {
+            height: 4px;
+            border-radius: 2px;
+            background: Theme.ink.with-alpha(0.12);
+            Rectangle {
+                x: 0;
+                width: parent.width * root.progress;
+                border-radius: 2px;
+                background: Theme.accent;
+                animate width { duration: Theme.normal; }
+            }
+        }
+
+        if !root.busy: HorizontalLayout {
+            alignment: end;
+            spacing: 8px;
+            PillButton {
+                text: "Later";
+                small: true;
+                clicked => { root.later(); }
+            }
+
+            PillButton {
+                text: "Update now";
+                primary: true;
+                small: true;
+                clicked => { root.install(); }
+            }
+        }
+    }
+}

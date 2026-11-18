@@ -24,19 +24,17 @@ impl App {
         }
         self.spawn(update::check(), |app, result| match result {
             Ok(Some(found)) => {
+                log::info!("Lily {} is available", found.version);
                 let ui = app.ui();
                 ui.set_update_version(s(&found.version));
                 ui.set_update_status(
                     format!(
-                        "Version {} is available. The app restarts to install it.",
+                        "Lily {} is available. Installing restarts the app.",
                         found.version
                     )
                     .into(),
                 );
-                app.toast(format!(
-                    "Lily {} is available; update it from Settings",
-                    found.version
-                ));
+                ui.set_update_prompt(true);
                 *app.update.borrow_mut() = Some(found);
             }
             Ok(None) => {}
@@ -51,6 +49,7 @@ impl App {
         };
         let ui = self.ui();
         ui.set_update_busy(true);
+        ui.set_update_progress(0.0);
         ui.set_update_status(format!("Downloading version {}…", found.version).into());
         let weak = self.ui.clone();
         let shown = Arc::new(AtomicU8::new(0));
@@ -58,6 +57,7 @@ impl App {
             let percent = (fraction * 100.0) as u8;
             if shown.swap(percent, Ordering::Relaxed) != percent {
                 let _ = weak.upgrade_in_event_loop(move |ui| {
+                    ui.set_update_progress(f32::from(percent) / 100.0);
                     ui.set_update_status(format!("Downloading… {percent}%").into());
                 });
             }
