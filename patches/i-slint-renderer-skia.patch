@@ -1,5 +1,5 @@
 diff --git a/lib.rs b/lib.rs
-index ba9ed30..3732bb5 100644
+index ba9ed30..5b971c4 100644
 --- a/lib.rs
 +++ b/lib.rs
 @@ -443,6 +443,9 @@ pub struct SkiaRenderer {
@@ -35,7 +35,17 @@ index ba9ed30..3732bb5 100644
              pre_present_callback: Default::default(),
              partial_rendering_state,
              dirty_region_debug_mode: Default::default(),
-@@ -668,6 +680,8 @@ impl SkiaRenderer {
+@@ -626,7 +638,8 @@ impl SkiaRenderer {
+         self.layer_cache.clear_all();
+         self.path_cache.clear_all();
+         self.box_shadow_cache.clear();
+-        self.text_layout_cache.clear_all();
++        // Not the text layouts: they hold no GPU memory, and clearing them
++        // freezes every size measured from text.
+     }
+ 
+     /// Reset the surface to a new surface. (destroy the previously set surface if any)
+@@ -668,6 +681,8 @@ impl SkiaRenderer {
          // the vivante drivers using zwp_linux_explicit_synchronization_v1 and
          // trying to create a second synchronization object and that's not allowed.
          self.clear_surface();
@@ -44,7 +54,7 @@ index ba9ed30..3732bb5 100644
          Ok(())
      }
  
-@@ -682,6 +696,12 @@ impl SkiaRenderer {
+@@ -682,6 +697,12 @@ impl SkiaRenderer {
      ) -> Result<(), PlatformError> {
          // just in case
          self.suspend()?;
@@ -57,7 +67,7 @@ index ba9ed30..3732bb5 100644
          let surface = (self.surface_factory)(
              &self.shared_context,
              window_handle,
-@@ -691,6 +711,7 @@ impl SkiaRenderer {
+@@ -691,6 +712,7 @@ impl SkiaRenderer {
              transparent,
          )?;
          self.set_surface(surface);
@@ -65,7 +75,7 @@ index ba9ed30..3732bb5 100644
          Ok(())
      }
  
-@@ -744,6 +765,26 @@ impl SkiaRenderer {
+@@ -744,6 +766,26 @@ impl SkiaRenderer {
          translation: (f32, f32),
          surface_size: PhysicalWindowSize,
      ) -> Result<DrawOutcome, i_slint_core::platform::PlatformError> {
