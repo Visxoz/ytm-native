@@ -222,6 +222,8 @@ fn main() {
     update::clean_up();
     settings::move_data_dir();
     let _ = std::fs::create_dir_all(settings::data_dir());
+    // Before any client is built, as each takes it then.
+    http::load_proxy();
 
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(2)

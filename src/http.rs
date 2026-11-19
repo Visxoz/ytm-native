@@ -116,6 +116,118 @@ pub fn redirects(domains: &'static [&'static str]) -> redirect::Policy {
     })
 }
 
+/// The user's own proxy, read once at startup by `load_proxy`, as the
+/// clients are built once. Unset, they follow Windows' proxy setting.
+// shortcut: reqwest reads only Windows' manual "Use a proxy server" address,
+// not a setup script, automatic detection or per-protocol servers; PAC would
+// need WinHTTP's WinHttpGetProxyForUrl.
+static PROXY: OnceLock<(Url, reqwest::Proxy)> = OnceLock::new();
+
+fn proxy_path() -> std::path::PathBuf {
+    crate::settings::data_dir().join("proxy.bin")
+}
+
+/// Takes the saved proxy into use. Encrypted, as its address may hold a
+/// password.
+pub fn load_proxy() {
+    let Some(saved) = crate::secret::read(&proxy_path()) else {
+        return;
+    };
+    match parse_proxy(&saved) {
+        Ok(proxy) => {
+            log::info!(
+                "connecting through the proxy at {}",
+                proxy_address(&proxy.0)
+            );
+            let _ = PROXY.set(proxy);
+        }
+        Err(e) => log::warn!("ignoring the saved proxy: {e}"),
+    }
+}
+
+/// Saves `text` as the proxy for the next start, or none when it is empty.
+/// Returns its address without any password, and whether it differs from
+/// the one in use, credentials included.
+pub fn save_proxy(text: &str) -> Result<(Option<String>, bool), &'static str> {
+    let url = if text.trim().is_empty() {
+        match std::fs::remove_file(proxy_path()) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err("Couldn't clear the saved proxy.");
+            }
+            _ => None,
+        }
+    } else {
+        let (url, _) = parse_proxy(text)?;
+        crate::secret::write(&proxy_path(), url.as_str())
+            .map_err(|_| "Couldn't save the proxy.")?;
+        Some(url)
+    };
+    let pending = PROXY.get().map(|(u, _)| u) != url.as_ref();
+    Ok((url.as_ref().map(proxy_address), pending))
+}
+
+/// The proxy in use, without any password.
+pub fn proxy_in_use() -> Option<String> {
+    PROXY.get().map(|(url, _)| proxy_address(url))
+}
+
+/// WebView2's flag for the proxy in use.
+pub fn proxy_server_arg() -> Option<String> {
+    PROXY.get().map(|(url, _)| proxy_server_flag(url))
+}
+
+/// Built from the parsed parts, never the text typed, as it joins a command
+/// line. Chromium takes no password, and resolves names through SOCKS5 itself.
+fn proxy_server_flag(url: &Url) -> String {
+    let address = proxy_address(url).replacen("socks5h://", "socks5://", 1);
+    format!("--proxy-server={address}")
+}
+
+/// A proxy address as typed: HTTP, HTTPS or SOCKS5, with a host and a port.
+/// Without a scheme, HTTP.
+fn parse_proxy(text: &str) -> Result<(Url, reqwest::Proxy), &'static str> {
+    let text = text.trim();
+    let url = if text.contains("://") {
+        Url::parse(text)
+    } else {
+        Url::parse(&format!("http://{text}"))
+    }
+    .map_err(|_| "That isn't a proxy address, like http://127.0.0.1:8080.")?;
+    if !matches!(url.scheme(), "http" | "https" | "socks5" | "socks5h") {
+        return Err("Use an http:// or socks5:// address.");
+    }
+    if url.host_str().is_none_or(str::is_empty) {
+        return Err("The address needs a host.");
+    }
+    if url.port_or_known_default().is_none() {
+        return Err("The address needs a port, like :1080.");
+    }
+    // hyper-util parses it again as an `http::Uri`, and goes direct should
+    // that fail.
+    if url.as_str().parse::<::http::Uri>().is_err() {
+        return Err("That isn't a proxy address, like http://127.0.0.1:8080.");
+    }
+    let proxy = reqwest::Proxy::all(url.as_str())
+        .map_err(|_| "That isn't a proxy address, like http://127.0.0.1:8080.")?;
+    Ok((url, proxy))
+}
+
+/// Scheme, host and port, leaving out any user name and password.
+fn proxy_address(url: &Url) -> String {
+    let host = url.host_str().unwrap_or_default();
+    let port = url.port_or_known_default().unwrap_or_default();
+    format!("{}://{host}:{port}", url.scheme())
+}
+
+/// The user's proxy, should they have set one; otherwise reqwest follows
+/// Windows' setting and the `HTTPS_PROXY` variables.
+pub fn proxied(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
+    match PROXY.get() {
+        Some((_, proxy)) => builder.proxy(proxy.clone()),
+        None => builder,
+    }
+}
+
 /// Connection reuse settings shared with rustypipe's client, which talks to
 /// the same hosts.
 pub fn keep_alive(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
@@ -129,7 +241,7 @@ pub fn keep_alive(builder: reqwest::ClientBuilder) -> reqwest::ClientBuilder {
 pub fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
-        keep_alive(reqwest::Client::builder())
+        proxied(keep_alive(reqwest::Client::builder()))
             .timeout(Duration::from_secs(15))
             .redirect(redirects(ALLOWED_DOMAINS))
             .build()
@@ -142,7 +254,11 @@ pub fn client() -> &'static reqwest::Client {
 pub fn blocking_client() -> &'static reqwest::blocking::Client {
     static CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
-        reqwest::blocking::Client::builder()
+        let builder = match PROXY.get() {
+            Some((_, proxy)) => reqwest::blocking::Client::builder().proxy(proxy.clone()),
+            None => reqwest::blocking::Client::builder(),
+        };
+        builder
             .pool_idle_timeout(POOL_IDLE)
             .timeout(Duration::from_secs(30))
             .no_gzip()
@@ -181,6 +297,34 @@ mod tests {
         assert!(!allowed("https://accounts.google.com/"));
         assert!(!allowed("file:///C:/Windows/System32/calc.exe"));
         assert!(!allowed("not a url"));
+    }
+
+    #[test]
+    fn takes_proxy_addresses_with_a_host_and_port() {
+        let address = |text| parse_proxy(text).map(|(url, _)| proxy_address(&url));
+        assert_eq!(address("127.0.0.1:8080").unwrap(), "http://127.0.0.1:8080");
+        assert_eq!(
+            address(" socks5h://user:secret@proxy.example:1080 ").unwrap(),
+            "socks5h://proxy.example:1080",
+            "no password shown"
+        );
+        assert_eq!(address("https://[::1]:3128").unwrap(), "https://[::1]:3128");
+        assert_eq!(address("http://proxy").unwrap(), "http://proxy:80");
+        assert!(address("ftp://proxy:21").is_err());
+        assert!(address("socks5://proxy").is_err(), "no port to assume");
+        assert!(address("http://:8080").is_err());
+        assert!(address("not a proxy").is_err());
+        assert!(address("socks5://prøxy.lan:1080").is_err(), "not a URI");
+    }
+
+    #[test]
+    fn gives_webview2_the_proxy_without_its_password() {
+        let flag = |text| proxy_server_flag(&parse_proxy(text).unwrap().0);
+        assert_eq!(
+            flag("socks5h://user:secret@127.0.0.1:1080"),
+            "--proxy-server=socks5://127.0.0.1:1080"
+        );
+        assert_eq!(flag("10.0.0.1:3128"), "--proxy-server=http://10.0.0.1:3128");
     }
 
     #[test]

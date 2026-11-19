@@ -17,6 +17,8 @@ winresource = "0.1.34"
 # schedules it as audio.
 cpal = { version = "0.18.2", features = ["realtime"] }
 discord-rich-presence = "1.1.0"
+# Checks a proxy address as hyper-util will parse it.
+http = "1.5"
 image = { version = "0.25.10", default-features = false, features = ["jpeg", "png", "webp"] }
 log = "0.4.34"
 # Last.fm signs its API calls with MD5.
@@ -30,7 +32,7 @@ oxc_span = "0.155"
 raw-window-handle = "0.6.2"
 # gzip and brotli are already in the tree through rustypipe; they let the
 # player endpoint and the player script answer compressed.
-reqwest = { version = "0.12", default-features = false, features = ["default-tls", "native-tls-alpn", "http2", "blocking", "gzip", "brotli"] }
+reqwest = { version = "0.12", default-features = false, features = ["default-tls", "native-tls-alpn", "http2", "blocking", "gzip", "brotli", "socks", "system-proxy"] }
 rquickjs = "0.9"
 rustypipe = { version = "=0.11.4", features = ["userdata"] }
 serde = { version = "1.0.229", features = ["derive"] }
@@ -53,9 +55,6 @@ windows-sys = { version = "0.61.2", features = ["Win32_Foundation", "Win32_Graph
 wry = { version = "0.57", default-features = false }
 # Already built for Slint; its COM wrappers give the folder picker.
 windows = { version = "0.62.2", features = ["Win32_System_Com", "Win32_UI_Shell"] }
-
-[dev-dependencies]
-http = "1.5"
 
 [profile.release]
 # Small by default; the crates on the audio and drawing paths keep full speed.

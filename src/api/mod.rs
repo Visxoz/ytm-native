@@ -88,7 +88,9 @@ impl Api {
             // unencrypted and never cleared; nothing reads them.
             .no_reporter()
             .no_botguard()
-            .build_with_client(crate::http::keep_alive(reqwest::ClientBuilder::new()))
+            .build_with_client(crate::http::proxied(crate::http::keep_alive(
+                reqwest::ClientBuilder::new(),
+            )))
             .map_err(err)?;
         Ok(Self {
             rp,

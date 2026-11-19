@@ -75,8 +75,10 @@ impl Controls {
             title: Some(title),
             artist: Some(artist),
             album: (!album.is_empty()).then_some(album),
-            // Windows fetches the artwork itself, so only from YouTube.
-            cover_url: cover.filter(|url| crate::http::allowed(url)),
+            // Windows fetches the artwork itself, so only from YouTube, and
+            // not at all past the user's own proxy, which it doesn't know of.
+            cover_url: cover
+                .filter(|url| crate::http::allowed(url) && crate::http::proxy_in_use().is_none()),
             duration: (duration > 0.0).then(|| Duration::from_secs_f64(duration)),
         };
         if let Err(e) = self.inner.set_metadata(metadata) {

@@ -67,6 +67,56 @@ component ChoiceButton {
     }
 }
 
+/// A one-line box for an address, applied with Enter. `accepted` answers
+/// why it wasn't taken, or nothing, so a mistyped one stays to be corrected.
+component AddressField inherits Rectangle {
+    in property <string> placeholder;
+    in property <string> name;
+    callback accepted(text: string) -> string;
+    callback edited();
+    width: 180px;
+    height: 32px;
+    border-radius: self.height / 2;
+    background: input.has-focus || touch.has-hover ? Theme.control-hover : Theme.control;
+    border-width: 1px;
+    border-color: input.has-focus ? Theme.text : transparent;
+    animate background, border-color { duration: Theme.fast; }
+
+    touch := TouchArea {
+        mouse-cursor: MouseCursor.text;
+        clicked => { input.focus(); }
+    }
+
+    input := TextInput {
+        x: 14px;
+        width: parent.width - 28px;
+        height: 100%;
+        vertical-alignment: center;
+        single-line: true;
+        font-size: 13px;
+        color: Theme.text;
+        selection-background-color: Theme.accent.with-alpha(0.5);
+        accessible-label: root.name;
+        edited => { root.edited(); }
+        accepted => {
+            if root.accepted(self.text) == "" {
+                self.text = "";
+            }
+        }
+    }
+
+    if input.text == "": Text {
+        x: 14px;
+        width: parent.width - 28px;
+        height: 100%;
+        overflow: elide;
+        vertical-alignment: center;
+        text: root.placeholder;
+        color: Theme.text-dim;
+        font-size: 13px;
+    }
+}
+
 /// One tab's rows, all tabs the same height so the dialog keeps its size
 /// when switching between them.
 component Tab inherits VerticalLayout {
@@ -106,6 +156,9 @@ export component SettingsDialog inherits Dialog {
     in property <string> lastfm-user;
     in property <bool> lastfm-connecting;
     in property <[string]> local-folders;
+    in property <string> proxy-detail;
+    /// The saved proxy without any password, or none.
+    in property <string> proxy-address;
     callback set-quality(value: int);
     callback set-normalise(value: bool);
     callback set-crossfade(value: bool);
@@ -126,7 +179,17 @@ export component SettingsDialog inherits Dialog {
     callback sign-out();
     callback add-folder();
     callback remove-folder(index: int);
+    callback set-proxy(address: string) -> string;
+    /// The address field going with its tab or the dialog, which would
+    /// otherwise leave the window's keys with nothing focused.
+    callback release-focus();
     property <int> tab;
+    property <string> proxy-error;
+
+    changed tab => {
+        root.proxy-error = "";
+        root.release-focus();
+    }
 
     title: "Settings";
     open: root.settings-open;
@@ -351,6 +414,27 @@ export component SettingsDialog inherits Dialog {
     }
 
     if root.tab == 4: Tab {
+        SettingRow {
+            label: "Proxy";
+            detail: root.proxy-error != "" ? root.proxy-error : root.proxy-detail;
+            AddressField {
+                y: (parent.height - self.height) / 2;
+                placeholder: root.proxy-address != "" ? root.proxy-address : "http://host:port";
+                name: "Proxy address";
+                edited => { root.proxy-error = ""; }
+                accepted(text) => {
+                    root.proxy-error = root.set-proxy(text);
+                    return root.proxy-error;
+                }
+            }
+            if root.proxy-address != "": PillButton {
+                y: (parent.height - self.height) / 2;
+                text: "Clear";
+                small: true;
+                clicked => { root.proxy-error = root.set-proxy(""); }
+            }
+        }
+
         SettingRow {
             label: "Updates";
             detail: root.update-status;

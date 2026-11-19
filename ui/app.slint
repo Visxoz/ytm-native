@@ -173,6 +173,10 @@ export component AppWindow inherits Window {
     in-out property <bool> update-prompt;
     in property <bool> check-updates;
     in property <[string]> local-folders;
+    /// What the proxy row says, and the user's own proxy saved, without any
+    /// password.
+    in property <string> proxy-detail;
+    in property <string> proxy-address;
 
     in property <string> toast;
     in property <bool> toast-visible;
@@ -218,6 +222,9 @@ export component AppWindow inherits Window {
     callback set-check-updates(value: bool);
     callback install-update();
     callback remove-folder(index: int);
+    /// Saves a proxy for the next start, or Windows' for an empty address,
+    /// answering why the address won't do, or nothing.
+    callback set-proxy(address: string) -> string;
     callback pick-playlist(index: int);
     callback set-autoplay(value: bool);
     callback set-youtube-history(value: bool);
@@ -245,6 +252,8 @@ export component AppWindow inherits Window {
     changed settings-open => {
         if root.settings-open {
             root.list-output-devices();
+        } else {
+            keys.focus();
         }
     }
 
@@ -585,8 +594,12 @@ export component AppWindow inherits Window {
             set-check-updates(v) => { root.set-check-updates(v); }
             install-update => { root.install-update(); }
             local-folders: root.local-folders;
+            proxy-detail: root.proxy-detail;
+            proxy-address: root.proxy-address;
             add-folder => { root.go("add-folder"); }
             remove-folder(i) => { root.remove-folder(i); }
+            set-proxy(address) => { return root.set-proxy(address); }
+            release-focus => { keys.focus(); }
             sign-out => { root.sign-out(); }
         }
 

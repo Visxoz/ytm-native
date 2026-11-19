@@ -388,6 +388,9 @@ impl App {
         app.bind(ui);
         app.attach_tray();
         app.apply_settings_to_ui(ui);
+        let proxy = crate::http::proxy_in_use();
+        ui.set_proxy_detail(proxy_detail(proxy.is_some(), false).into());
+        ui.set_proxy_address(proxy.unwrap_or_default().into());
         app.show_folders();
         app.apply_theme(ui);
         // Set here and by the switch only, so other settings changing can't
@@ -669,6 +672,20 @@ impl App {
         ui.set_output_detail(detail.into());
     }
 
+    /// Saves `address` as the proxy for the next start, returning why it
+    /// won't do, or nothing.
+    fn set_proxy(&self, address: &str) -> SharedString {
+        match crate::http::save_proxy(address) {
+            Ok((saved, pending)) => {
+                let ui = self.ui();
+                ui.set_proxy_detail(proxy_detail(saved.is_some(), pending).into());
+                ui.set_proxy_address(saved.unwrap_or_default().into());
+                SharedString::new()
+            }
+            Err(e) => e.into(),
+        }
+    }
+
     /// Plays through the device Settings lists at `index`, 0 being the default.
     fn choose_output_device(&self, index: usize) {
         let device = match index.checked_sub(1) {
@@ -782,6 +799,19 @@ impl App {
         self.persist();
         self.player.stop();
         self.presence.shutdown();
+    }
+}
+
+/// What the proxy row says of the one saved, which is `pending` until the
+/// next start, as the clients took theirs at startup.
+fn proxy_detail(saved: bool, pending: bool) -> &'static str {
+    match (saved, pending) {
+        (true, false) => "Connects through this proxy.",
+        (true, true) => "Connects through this proxy from Lily's next start.",
+        (false, false) => {
+            "Follows the proxy set in Windows. Enter an http:// or socks5:// address to use another."
+        }
+        (false, true) => "Follows the proxy set in Windows from Lily's next start.",
     }
 }
 

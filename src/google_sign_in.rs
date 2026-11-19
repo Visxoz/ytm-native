@@ -27,6 +27,15 @@ const BOUND_SESSION_COOKIE: &str = "PSIDRTS";
 const BROWSER_ARGS: &str = "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,\
     DeviceBoundSessions,DeviceBoundSessionsForRestrictedSites,EnableBoundSessionCredentials";
 
+/// With the user's proxy, which WebView2 would otherwise go around for
+/// Windows' own.
+fn browser_args() -> String {
+    match crate::http::proxy_server_arg() {
+        Some(proxy) => format!("{BROWSER_ARGS} {proxy}"),
+        None => BROWSER_ARGS.to_owned(),
+    }
+}
+
 const MUSIC_HOST: &str = "music.youtube.com";
 /// Sign-in and cookie consent hosts, allowed on any path.
 const SIGN_IN_HOSTS: &[&str] = &[
@@ -127,7 +136,7 @@ impl GoogleSignIn {
         let webview = WebViewBuilder::new_with_web_context(&mut self.context)
             .with_url(START_URL)
             .with_incognito(true)
-            .with_additional_browser_args(BROWSER_ARGS)
+            .with_additional_browser_args(browser_args())
             .with_bounds(bounds(&self.window))
             .with_on_page_load_handler(move |event, _| {
                 if matches!(event, PageLoadEvent::Finished) {

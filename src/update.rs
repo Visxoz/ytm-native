@@ -57,7 +57,7 @@ static PENDING: Mutex<Option<Command>> = Mutex::new(None);
 fn client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(|| {
-        reqwest::Client::builder()
+        crate::http::proxied(reqwest::Client::builder())
             // GitHub's API refuses requests without one.
             .user_agent(format!("Lily/{CURRENT}"))
             .timeout(Duration::from_secs(120))

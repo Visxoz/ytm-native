@@ -214,6 +214,13 @@ impl App {
             .choose_output_device(index as usize));
         on!(on_remove_folder, |app, index| app
             .remove_folder(index as usize));
+        // Not through `on!`, as it answers.
+        let weak = Rc::downgrade(self);
+        ui.on_set_proxy(move |address| {
+            weak.upgrade()
+                .map(|app| app.set_proxy(&address))
+                .unwrap_or_default()
+        });
         on!(on_player_event, |app, kind, message| app
             .on_player_event(&kind, &message));
         on!(on_local_files_changed, |app| app.local_files_changed());
