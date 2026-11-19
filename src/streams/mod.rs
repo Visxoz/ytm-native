@@ -4,6 +4,8 @@
 
 pub mod premium;
 
+use std::sync::Mutex;
+
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
@@ -62,6 +64,42 @@ const CLIENTS: &[Client] = &[
     },
 ];
 
+pub const CLIENT_COUNT: usize = CLIENTS.len();
+
+/// Indices in `CLIENTS` whose URLs googlevideo cuts off here, as it does
+/// past the first megabyte on networks where it wants a PO token, the one
+/// refused longest ago first.
+static CUT_OFF: Mutex<Vec<usize>> = Mutex::new(Vec::new());
+
+/// Asks `client` last for the rest of the session.
+pub fn cut_off(client: &str) {
+    let Some(i) = CLIENTS.iter().position(|c| c.name == client) else {
+        return;
+    };
+    if mark(&mut CUT_OFF.lock().unwrap(), i) {
+        log::warn!("{client} streams are cut off here; asking other clients first from now on");
+    }
+}
+
+/// Moves client `i` to the back of `cut`, returning whether it is new there.
+fn mark(cut: &mut Vec<usize>, i: usize) -> bool {
+    let new = !cut.contains(&i);
+    cut.retain(|&c| c != i);
+    cut.push(i);
+    new
+}
+
+/// The clients not cut off, then those that are, refused longest ago first:
+/// one may still resolve a song the others refuse, and a download walking
+/// on from refusal to refusal reaches each before coming back to any.
+fn clients(cut: &[usize]) -> Vec<&'static Client> {
+    (0..CLIENTS.len())
+        .filter(|i| !cut.contains(i))
+        .chain(cut.iter().copied())
+        .map(|i| &CLIENTS[i])
+        .collect()
+}
+
 /// Saved with a download without what only streaming needs, so it plays
 /// from the file as it was resolved.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -85,6 +123,9 @@ pub struct ResolvedStream {
     /// The file it plays from instead, downloaded or the user's own.
     #[serde(skip)]
     pub file: Option<std::path::PathBuf>,
+    /// The plain-URL client it came from, if one.
+    #[serde(skip)]
+    pub client: Option<&'static str>,
 }
 
 #[derive(Deserialize)]
@@ -160,6 +201,14 @@ impl Format {
     fn has_url(&self) -> bool {
         self.url.is_some() || self.signature_cipher.is_some()
     }
+
+    /// Not a dynamic-range compressed variant, dubbed track or surround
+    /// mix, which the decoders can't play.
+    fn plain(&self) -> bool {
+        !self.is_drc
+            && self.audio_channels.is_none_or(|c| c <= 2)
+            && self.audio_track.as_ref().is_none_or(|t| t.audio_is_default)
+    }
 }
 
 impl PlayerResponse {
@@ -208,6 +257,7 @@ impl PlayerResponse {
             premium,
             itag: format.itag,
             file: None,
+            client: None,
         }
     }
 }
@@ -241,16 +291,19 @@ fn first_bytes(url: &str, headers: &[(String, String)]) -> Result<usize, String>
     Ok(bytes.len())
 }
 
-/// The first client's error is reported when none works, as it is the usual
-/// one.
+/// With `itag`, that format only, so a download can carry on from another
+/// client's URL. The first client's error is reported when none works, as
+/// it is the usual one.
 pub async fn resolve(
     video_id: &str,
     visitor_data: &str,
     max_kbps: Option<u64>,
+    itag: Option<u32>,
 ) -> Result<ResolvedStream, String> {
     let mut first_error = None;
-    for client in CLIENTS {
-        match resolve_with(client, video_id, visitor_data, max_kbps).await {
+    let clients = clients(&CUT_OFF.lock().unwrap());
+    for client in clients {
+        match resolve_with(client, video_id, visitor_data, max_kbps, itag).await {
             Ok(stream) => {
                 if first_error.is_some() {
                     log::info!("{video_id}: the {} client served the stream", client.name);
@@ -271,6 +324,7 @@ async fn resolve_with(
     video_id: &str,
     visitor_data: &str,
     max_kbps: Option<u64>,
+    itag: Option<u32>,
 ) -> Result<ResolvedStream, String> {
     let mut context = json!({
         "clientName": client.name,
@@ -308,7 +362,11 @@ async fn resolve_with(
         .text()
         .await
         .map_err(|e| format!("player request failed: {}", e.without_url()))?;
-    parse(&text, client.user_agent, max_kbps)
+    let stream = parse(&text, client.user_agent, max_kbps, itag)?;
+    Ok(ResolvedStream {
+        client: Some(client.name),
+        ..stream
+    })
 }
 
 /// Parses a player response, failing with YouTube's reason if unplayable.
@@ -325,29 +383,34 @@ pub(crate) fn parse_response(json: &str) -> Result<PlayerResponse, String> {
     Ok(response)
 }
 
-/// The best plain-URL stream of a player response. A client that answers
-/// with scrambled URLs only counts as having none.
-fn parse(json: &str, user_agent: &str, max_kbps: Option<u64>) -> Result<ResolvedStream, String> {
+/// The best plain-URL stream of a player response, or with `itag`, that
+/// one. A client that answers with scrambled URLs only counts as having none.
+fn parse(
+    json: &str,
+    user_agent: &str,
+    max_kbps: Option<u64>,
+    itag: Option<u32>,
+) -> Result<ResolvedStream, String> {
     let response = parse_response(json)?;
-    let format =
-        best_audio(response.audio_formats(), max_kbps).ok_or("no playable audio stream")?;
+    let formats = response.audio_formats();
+    let format = match itag {
+        Some(itag) => formats
+            .iter()
+            .find(|f| f.itag == itag && f.url.is_some() && f.plain()),
+        None => best_audio(formats, max_kbps),
+    }
+    .ok_or("no playable audio stream")?;
     let url = format.url.clone().ok_or("no playable audio stream")?;
     Ok(response.stream(format, url, user_agent, false))
 }
 
-/// The highest-bitrate Opus stream, else the best AAC. Skips dynamic-range
-/// compressed variants, dubbed tracks and surround mixes, which the decoders
-/// can't play. With `max_kbps`, the best within it, or the lowest there is
-/// when none fits.
+/// The highest-bitrate plain Opus stream, else the best AAC. With
+/// `max_kbps`, the best within it, or the lowest there is when none fits.
 pub(crate) fn best_audio(formats: &[Format], max_kbps: Option<u64>) -> Option<&Format> {
     let candidates = |codec: fn(&Format) -> bool| {
-        formats.iter().filter(move |f| {
-            codec(f)
-                && f.has_url()
-                && !f.is_drc
-                && f.audio_channels.is_none_or(|c| c <= 2)
-                && f.audio_track.as_ref().is_none_or(|t| t.audio_is_default)
-        })
+        formats
+            .iter()
+            .filter(move |f| codec(f) && f.has_url() && f.plain())
     };
     let pick = |codec: fn(&Format) -> bool| {
         candidates(codec)
@@ -387,7 +450,13 @@ mod tests {
 
     #[test]
     fn prefers_opus() {
-        let stream = parse(&response(&[AAC, OPUS, OPUS_DRC, VIDEO].join(",")), UA, None).unwrap();
+        let stream = parse(
+            &response(&[AAC, OPUS, OPUS_DRC, VIDEO].join(",")),
+            UA,
+            None,
+            None,
+        )
+        .unwrap();
         assert_eq!(stream.url, "https://a/251");
         assert_eq!(stream.mime, "audio/webm");
         assert_eq!(stream.size, 6214234);
@@ -400,10 +469,16 @@ mod tests {
     #[test]
     fn caps_the_bitrate_for_lower_qualities() {
         let all = response(&[AAC, OPUS, OPUS_LOW].join(","));
-        assert_eq!(parse(&all, UA, Some(64)).unwrap().url, "https://a/249");
-        assert_eq!(parse(&all, UA, Some(192)).unwrap().url, "https://a/251");
         assert_eq!(
-            parse(&response(&[AAC, OPUS].join(",")), UA, Some(64))
+            parse(&all, UA, Some(64), None).unwrap().url,
+            "https://a/249"
+        );
+        assert_eq!(
+            parse(&all, UA, Some(192), None).unwrap().url,
+            "https://a/251"
+        );
+        assert_eq!(
+            parse(&response(&[AAC, OPUS].join(",")), UA, Some(64), None)
                 .unwrap()
                 .url,
             "https://a/251",
@@ -418,13 +493,16 @@ mod tests {
         const SURROUND: &str = r#"{"itag":258,"url":"https://a/258","mimeType":"audio/mp4; codecs=\"mp4a.40.2\"",
             "bitrate":384000,"audioChannels":6}"#;
         let all = response(&[HE_AAC, AAC, SURROUND].join(","));
-        assert_eq!(parse(&all, UA, Some(64)).unwrap().url, "https://a/140");
-        assert_eq!(parse(&all, UA, None).unwrap().url, "https://a/140");
+        assert_eq!(
+            parse(&all, UA, Some(64), None).unwrap().url,
+            "https://a/140"
+        );
+        assert_eq!(parse(&all, UA, None, None).unwrap().url, "https://a/140");
     }
 
     #[test]
     fn falls_back_to_aac() {
-        let stream = parse(&response(&[AAC, VIDEO].join(",")), UA, None).unwrap();
+        let stream = parse(&response(&[AAC, VIDEO].join(",")), UA, None, None).unwrap();
         assert_eq!(stream.url, "https://a/140");
         assert_eq!(stream.codec, "AAC");
         assert_eq!(
@@ -437,7 +515,7 @@ mod tests {
     #[test]
     fn scrambled_urls_count_as_none() {
         assert_eq!(
-            parse(&response(PREMIUM), UA, None).unwrap_err(),
+            parse(&response(PREMIUM), UA, None, None).unwrap_err(),
             "no playable audio stream"
         );
     }
@@ -451,14 +529,49 @@ mod tests {
     }
 
     #[test]
+    fn carries_on_with_the_same_format_only() {
+        let all = response(&[AAC, OPUS, OPUS_LOW].join(","));
+        let stream = parse(&all, UA, None, Some(249)).unwrap();
+        assert_eq!(stream.url, "https://a/249", "not the best");
+        assert!(parse(&all, UA, None, Some(250)).is_err(), "not offered");
+        assert!(
+            parse(&response(PREMIUM), UA, None, Some(774)).is_err(),
+            "scrambled"
+        );
+        let drc_first = response(&[OPUS_DRC, OPUS].join(","));
+        assert_eq!(
+            parse(&drc_first, UA, None, Some(251)).unwrap().url,
+            "https://a/251",
+            "not the compressed variant"
+        );
+    }
+
+    #[test]
+    fn asks_cut_off_clients_last_refused_longest_ago_first() {
+        let names = |cut: &[usize]| clients(cut).iter().map(|c| c.name).collect::<Vec<_>>();
+        assert_eq!(names(&[]), ["VISIONOS", "ANDROID_VR", "IOS"]);
+        assert_eq!(names(&[1]), ["VISIONOS", "IOS", "ANDROID_VR"]);
+
+        // Only iOS works, and was refused once before: a download walking
+        // on from visionOS and Android VR still reaches it.
+        let mut cut = vec![2];
+        assert!(mark(&mut cut, 0));
+        assert_eq!(names(&cut)[0], "ANDROID_VR");
+        assert!(mark(&mut cut, 1));
+        assert_eq!(names(&cut), ["IOS", "VISIONOS", "ANDROID_VR"]);
+        assert!(!mark(&mut cut, 2), "already marked");
+        assert_eq!(cut, [0, 1, 2], "but now refused last");
+    }
+
+    #[test]
     fn reports_unplayable_reason() {
         let json = r#"{"playabilityStatus":{"status":"LOGIN_REQUIRED","reason":"Sign in to confirm your age"}}"#;
         assert_eq!(
-            parse(json, UA, None).unwrap_err(),
+            parse(json, UA, None, None).unwrap_err(),
             "Sign in to confirm your age"
         );
         assert_eq!(
-            parse(&response(VIDEO), UA, None).unwrap_err(),
+            parse(&response(VIDEO), UA, None, None).unwrap_err(),
             "no playable audio stream"
         );
     }
@@ -479,7 +592,7 @@ mod tests {
                 Err(e) => return vec![format!("visitor data: {e}")],
             };
             for client in CLIENTS {
-                match resolve_with(client, VIDEO, &visitor, None).await {
+                match resolve_with(client, VIDEO, &visitor, None, None).await {
                     Ok(stream) => match probe(&stream).await {
                         Ok(()) => eprintln!(
                             "{}: {} {} kbps, serves bytes",

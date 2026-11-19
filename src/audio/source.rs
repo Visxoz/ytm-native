@@ -26,8 +26,9 @@ const MAX_RETRIES: u32 = 4;
 const RIDE_OUT: Duration = Duration::from_secs(60);
 const RETRY_DELAY: Duration = Duration::from_millis(500);
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
-/// Fresh URLs asked for in a row without a whole range arriving from them.
-const MAX_REFRESHES: u32 = 2;
+/// Fresh URLs asked for in a row without a whole range arriving from them:
+/// the same client once more, then each of the others.
+const MAX_REFRESHES: u32 = crate::streams::CLIENT_COUNT as u32;
 
 pub struct Source {
     pub url: String,
@@ -37,8 +38,9 @@ pub struct Source {
 }
 
 /// Asks YouTube again for the stream, as googlevideo sometimes serves a URL's
-/// first megabyte and refuses the rest. Runs on the download thread, so may block.
-pub type Refresh = Box<dyn FnMut() -> Result<Source, String> + Send>;
+/// first megabyte and refuses the rest. Told whether the last fresh URL was
+/// refused too. Runs on the download thread, so may block.
+pub type Refresh = Box<dyn FnMut(bool) -> Result<Source, String> + Send>;
 
 #[derive(Default)]
 struct State {
@@ -202,7 +204,7 @@ impl Download {
                 // Asking the same URL again cannot help, but a fresh one
                 // carries on from the same byte.
                 refreshes += 1;
-                match refreshed(&mut refresh, &source) {
+                match refreshed(&mut refresh, &source, refreshes > 1) {
                     Ok(new) => {
                         source = new;
                         continue;
@@ -337,8 +339,8 @@ fn is_refused(error: &(dyn std::error::Error + 'static)) -> bool {
 
 /// A fresh URL for the file `old` serves. It must be the same encode, as
 /// the bytes already downloaded have to line up with the rest.
-fn refreshed(refresh: &mut Refresh, old: &Source) -> Result<Source, String> {
-    let new = refresh()?;
+fn refreshed(refresh: &mut Refresh, old: &Source, again: bool) -> Result<Source, String> {
+    let new = refresh(again)?;
     check_host(&new.url)?;
     if new.size != old.size || !same_file(&old.url, &new.url) {
         return Err("YouTube served a different file".into());
@@ -471,7 +473,7 @@ mod tests {
     }
 
     fn refresh_to(url: &'static str, size: u64) -> Refresh {
-        Box::new(move || Ok(source(url, size)))
+        Box::new(move |_| Ok(source(url, size)))
     }
 
     #[test]
@@ -479,19 +481,22 @@ mod tests {
         let old = source(URL, 4171552);
         let fresh =
             "https://rr4.googlevideo.com/videoplayback?itag=251&clen=4171552&lmt=1700000000000000";
-        assert!(refreshed(&mut refresh_to(fresh, 4171552), &old).is_ok());
+        assert!(refreshed(&mut refresh_to(fresh, 4171552), &old, false).is_ok());
         assert!(
-            refreshed(&mut refresh_to(fresh, 4171553), &old).is_err(),
+            refreshed(&mut refresh_to(fresh, 4171553), &old, false).is_err(),
             "another length"
         );
         let elsewhere =
             "https://example.com/videoplayback?itag=251&clen=4171552&lmt=1700000000000000";
         assert_eq!(
-            refreshed(&mut refresh_to(elsewhere, 4171552), &old).err(),
+            refreshed(&mut refresh_to(elsewhere, 4171552), &old, false).err(),
             Some("unexpected stream host".into())
         );
-        let mut failing: Refresh = Box::new(|| Err("offline".into()));
-        assert_eq!(refreshed(&mut failing, &old).err(), Some("offline".into()));
+        let mut failing: Refresh = Box::new(|_| Err("offline".into()));
+        assert_eq!(
+            refreshed(&mut failing, &old, false).err(),
+            Some("offline".into())
+        );
     }
 
     #[test]

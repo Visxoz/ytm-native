@@ -319,7 +319,7 @@ impl Resolver {
                 dry.elapsed().as_millis()
             ));
         }
-        self.free(&visitor).await
+        self.free(&visitor, None).await
     }
 
     /// The stream to download. Counts nothing towards the Premium state, as
@@ -340,28 +340,30 @@ impl Resolver {
         {
             return Ok(stream);
         }
-        self.free(&visitor).await
+        self.free(&visitor, None).await
     }
 
-    /// A fresh URL for the same file. A free web-client format is asked of the
-    /// plain-URL clients, so one googlevideo refuses still plays. Counts
-    /// nothing towards the Premium state, as the song already counted.
-    async fn refresh(&self, was_premium: bool) -> Result<ResolvedStream, String> {
+    /// A fresh URL for the same file. A free stream, web-client ones too, is
+    /// asked of the plain-URL clients in format `itag`, so one googlevideo
+    /// refuses still plays. Counts nothing towards the Premium state, as the
+    /// song already counted.
+    async fn refresh(&self, was_premium: bool, itag: u32) -> Result<ResolvedStream, String> {
         let video_id = self.video_id.as_str();
         premium::diag(format!(
             "{video_id}: stream refused partway; asking for a fresh URL"
         ));
         let visitor = self.api.visitor_data(false).await?;
         if !was_premium {
-            return self.free(&visitor).await;
+            return self.free(&visitor, Some(itag)).await;
         }
         let cookie = self.api.cookie().ok_or("signed out")?;
         solved_stream(&self.premium, video_id, &cookie, &visitor, false, None).await
     }
 
     /// The first plain-URL client that answers, and signed in, the web
-    /// client as a last resort.
-    async fn free(&self, visitor: &str) -> Result<ResolvedStream, String> {
+    /// client as a last resort. `itag` holds the plain-URL clients to that
+    /// format, but not the web client.
+    async fn free(&self, visitor: &str, itag: Option<u32>) -> Result<ResolvedStream, String> {
         let Self {
             api,
             premium,
@@ -371,13 +373,13 @@ impl Resolver {
         } = self;
         let (video_id, max_kbps) = (video_id.as_str(), *max_kbps);
         let free = Instant::now();
-        let result = match streams::resolve(video_id, visitor, max_kbps).await {
+        let result = match streams::resolve(video_id, visitor, max_kbps, itag).await {
             Ok(stream) => Ok(stream),
             // YouTube sometimes bot-checks a visitor ID; retry with a fresh one.
             Err(e) => {
                 log::debug!("retrying with a new visitor ID: {e}");
                 let fresh = api.visitor_data(true).await?;
-                let result = streams::resolve(video_id, &fresh, max_kbps).await;
+                let result = streams::resolve(video_id, &fresh, max_kbps, itag).await;
                 // Only a fresh ID working shows the old one was at fault;
                 // both failing points at the song instead.
                 if result.is_ok() {
@@ -473,22 +475,29 @@ impl App {
     }
 
     /// Where `video_id`'s stream downloads from. Should googlevideo refuse its
-    /// URL partway, the download's thread waits on a fresh one.
+    /// URL partway, the download's thread waits on a fresh one, and should
+    /// that be refused too, on one from another client.
     pub(super) fn remote_source(
         &self,
         video_id: &str,
         stream: ResolvedStream,
     ) -> (Source, Refresh) {
         let resolver = Arc::new(self.resolver(video_id.to_owned()));
-        let (rt, was_premium) = (self.rt.clone(), stream.premium);
-        let refresh = Box::new(move || {
+        let (rt, was_premium, itag) = (self.rt.clone(), stream.premium, stream.itag);
+        let mut client = stream.client;
+        let refresh = Box::new(move |again| {
+            if again && let Some(name) = client {
+                streams::cut_off(name);
+            }
             let resolver = Arc::clone(&resolver);
             // Spawned rather than driven here: a runtime shutting down on
             // exit drops the task and the wait errors, where this would panic.
-            let task = rt.spawn(async move { resolver.refresh(was_premium).await });
-            rt.block_on(task)
-                .map_err(|_| "the refresh did not finish".to_owned())?
-                .map(source)
+            let task = rt.spawn(async move { resolver.refresh(was_premium, itag).await });
+            let stream = rt
+                .block_on(task)
+                .map_err(|_| "the refresh did not finish".to_owned())??;
+            client = stream.client;
+            Ok(source(stream))
         });
         (source(stream), refresh)
     }

@@ -486,17 +486,11 @@ mod tests {
     #[test]
     fn labels_premium_formats_with_their_nominal_bitrate() {
         let stream = |itag, kbps| ResolvedStream {
-            url: String::new(),
-            size: 0,
-            mime: String::new(),
-            headers: Vec::new(),
             codec: "Opus".into(),
             bitrate_kbps: kbps,
-            duration: None,
-            loudness_db: None,
             premium: itag == 774,
             itag,
-            file: None,
+            ..Default::default()
         };
         assert_eq!(quality_label(&stream(774, 284.6)), "OPUS 256");
         assert_eq!(quality_label(&stream(251, 146.4)), "OPUS 146");
