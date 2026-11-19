@@ -180,11 +180,11 @@ impl App {
         });
     }
 
-    pub(super) fn take_resume_position(&self) -> f64 {
-        let mut state = self.state.borrow_mut();
-        let current = state.queue.current().map(|t| t.id.clone());
-        match state.playback.resume.take() {
-            Some((id, position)) if Some(&id) == current.as_ref() => position,
+    pub(super) fn resume_position(&self) -> f64 {
+        let state = self.state.borrow();
+        let current = state.queue.current().map(|t| t.id.as_str());
+        match &state.playback.resume {
+            Some((id, position)) if Some(id.as_str()) == current => *position,
             _ => 0.0,
         }
     }

@@ -391,8 +391,9 @@ impl Engine {
         };
         // The track then loads as usual once the current one ends.
         log::debug!("the next track did not open: {error}");
+        let dropped = next.download.dropped();
         self.next = None;
-        (self.on_event)(PlayerEvent::NextFailed);
+        (self.on_event)(PlayerEvent::NextFailed { dropped });
     }
 
     /// Moves decoding on to the queued track once the current one is fully
@@ -582,7 +583,7 @@ impl Engine {
                 if !self.is_current(&download) {
                     return;
                 }
-                (self.on_event)(PlayerEvent::Error(e));
+                (self.on_event)(failed(&download, e));
                 return;
             }
         };
@@ -671,7 +672,7 @@ impl Engine {
                     // Dropped, or as a finished track it would also report
                     // that it ended, skipping a second track.
                     self.track = None;
-                    (self.on_event)(PlayerEvent::Error(e));
+                    (self.on_event)(failed(&download, e));
                 }
             }
         }
@@ -910,6 +911,15 @@ impl Engine {
         {
             log::warn!("could not pause audio output: {e}");
         }
+    }
+}
+
+/// A track's failure, as a dropped connection when its download says so.
+fn failed(download: &Download, error: String) -> PlayerEvent {
+    if download.dropped() {
+        PlayerEvent::Dropped(error)
+    } else {
+        PlayerEvent::Error(error)
     }
 }
 

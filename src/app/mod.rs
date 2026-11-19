@@ -86,7 +86,9 @@ struct Playback {
     current_premium: bool,
     /// A track whose Premium stream failed and plays the free one instead.
     force_free: Option<String>,
-    /// Track and position restored from the last run, used on its first play.
+    /// Where a track is to start: restored from the last run, sought to
+    /// while stopped, or where a Premium retry or dropped connection left
+    /// off. Kept until it sounds, so a load that fails starts there again.
     resume: Option<(String, f64)>,
     /// The generation whose play is already recorded: a free-stream retry
     /// carrying on a song, so its start is not a second play.
@@ -101,6 +103,8 @@ struct Playback {
     /// The track last tried for queueing, so a failure is not retried
     /// every tick; it then loads as usual when the current one ends.
     queue_tried: Option<String>,
+    /// A song whose connection dropped, and the tries at opening it again.
+    reopen: Option<(String, u32)>,
 }
 
 impl Playback {
@@ -133,6 +137,25 @@ impl Playback {
         self.prefetched
             .remove(id)
             .filter(|(_, at)| at.elapsed() < playback::PREFETCH_FRESH)
+    }
+
+    /// Counts a try at opening `id` again after its connection dropped,
+    /// where the sound got to should it have started, and returns the tries.
+    fn reopen_try(&mut self, id: &str, position: f64) -> u32 {
+        if self.started {
+            self.resume = Some((id.to_owned(), position));
+            self.play_recorded = Some(self.generation);
+        }
+        let (_, tries) = match &mut self.reopen {
+            Some(reopen) if reopen.0 == id => reopen,
+            slot => slot.insert((id.to_owned(), 0)),
+        };
+        *tries += 1;
+        *tries
+    }
+
+    fn reopening(&self, id: &str) -> bool {
+        self.reopen.as_ref().is_some_and(|(r, _)| r == id)
     }
 
     /// Keeps the stream for `id`, dropping stale ones such as tracks skipped past.
@@ -186,6 +209,10 @@ struct State {
 impl State {
     /// Replaces the queue, dropping Smart Shuffle's batch for the old one.
     fn set_queue(&mut self, tracks: Vec<Track>, start: usize, shuffle: bool) {
+        // Chosen afresh, a song that dropped starts over.
+        if self.playback.reopen.take().is_some() {
+            self.playback.resume = None;
+        }
         self.queue.set(tracks, start, shuffle);
         self.smart.reset();
     }
@@ -269,9 +296,12 @@ impl App {
                 PlayerEvent::Started => ("started", String::new()),
                 PlayerEvent::Advanced => ("advanced", String::new()),
                 PlayerEvent::NextDropped => ("next-dropped", String::new()),
-                PlayerEvent::NextFailed => ("next-failed", String::new()),
+                PlayerEvent::NextFailed { dropped } => {
+                    ("next-failed", if dropped { "dropped" } else { "" }.into())
+                }
                 PlayerEvent::Ended => ("ended", String::new()),
                 PlayerEvent::Error(e) => ("error", e),
+                PlayerEvent::Dropped(e) => ("dropped", e),
             };
             let _ = weak.upgrade_in_event_loop(move |ui| {
                 ui.invoke_player_event(kind.into(), message.into())
@@ -752,5 +782,37 @@ impl App {
         self.persist();
         self.player.stop();
         self.presence.shutdown();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_dropped_song_reopens_where_it_first_stopped() {
+        let mut playback = Playback {
+            started: true,
+            ..Playback::default()
+        };
+        assert_eq!(playback.reopen_try("a", 42.0), 1);
+        assert_eq!(playback.play_recorded, Some(playback.generation));
+        playback.started = false;
+        playback.generation += 1;
+        assert_eq!(playback.reopen_try("a", 0.0), 2, "the reopen failed too");
+        assert_eq!(
+            playback.resume,
+            Some(("a".into(), 42.0)),
+            "not where the stopped player is"
+        );
+        assert!(playback.reopening("a"));
+
+        assert_eq!(playback.reopen_try("b", 9.0), 1, "another song starts over");
+        assert!(!playback.reopening("a"));
+        assert_eq!(
+            playback.resume,
+            Some(("a".into(), 42.0)),
+            "b never sounded, so has no place to carry on from"
+        );
     }
 }

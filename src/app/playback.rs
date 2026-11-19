@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use slint::SharedString;
+use slint::{SharedString, Timer};
 
 use super::{
     App, SongVersion, State,
@@ -23,6 +23,10 @@ const RESTART_AFTER_SECS: f64 = 3.0;
 /// Stream URLs last about six hours; refresh well before.
 pub(super) const PREFETCH_FRESH: Duration = Duration::from_secs(60 * 60);
 const MAX_CONSECUTIVE_FAILURES: u32 = 3;
+/// Opening a song again after its connection dropped, each try waiting
+/// `REOPEN_AFTER` longer than the last.
+const MAX_REOPENS: u32 = 3;
+const REOPEN_AFTER: Duration = Duration::from_secs(5);
 
 impl App {
     pub(super) fn start_current(self: &Rc<Self>) {
@@ -33,6 +37,7 @@ impl App {
         let generation = {
             let mut state = self.state.borrow_mut();
             let playback = &mut state.playback;
+            let recorded = playback.play_recorded == Some(playback.generation);
             playback.generation += 1;
             playback.started = false;
             playback.duration = track.seconds();
@@ -48,6 +53,12 @@ impl App {
                 playback.unqueue();
             } else {
                 playback.forget_queued();
+            }
+            // A song opened again carries on without a second play.
+            if !playback.reopening(&track.id) {
+                playback.reopen = None;
+            } else if recorded {
+                playback.play_recorded = Some(playback.generation);
             }
             playback.generation
         };
@@ -70,8 +81,11 @@ impl App {
             if app.state.borrow().playback.generation != generation {
                 return;
             }
+            let reopening = app.state.borrow().playback.reopening(&track.id);
             match result {
                 Ok(stream) => app.load_stream(&track.id, stream),
+                // Still offline.
+                Err(e) if reopening => app.connection_lost(&e),
                 Err(e) => app.playback_failed(&track.title, &e),
             }
         });
@@ -79,8 +93,63 @@ impl App {
 
     fn load_stream(self: &Rc<Self>, id: &str, stream: ResolvedStream) {
         self.show_stream(&stream);
-        let start_at = self.take_resume_position();
+        let start_at = self.resume_position();
         self.player.load(self.stream_spec(id, stream, start_at));
+    }
+
+    /// Opens the song again where it stopped, a few times while the
+    /// connection is gone, then stops on it, so Play carries on.
+    fn connection_lost(self: &Rc<Self>, error: &str) {
+        log::warn!("lost the connection: {error}");
+        let position = self.player.position();
+        let (id, sounded, tries, generation) = {
+            let mut state = self.state.borrow_mut();
+            let Some(id) = state.queue.current().map(|t| t.id.clone()) else {
+                return;
+            };
+            let playback = &mut state.playback;
+            let sounded = playback.started;
+            let tries = playback.reopen_try(&id, position);
+            playback.started = false;
+            (id, sounded, tries, playback.generation)
+        };
+        if self.player.is_paused() || tries > MAX_REOPENS {
+            if tries > MAX_REOPENS {
+                self.toast("Lost the connection. Press play to carry on.");
+            }
+            self.stop();
+            return;
+        }
+        if tries == 1 {
+            self.toast("Lost the connection; trying again");
+        }
+        self.ui().set_np_loading(true);
+        let weak = Rc::downgrade(self);
+        Timer::single_shot(REOPEN_AFTER * tries, move || {
+            let Some(app) = weak.upgrade() else { return };
+            // A late event may have sent it after the song played on.
+            let due = {
+                let playback = &app.state.borrow().playback;
+                playback.generation == generation && !playback.started && playback.reopen.is_some()
+            };
+            if !due {
+                return;
+            }
+            {
+                // The download gave up ahead of the sound, which played on
+                // through what was buffered, unless sought since.
+                let resume = &mut app.state.borrow_mut().playback.resume;
+                if sounded && *resume == Some((id.clone(), position)) {
+                    *resume = Some((id, app.player.position()));
+                }
+            }
+            if app.player.is_paused() {
+                // Play then opens it.
+                app.ui().set_np_loading(false);
+            } else {
+                app.start_current();
+            }
+        });
     }
 
     fn playback_failed(self: &Rc<Self>, title: &str, error: &str) {
@@ -145,6 +214,8 @@ impl App {
                     let playback = &mut state.playback;
                     playback.started = true;
                     playback.failures = 0;
+                    playback.reopen = None;
+                    playback.resume = None;
                     let waited = playback.requested_at.take().map(|t| t.elapsed());
                     let recorded = playback.play_recorded.take() == Some(playback.generation);
                     (waited, playback.current_premium, recorded)
@@ -172,8 +243,13 @@ impl App {
             }
             "advanced" => self.advance_gapless(),
             "next-dropped" => self.state.borrow_mut().playback.unqueue(),
-            "next-failed" => self.state.borrow_mut().playback.queued_failed = true,
+            // A stream that dropped is kept, so its track rides out the
+            // drop as it plays rather than failing to resolve offline.
+            "next-failed" if message != "dropped" => {
+                self.state.borrow_mut().playback.queued_failed = true;
+            }
             "ended" => self.next(false),
+            "dropped" => self.connection_lost(message),
             "error" => {
                 let title = self
                     .state
@@ -415,13 +491,18 @@ impl App {
         } else {
             secs.max(0.0)
         };
-        if self.stopped() {
-            // The engine has nothing to seek in; the track starts here.
+        let stopped = self.stopped();
+        {
+            // With nothing to seek in, or a song being opened again, the
+            // track starts here.
             let mut state = self.state.borrow_mut();
-            if let Some(id) = state.queue.current().map(|t| t.id.clone()) {
+            if let Some(id) = state.queue.current().map(|t| t.id.clone())
+                && (stopped || state.playback.reopening(&id))
+            {
                 state.playback.resume = Some((id, secs));
             }
-        } else {
+        }
+        if !stopped {
             self.player.seek(secs);
         }
         self.ui().set_np_position(secs as f32);

@@ -9,7 +9,7 @@ use std::{
     path::PathBuf,
     sync::{Arc, Condvar, Mutex, OnceLock},
     thread,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use symphonia::core::io::MediaSource;
@@ -21,7 +21,11 @@ const READ_BUF: usize = 64 * 1024;
 /// Caps the up-front allocation should a reported size be wrong; enough for a long mix.
 const MAX_RESERVE: u64 = 1024 * 1024 * 1024;
 const MAX_RETRIES: u32 = 4;
+/// How long a connection that stops answering is retried, so one that
+/// comes back within it plays on.
+const RIDE_OUT: Duration = Duration::from_secs(60);
 const RETRY_DELAY: Duration = Duration::from_millis(500);
+const MAX_RETRY_DELAY: Duration = Duration::from_secs(5);
 /// Fresh URLs asked for in a row without a whole range arriving from them.
 const MAX_REFRESHES: u32 = 2;
 
@@ -43,6 +47,8 @@ struct State {
     done: bool,
     cancelled: bool,
     error: Option<String>,
+    /// The error is the connection's, which outlasted `RIDE_OUT`.
+    dropped: bool,
 }
 
 #[derive(Default)]
@@ -131,6 +137,12 @@ impl Download {
         }
     }
 
+    /// Whether it gave up on a connection that stopped answering, rather
+    /// than on a refusal or a bad file.
+    pub fn dropped(&self) -> bool {
+        self.state.lock().unwrap().dropped
+    }
+
     pub fn reader(self: &Arc<Self>) -> StreamReader {
         StreamReader {
             download: Arc::clone(self),
@@ -142,7 +154,12 @@ impl Download {
         if let Err(e) = check_host(&source.url) {
             return self.fail(e);
         }
-        let (mut retries, mut refreshes) = (0, 0);
+        // Kept apart, so a stray error once a lost connection is back gets
+        // its own tries.
+        let (mut retries, mut drops, mut refreshes) = (0, 0, 0);
+        // From the first failure in a row, not the last byte, as a PC
+        // waking from sleep fails at once while its network comes back.
+        let mut failing_since = None;
         let mut buf = vec![0; READ_BUF];
         loop {
             let (offset, total) = {
@@ -159,7 +176,9 @@ impl Download {
                 Ok(true) => break,
                 Ok(false) => {
                     retries = 0;
+                    drops = 0;
                     refreshes = 0;
+                    failing_since = None;
                     continue;
                 }
                 Err(e) => e,
@@ -171,9 +190,11 @@ impl Download {
                     return;
                 }
                 // A range that broke off after some bytes still got somewhere,
-                // so only failures in a row that bring nothing give up.
+                // so only a stretch with nothing arriving gives up.
                 if state.data.len() as u64 > offset {
                     retries = 0;
+                    drops = 0;
+                    failing_since = None;
                 }
             }
             let refused = is_refused(&*error);
@@ -188,10 +209,19 @@ impl Download {
                     }
                     Err(e) => log::warn!("no fresh URL for a refused download: {e}"),
                 }
+            } else if is_connection(&*error) {
+                let failing = *failing_since.get_or_insert_with(Instant::now);
+                if let Some(delay) = retry_delay(drops, failing.elapsed()) {
+                    drops += 1;
+                    log::debug!("download lost its connection, retrying ({drops}): {error}");
+                    self.wait(delay);
+                    continue;
+                }
+                self.state.lock().unwrap().dropped = true;
             } else if !refused && retries < MAX_RETRIES {
                 retries += 1;
                 log::debug!("download chunk failed, retrying ({retries}): {error}");
-                thread::sleep(RETRY_DELAY * retries);
+                self.wait(RETRY_DELAY * retries);
                 continue;
             }
             log::warn!("download failed: {error}");
@@ -199,6 +229,14 @@ impl Download {
         }
         self.state.lock().unwrap().done = true;
         self.changed.notify_all();
+    }
+
+    /// Sleeps for `delay`, or until cancelled.
+    fn wait(&self, delay: Duration) {
+        let state = self.state.lock().unwrap();
+        let _ = self
+            .changed
+            .wait_timeout_while(state, delay, |s| !s.cancelled);
     }
 
     /// Ends the download with `error`, which a blocked read then returns.
@@ -266,12 +304,27 @@ impl Download {
     }
 }
 
+/// The wait before retrying after `retries` failures in a row, doubling, or
+/// `None` once they have gone on for `RIDE_OUT`.
+fn retry_delay(retries: u32, failing: Duration) -> Option<Duration> {
+    (failing < RIDE_OUT).then(|| (RETRY_DELAY * 2u32.saturating_pow(retries)).min(MAX_RETRY_DELAY))
+}
+
 fn check_host(url: &str) -> Result<(), String> {
     if crate::http::allowed(url) {
         return Ok(());
     }
     log::warn!("refused a stream from a host YouTube does not use");
     Err("unexpected stream host".into())
+}
+
+/// Whether the connection failed, rather than googlevideo answering with
+/// an error or bytes that don't fit.
+fn is_connection(error: &(dyn std::error::Error + 'static)) -> bool {
+    error.is::<io::Error>()
+        || error
+            .downcast_ref::<reqwest::Error>()
+            .is_some_and(|e| e.status().is_none())
 }
 
 /// Whether googlevideo refused the URL itself rather than one request.
@@ -442,7 +495,7 @@ mod tests {
     }
 
     #[test]
-    fn only_a_forbidden_answer_asks_for_a_fresh_url() {
+    fn tells_refusals_and_lost_connections_from_other_errors() {
         let answer = |status: u16| {
             let response = http::Response::builder().status(status).body("").unwrap();
             reqwest::Response::from(response)
@@ -455,6 +508,14 @@ mod tests {
         assert!(!is_refused(&answer(503)));
         let other: Box<dyn std::error::Error> = "the server sent no bytes".into();
         assert!(!is_refused(&*other), "not an HTTP error");
+        assert!(
+            !is_connection(&answer(503)),
+            "an answer, not a lost connection"
+        );
+        assert!(!is_connection(&*other));
+        assert!(is_connection(&io::Error::from(
+            io::ErrorKind::ConnectionReset
+        )));
     }
 
     #[test]
@@ -480,6 +541,15 @@ mod tests {
             reader.seek(SeekFrom::Current(i64::MAX)).is_err(),
             "overflow"
         );
+    }
+
+    #[test]
+    fn retries_a_dropped_connection_until_it_has_been_gone_a_while() {
+        let secs = Duration::from_secs;
+        assert_eq!(retry_delay(0, Duration::ZERO), Some(RETRY_DELAY));
+        assert_eq!(retry_delay(1, secs(1)), Some(RETRY_DELAY * 2));
+        assert_eq!(retry_delay(40, secs(30)), Some(MAX_RETRY_DELAY), "capped");
+        assert_eq!(retry_delay(0, RIDE_OUT), None, "given up");
     }
 
     #[test]

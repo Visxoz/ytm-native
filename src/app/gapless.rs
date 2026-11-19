@@ -113,6 +113,7 @@ impl App {
             playback.requested_at = None;
             playback.queue_tried = None;
             playback.resume = None;
+            playback.reopen = None;
         }
         self.present(&track, 0.0);
         self.record_play();

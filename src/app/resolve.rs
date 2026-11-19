@@ -229,6 +229,9 @@ struct Resolver {
     video_id: String,
     want_premium: bool,
     max_kbps: Option<u64>,
+    /// Opening a song again after its connection dropped, whose failures
+    /// say nothing about Premium.
+    reopening: bool,
 }
 
 impl Resolver {
@@ -240,6 +243,7 @@ impl Resolver {
             premium,
             video_id,
             want_premium,
+            reopening,
             ..
         } = self;
         let video_id = video_id.as_str();
@@ -276,7 +280,9 @@ impl Resolver {
                             premium::diag(format!(
                                 "{video_id}: Premium path failed, using the free stream: {e}"
                             ));
-                            premium.record_error();
+                            if !reopening {
+                                premium.record_error();
+                            }
                         }
                     }
                 }
@@ -410,6 +416,7 @@ impl App {
         Resolver {
             api: self.api.clone(),
             premium: Arc::clone(&self.premium),
+            reopening: state.playback.reopening(&video_id),
             video_id,
             want_premium,
             max_kbps: state.settings.quality.max_kbps(),
