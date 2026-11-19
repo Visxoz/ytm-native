@@ -197,9 +197,6 @@ struct State {
     saving: Option<(String, Vec<api::PlaylistOption>)>,
     artwork_accent: Option<slint::Color>,
     scrobbler: scrobble::Scrobbler,
-    /// Whether the stored cookie has been checked this run, which the first
-    /// signed-in Home does with its picture.
-    cookie_checked: bool,
     downloads: Downloads,
     /// Songs waiting to download; the first is downloading while `downloading`.
     download_queue: VecDeque<Track>,
@@ -350,7 +347,6 @@ impl App {
                 saving: None,
                 artwork_accent: None,
                 scrobbler: scrobble::Scrobbler::load(),
-                cookie_checked: false,
                 downloads: Downloads::load(),
                 download_queue: VecDeque::new(),
                 downloading: false,
@@ -732,8 +728,9 @@ impl App {
         let signed_in = self.api.has_cookie();
         self.state.borrow_mut().signed_in = signed_in;
         self.ui().global::<ApiGlobal>().set_signed_in(signed_in);
-        // Home, opened below, loads the account's picture and checks the
-        // cookie with it.
+        // Home, opened below, loads the account's picture, and the first
+        // signed-in answer that comes back signed out has the cookie checked.
+        self.watch_sign_in();
         if signed_in {
             self.load_library();
             if let Some(id) = self.playing_id() {

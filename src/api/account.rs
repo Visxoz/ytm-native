@@ -88,6 +88,12 @@ impl Api {
         self.rp.store_cache().await;
     }
 
+    /// Waits for YouTube to answer a request sent with the cookie as signed
+    /// out, as it does once the session has ended.
+    pub async fn sign_in_lost(&self) {
+        self.rp.user_auth_lost().await;
+    }
+
     /// Checks the stored cookie with YouTube, which costs a page load.
     /// `None` when YouTube could not be asked.
     pub async fn cookie_valid(&self) -> Option<bool> {
@@ -151,6 +157,21 @@ mod tests {
         assert_eq!(account_photo(menu, GUIDE_PHOTO), None);
         assert_eq!(account_photo("{}", MENU_PHOTO), None);
         assert_eq!(account_photo("not json", MENU_PHOTO), None);
+    }
+
+    #[test]
+    fn notices_answers_served_signed_out() {
+        use rustypipe::client::answered_signed_out;
+        let context = |logged_in| {
+            format!(
+                r#"{{"responseContext":{{"serviceTrackingParams":[{{"service":"GFEEDBACK",
+                "params":[{{"key":"browse_id","value":"FEmusic_home"}},
+                {{"key":"logged_in","value":"{logged_in}"}}]}}]}}}}"#
+            )
+        };
+        assert!(answered_signed_out(&context("0")));
+        assert!(!answered_signed_out(&context("1")));
+        assert!(!answered_signed_out("{}"));
     }
 
     #[test]

@@ -38,7 +38,7 @@ $crates = @(
             }
             $Matches[1]
         }
-        Hint    = 'Check whether rustypipe now reads editable playlist headers, how it fetches visitor data, whether it takes in the cookies YouTube sets, and how it retries refusals, and update or drop the patch.'
+        Hint    = 'Check whether rustypipe now reads editable playlist headers, how it fetches visitor data, whether it takes in the cookies YouTube sets and notices signed-in requests answered signed out, and how it retries refusals, and update or drop the patch.'
     }
 )
 

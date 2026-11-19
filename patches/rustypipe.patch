@@ -11,7 +11,7 @@ index 542a882..224a195 100644
  
  [dependencies.tracing]
 diff --git a/src/client/mod.rs b/src/client/mod.rs
-index 06386bc..803898b 100644
+index 06386bc..991b095 100644
 --- a/src/client/mod.rs
 +++ b/src/client/mod.rs
 @@ -32,7 +32,8 @@ mod channel_rss;
@@ -24,7 +24,7 @@ index 06386bc..803898b 100644
  use std::{borrow::Cow, fmt::Debug, time::Duration};
  
  use once_cell::sync::Lazy;
-@@ -328,6 +329,75 @@ impl AuthCookie {
+@@ -328,6 +329,81 @@ impl AuthCookie {
      }
  }
  
@@ -97,10 +97,16 @@ index 06386bc..803898b 100644
 +    })
 +}
 +
++/// Whether a response says it was served signed out, as YouTube answers a
++/// request whose cookie belongs to a session that has ended.
++pub fn answered_signed_out(body: &str) -> bool {
++    body.contains(r#""key":"logged_in","value":"0""#)
++}
++
  pub(crate) const DEFAULT_UA: &str =
      "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0";
  pub(crate) const MOBILE_UA: &str = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.135 Mobile Safari/537.36";
-@@ -348,7 +418,7 @@ const DISABLE_PRETTY_PRINT_PARAMETER: &str = "prettyPrint=false";
+@@ -348,7 +424,7 @@ const DISABLE_PRETTY_PRINT_PARAMETER: &str = "prettyPrint=false";
  
  // Web client
  const DESKTOP_CLIENT_VERSION: &str = "2.20241216.05.00";
@@ -109,11 +115,13 @@ index 06386bc..803898b 100644
  const MOBILE_CLIENT_VERSION: &str = "2.20241217.07.00";
  const TV_CLIENT_VERSION: &str = "7.20241211.14.00";
  
-@@ -390,6 +460,24 @@ struct RustyPipeRef {
+@@ -390,6 +466,26 @@ struct RustyPipeRef {
      user_agent: Cow<'static, str>,
      visitor_data_cache: VisitorDataCache,
      botguard: Option<BotguardCfg>,
 +    refusals: Mutex<Refusals>,
++    /// Woken by a signed-in request answered as signed out.
++    signed_out: tokio::sync::Notify,
 +}
 +
 +/// Signed-in requests YouTube refused in a row, and until when the rest
@@ -134,15 +142,16 @@ index 06386bc..803898b 100644
  }
  
  #[derive(Clone)]
-@@ -797,6 +885,7 @@ impl RustyPipeBuilder {
+@@ -797,6 +893,8 @@ impl RustyPipeBuilder {
                  user_agent,
                  visitor_data_cache,
                  botguard,
 +                refusals: Mutex::default(),
++                signed_out: tokio::sync::Notify::new(),
              }),
          })
      }
-@@ -1099,6 +1188,7 @@ impl RustyPipe {
+@@ -1099,6 +1197,7 @@ impl RustyPipe {
  
              let err = match resp {
                  Ok(resp) => {
@@ -150,7 +159,7 @@ index 06386bc..803898b 100644
                      let status = resp.status();
                      // Immediately return in case of success or unrecoverable status code
                      if status.is_success()
-@@ -1160,6 +1250,37 @@ impl RustyPipe {
+@@ -1160,6 +1259,37 @@ impl RustyPipe {
          Ok(self.http_request_estatus(request).await?.text().await?)
      }
  
@@ -188,7 +197,7 @@ index 06386bc..803898b 100644
      async fn extract_client_version(&self, client_type: ClientType) -> Result<String, Error> {
          let (sw_url, html_url, origin, ua) = match client_type {
              ClientType::Desktop => (
-@@ -1325,7 +1446,11 @@ impl RustyPipe {
+@@ -1325,7 +1455,11 @@ impl RustyPipe {
      }
  
      /// Write the current cache data to the storage backend.
@@ -201,7 +210,7 @@ index 06386bc..803898b 100644
          let mut cache_clients = HashMap::new();
          for (c, lk) in &self.inner.cache.clients {
              let v = lk.read().await.clone();
-@@ -1663,6 +1788,48 @@ impl RustyPipe {
+@@ -1663,6 +1797,62 @@ impl RustyPipe {
          Ok(())
      }
  
@@ -236,6 +245,20 @@ index 06386bc..803898b 100644
 +        }
 +    }
 +
++    /// Waits for a request sent with the stored cookie to be answered as
++    /// signed out. Answers arriving while nothing waits wake the next wait.
++    pub async fn user_auth_lost(&self) {
++        self.inner.signed_out.notified().await;
++    }
++
++    /// Takes in the body of a successful answer to a signed-in request.
++    fn check_signed_in(&self, body: &str) {
++        if answered_signed_out(body) {
++            tracing::warn!("YouTube answered a signed-in request as signed out");
++            self.inner.signed_out.notify_one();
++        }
++    }
++
 +    fn take_response_cookies(&self, request: &Request, response: &Response) {
 +        let set_cookie = response.headers().get_all(header::SET_COOKIE);
 +        if set_cookie.iter().next().is_none() {
@@ -250,7 +273,7 @@ index 06386bc..803898b 100644
      /// Attempt to fetch the YouTube website with login cookies to check if the user is successfully logged in
      /// and the session is still valid.
      pub async fn user_auth_check_cookie(&self) -> Result<(), Error> {
-@@ -2370,6 +2537,7 @@ impl RustyPipeQuery {
+@@ -2370,10 +2560,14 @@ impl RustyPipeQuery {
              .http
              .execute(request.try_clone().unwrap())
              .await?;
@@ -258,7 +281,14 @@ index 06386bc..803898b 100644
  
          let status = response.status();
          let body = response.text().await?;
-@@ -2427,15 +2595,23 @@ impl RustyPipeQuery {
+         tracing::debug!("fetched {} bytes from YT", body.len());
++        if ctx.authenticated && ctype.is_web() && status.is_success() {
++            self.client.check_signed_in(&body);
++        }
+ 
+         let res = if status.is_client_error() || status.is_server_error() {
+             let error_msg = serde_json::from_str::<response::ErrorResponse>(&body)
+@@ -2427,15 +2621,23 @@ impl RustyPipeQuery {
          ctx_src: &MapRespOptions<'_>,
      ) -> Result<RequestResult<M>, Error> {
          let mut last_resp = None;
@@ -283,7 +313,7 @@ index 06386bc..803898b 100644
                          return Ok(resp);
                      }
                      e
-@@ -2620,13 +2796,28 @@ impl RustyPipeQuery {
+@@ -2620,13 +2822,33 @@ impl RustyPipeQuery {
          let context = self.get_context(ctype, true, &visitor_data).await;
          let req_body = QBody { context, body };
  
@@ -309,6 +339,11 @@ index 06386bc..803898b 100644
 +            if signed_in && matches!(&res, Ok(_) | Err(Error::HttpStatus(..))) {
 +                self.client.signed_in_answered(refused);
 +            }
++            if signed_in && ctype.is_web() {
++                if let Ok(body) = &res {
++                    self.client.check_signed_in(body);
++                }
++            }
 +            if !refused || paused || n == self.client.inner.n_http_retries {
 +                return res;
 +            }
@@ -319,7 +354,7 @@ index 06386bc..803898b 100644
      }
  }
  
-@@ -2764,6 +2955,25 @@ fn detect_botguard_bin(program: OsString) -> Result<(OsString, String), Error> {
+@@ -2764,6 +2986,25 @@ fn detect_botguard_bin(program: OsString) -> Result<(OsString, String), Error> {
  mod tests {
      use super::*;
  

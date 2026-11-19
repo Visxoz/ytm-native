@@ -149,9 +149,8 @@ impl App {
     /// in, or the charts: rather that than a fresh one missing shelves.
     fn load_personal_home(self: &Rc<Self>, generation: u64) {
         // Asked with each fresh feed, so a changed or failed picture shows
-        // within minutes. The first also checks the stored cookie.
-        let check_cookie = !std::mem::replace(&mut self.state.borrow_mut().cookie_checked, true);
-        self.load_account_photo(check_cookie);
+        // within minutes.
+        self.load_account_photo();
         let api = self.api.clone();
         let ahead = self.home_ahead.take();
         self.spawn(

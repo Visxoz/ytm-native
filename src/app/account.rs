@@ -7,6 +7,10 @@ use crate::{
     Api as ApiGlobal, CardItem, api::Route, google_sign_in::GoogleSignIn, images, settings,
 };
 
+/// The least time between cookie checks, after one that didn't find the
+/// cookie rejected.
+const SIGN_IN_RECHECK_AFTER: Duration = Duration::from_secs(10 * 60);
+
 impl App {
     pub(super) fn sign_in(self: &Rc<Self>, cookie: String) {
         if cookie.trim().is_empty() {
@@ -34,7 +38,7 @@ impl App {
                         // It may be another account's.
                         settings::remove_home();
                         app.load_library();
-                        app.load_account_photo(true);
+                        app.load_account_photo();
                         app.premium.reset();
                         app.update_settings(|s| {
                             s.premium_account = false;
@@ -173,12 +177,79 @@ impl App {
         );
     }
 
-    pub(super) fn sign_in_expired(self: &Rc<Self>) {
-        log::warn!("the stored sign-in was rejected");
-        self.show_signed_out();
-        if self.state.borrow().route == Route::Home {
-            self.reload();
+    /// Waits for YouTube to answer a signed-in request as signed out, then
+    /// checks the cookie, as the session can end at any time.
+    pub(super) fn watch_sign_in(self: &Rc<Self>) {
+        let api = self.api.clone();
+        self.spawn(async move { api.sign_in_lost().await }, |app, ()| {
+            app.check_sign_in();
+        });
+    }
+
+    fn check_sign_in(self: &Rc<Self>) {
+        let (signed_in, account) = {
+            let state = self.state.borrow();
+            (state.signed_in, state.account)
+        };
+        // An answer to a request sent before the cookie was removed.
+        if !signed_in {
+            return self.watch_sign_in();
         }
+        let api = self.api.clone();
+        self.spawn(
+            async move {
+                // A stale cookie may only need renewing, which the first
+                // check of a run can beat.
+                match api.cookie_valid().await {
+                    Some(false) => {
+                        if let Err(e) = api.rotate_cookies().await {
+                            log::warn!("could not renew the sign-in: {e}");
+                        }
+                        api.cookie_valid().await
+                    }
+                    valid => valid,
+                }
+            },
+            move |app, valid| {
+                // Signing in or out meanwhile makes the answer another account's.
+                if app.state.borrow().account != account {
+                    return app.watch_sign_in();
+                }
+                if valid == Some(false) {
+                    return app.sign_in_expired();
+                }
+                // Otherwise the cookie isn't checked again at every answer.
+                let weak = Rc::downgrade(app);
+                Timer::single_shot(SIGN_IN_RECHECK_AFTER, move || {
+                    if let Some(app) = weak.upgrade() {
+                        app.watch_sign_in();
+                    }
+                });
+            },
+        );
+    }
+
+    /// Removes the dead cookie too, so the next start doesn't sign in with it.
+    fn sign_in_expired(self: &Rc<Self>) {
+        log::warn!("the stored sign-in was rejected");
+        let api = self.api.clone();
+        let account = self.state.borrow().account;
+        self.spawn(async move { api.sign_out().await }, move |app, ()| {
+            // The user signed out themselves meanwhile.
+            if app.state.borrow().account != account {
+                return app.watch_sign_in();
+            }
+            app.show_signed_out();
+            app.toast("YouTube signed you out");
+            let reload = matches!(
+                app.state.borrow().route,
+                Route::Home | Route::Library | Route::History
+            );
+            if reload {
+                app.reload();
+            }
+            app.watch_sign_in();
+        });
     }
 
     fn show_signed_out(&self) {
@@ -193,47 +264,29 @@ impl App {
         let ui = self.ui();
         ui.global::<ApiGlobal>().set_signed_in(false);
         ui.set_account_photo(Image::default());
+        self.premium.reset();
+        self.update_settings(|s| {
+            s.premium_account = false;
+            s.no_premium = false;
+        });
     }
 
-    /// With `check_cookie`, checks the stored cookie if no photo came back.
-    /// Refreshes leave that out, as a failed check signs out.
-    pub(super) fn load_account_photo(self: &Rc<Self>, check_cookie: bool) {
+    pub(super) fn load_account_photo(self: &Rc<Self>) {
         let api = self.api.clone();
-        // Signing in or out meanwhile makes both the photo and the check
-        // another account's.
+        // Signing in or out meanwhile makes the photo another account's.
         let account = self.state.borrow().account;
         self.spawn(
             async move { api.account_photo().await },
-            move |app, result| {
-                if app.state.borrow().account != account {
-                    return;
-                }
-                match result {
-                    Ok(Some(url)) => {
-                        app.load_image(Some(url), images::AVATAR, move |app, image| {
-                            if app.state.borrow().account == account {
-                                app.ui().set_account_photo(image);
-                            }
-                        });
-                        // A photo means YouTube took the cookie, so the slower
-                        // check isn't needed.
-                        return;
-                    }
-                    Ok(None) => {}
-                    Err(e) => log::warn!("could not load the account's picture: {e}"),
-                }
-                if !check_cookie {
-                    return;
-                }
-                let api = app.api.clone();
-                app.spawn(
-                    async move { api.cookie_valid().await },
-                    move |app, valid| {
-                        if valid == Some(false) && app.state.borrow().account == account {
-                            app.sign_in_expired();
+            move |app, result| match result {
+                Ok(Some(url)) if app.state.borrow().account == account => {
+                    app.load_image(Some(url), images::AVATAR, move |app, image| {
+                        if app.state.borrow().account == account {
+                            app.ui().set_account_photo(image);
                         }
-                    },
-                );
+                    });
+                }
+                Ok(_) => {}
+                Err(e) => log::warn!("could not load the account's picture: {e}"),
             },
         );
     }
@@ -252,11 +305,6 @@ impl App {
         let api = self.api.clone();
         self.spawn(async move { api.sign_out().await }, |app, ()| {
             app.show_signed_out();
-            app.premium.reset();
-            app.update_settings(|s| {
-                s.premium_account = false;
-                s.no_premium = false;
-            });
             app.ui().set_settings_open(false);
             app.toast("Signed out");
             app.show_fresh(Route::Home);

@@ -88,8 +88,10 @@ impl Api {
             // unencrypted and never cleared; nothing reads them.
             .no_reporter()
             .no_botguard()
+            // YouTube's pages carry about 20 KB of headers, past hyper's
+            // 16 KB default, which signing in and the cookie check load.
             .build_with_client(crate::http::proxied(crate::http::keep_alive(
-                reqwest::ClientBuilder::new(),
+                reqwest::ClientBuilder::new().http2_max_header_list_size(64 * 1024),
             )))
             .map_err(err)?;
         Ok(Self {
