@@ -11,10 +11,20 @@ index 542a882..224a195 100644
  
  [dependencies.tracing]
 diff --git a/src/client/mod.rs b/src/client/mod.rs
-index 06386bc..3a7d04a 100644
+index 06386bc..803898b 100644
 --- a/src/client/mod.rs
 +++ b/src/client/mod.rs
-@@ -328,6 +328,75 @@ impl AuthCookie {
+@@ -32,7 +32,8 @@ mod channel_rss;
+ use std::collections::HashMap;
+ use std::ffi::OsString;
+ use std::path::PathBuf;
+-use std::sync::{Arc, RwLock};
++use std::sync::{Arc, Mutex, RwLock};
++use std::time::Instant;
+ use std::{borrow::Cow, fmt::Debug, time::Duration};
+ 
+ use once_cell::sync::Lazy;
+@@ -328,6 +329,75 @@ impl AuthCookie {
      }
  }
  
@@ -90,7 +100,7 @@ index 06386bc..3a7d04a 100644
  pub(crate) const DEFAULT_UA: &str =
      "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0";
  pub(crate) const MOBILE_UA: &str = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.135 Mobile Safari/537.36";
-@@ -348,7 +417,7 @@ const DISABLE_PRETTY_PRINT_PARAMETER: &str = "prettyPrint=false";
+@@ -348,7 +418,7 @@ const DISABLE_PRETTY_PRINT_PARAMETER: &str = "prettyPrint=false";
  
  // Web client
  const DESKTOP_CLIENT_VERSION: &str = "2.20241216.05.00";
@@ -99,7 +109,40 @@ index 06386bc..3a7d04a 100644
  const MOBILE_CLIENT_VERSION: &str = "2.20241217.07.00";
  const TV_CLIENT_VERSION: &str = "7.20241211.14.00";
  
-@@ -1099,6 +1168,7 @@ impl RustyPipe {
+@@ -390,6 +460,24 @@ struct RustyPipeRef {
+     user_agent: Cow<'static, str>,
+     visitor_data_cache: VisitorDataCache,
+     botguard: Option<BotguardCfg>,
++    refusals: Mutex<Refusals>,
++}
++
++/// Signed-in requests YouTube refused in a row, and until when the rest
++/// wait, as it refuses an account's requests in runs.
++#[derive(Default)]
++struct Refusals {
++    run: u32,
++    paused_until: Option<Instant>,
++}
++
++/// Refusals in a row before signed-in requests pause.
++const REFUSAL_RUN: u32 = 6;
++
++/// How long signed-in requests wait after `run` refusals in a row: 5 s at
++/// `REFUSAL_RUN`, doubling up to 40 s.
++fn refusal_pause(run: u32) -> Option<Duration> {
++    (run >= REFUSAL_RUN).then(|| Duration::from_secs(5 << (run - REFUSAL_RUN).min(3)))
+ }
+ 
+ #[derive(Clone)]
+@@ -797,6 +885,7 @@ impl RustyPipeBuilder {
+                 user_agent,
+                 visitor_data_cache,
+                 botguard,
++                refusals: Mutex::default(),
+             }),
+         })
+     }
+@@ -1099,6 +1188,7 @@ impl RustyPipe {
  
              let err = match resp {
                  Ok(resp) => {
@@ -107,7 +150,45 @@ index 06386bc..3a7d04a 100644
                      let status = resp.status();
                      // Immediately return in case of success or unrecoverable status code
                      if status.is_success()
-@@ -1325,7 +1395,11 @@ impl RustyPipe {
+@@ -1160,6 +1250,37 @@ impl RustyPipe {
+         Ok(self.http_request_estatus(request).await?.text().await?)
+     }
+ 
++    /// Waits out a pause in signed-in requests, returning whether there was one.
++    async fn wait_for_turn(&self) -> bool {
++        let until = self.inner.refusals.lock().unwrap().paused_until;
++        let wait = until.map_or(Duration::ZERO, |u| {
++            u.saturating_duration_since(Instant::now())
++        });
++        if wait.is_zero() {
++            return false;
++        }
++        tokio::time::sleep(wait).await;
++        true
++    }
++
++    /// Counts a signed-in request YouTube answered, `refused` or otherwise.
++    fn signed_in_answered(&self, refused: bool) {
++        let mut refusals = self.inner.refusals.lock().unwrap();
++        refusals.run = if refused {
++            refusals.run.saturating_add(1)
++        } else {
++            0
++        };
++        let Some(pause) = refusal_pause(refusals.run) else {
++            return;
++        };
++        let until = Instant::now() + pause;
++        if refusals.paused_until.is_none_or(|u| u < until) {
++            tracing::warn!("YouTube keeps refusing signed-in requests; pausing them for {pause:?}");
++            refusals.paused_until = Some(until);
++        }
++    }
++
+     async fn extract_client_version(&self, client_type: ClientType) -> Result<String, Error> {
+         let (sw_url, html_url, origin, ua) = match client_type {
+             ClientType::Desktop => (
+@@ -1325,7 +1446,11 @@ impl RustyPipe {
      }
  
      /// Write the current cache data to the storage backend.
@@ -120,7 +201,7 @@ index 06386bc..3a7d04a 100644
          let mut cache_clients = HashMap::new();
          for (c, lk) in &self.inner.cache.clients {
              let v = lk.read().await.clone();
-@@ -1663,6 +1737,48 @@ impl RustyPipe {
+@@ -1663,6 +1788,48 @@ impl RustyPipe {
          Ok(())
      }
  
@@ -169,7 +250,7 @@ index 06386bc..3a7d04a 100644
      /// Attempt to fetch the YouTube website with login cookies to check if the user is successfully logged in
      /// and the session is still valid.
      pub async fn user_auth_check_cookie(&self) -> Result<(), Error> {
-@@ -2370,6 +2486,7 @@ impl RustyPipeQuery {
+@@ -2370,6 +2537,7 @@ impl RustyPipeQuery {
              .http
              .execute(request.try_clone().unwrap())
              .await?;
@@ -177,6 +258,93 @@ index 06386bc..3a7d04a 100644
  
          let status = response.status();
          let body = response.text().await?;
+@@ -2427,15 +2595,23 @@ impl RustyPipeQuery {
+         ctx_src: &MapRespOptions<'_>,
+     ) -> Result<RequestResult<M>, Error> {
+         let mut last_resp = None;
++        let signed_in = self.opts.auth == Some(true);
+         for n in 0..=self.client.inner.n_http_retries {
++            let paused = signed_in && self.client.wait_for_turn().await;
+             let resp = self
+                 .execute_request_attempt::<R, M, B>(ctype, id, endpoint, body, ctx_src)
+                 .await?;
++            let refused = matches!(&resp.res, Err(e) if e.is_stray_refusal());
++            if signed_in {
++                self.client.signed_in_answered(refused);
++            }
+ 
+             let err = match &resp.res {
+                 Ok(_) => return Ok(resp),
+                 Err(e) => {
+-                    if !e.should_retry() {
++                    // Refused even after a pause: failing beats holding the
++                    // caller through another.
++                    if !e.should_retry() || (paused && refused) {
+                         return Ok(resp);
+                     }
+                     e
+@@ -2620,13 +2796,28 @@ impl RustyPipeQuery {
+         let context = self.get_context(ctype, true, &visitor_data).await;
+         let req_body = QBody { context, body };
+ 
+-        let request = self
+-            .request_builder(ctype, endpoint, None)
+-            .await?
+-            .json(&req_body)
+-            .build()?;
+-
+-        self.client.http_request_txt(&request).await
++        let signed_in = self.opts.auth == Some(true);
++        let mut n = 0;
++        loop {
++            let paused = signed_in && self.client.wait_for_turn().await;
++            // Built for each attempt, as the sign-in header carries the time.
++            let request = self
++                .request_builder(ctype, endpoint, None)
++                .await?
++                .json(&req_body)
++                .build()?;
++            let res = self.client.http_request_txt(&request).await;
++            let refused = matches!(&res, Err(e) if e.is_stray_refusal());
++            if signed_in && matches!(&res, Ok(_) | Err(Error::HttpStatus(..))) {
++                self.client.signed_in_answered(refused);
++            }
++            if !refused || paused || n == self.client.inner.n_http_retries {
++                return res;
++            }
++            let ms = util::retry_delay(n, 1000, 60000, 3);
++            tokio::time::sleep(Duration::from_millis(ms.into())).await;
++            n += 1;
++        }
+     }
+ }
+ 
+@@ -2764,6 +2955,25 @@ fn detect_botguard_bin(program: OsString) -> Result<(OsString, String), Error> {
+ mod tests {
+     use super::*;
+ 
++    #[test]
++    fn pauses_only_after_a_run_of_refusals() {
++        assert_eq!(refusal_pause(REFUSAL_RUN - 1), None, "stray ones only retry");
++        assert_eq!(refusal_pause(REFUSAL_RUN), Some(Duration::from_secs(5)));
++        assert_eq!(refusal_pause(REFUSAL_RUN + 1), Some(Duration::from_secs(10)));
++        assert_eq!(refusal_pause(u32::MAX), Some(Duration::from_secs(40)), "capped");
++    }
++
++    #[test]
++    fn retries_refusals_not_for_want_of_permission() {
++        let status = |code, msg: &str| Error::HttpStatus(code, msg.to_owned().into());
++        assert!(status(403, "").should_retry());
++        assert!(status(403, "Request refused").is_stray_refusal());
++        let denied = status(403, "The caller does not have permission");
++        assert!(!denied.should_retry() && !denied.is_stray_refusal());
++        assert!(!status(404, "").is_stray_refusal());
++        assert!(status(503, "").should_retry());
++    }
++
+     use rstest::rstest;
+ 
+     // 1.20240506.01.00-canary_control_1.20240508.01.01
 diff --git a/src/client/response/music_playlist.rs b/src/client/response/music_playlist.rs
 index 84202f0..63f2fdb 100644
 --- a/src/client/response/music_playlist.rs
@@ -230,6 +398,37 @@ index 84202f0..63f2fdb 100644
  #[serde_as]
  #[derive(Debug, Deserialize)]
  #[serde(rename_all = "camelCase")]
+diff --git a/src/error.rs b/src/error.rs
+index 81cd7fa..7c47931 100644
+--- a/src/error.rs
++++ b/src/error.rs
+@@ -234,7 +234,11 @@ impl Error {
+     pub(crate) fn should_retry(&self) -> bool {
+         match self {
+             Self::HttpStatus(code, _) => match StatusCode::try_from(*code) {
+-                Ok(status) => status.is_server_error() || status == StatusCode::TOO_MANY_REQUESTS,
++                Ok(status) => {
++                    status.is_server_error()
++                        || status == StatusCode::TOO_MANY_REQUESTS
++                        || self.is_stray_refusal()
++                }
+                 Err(_) => false,
+             },
+             Self::Extraction(
+@@ -247,6 +251,13 @@ impl Error {
+             _ => false,
+         }
+     }
++
++    /// A 403 not for want of permission, as to someone else's private
++    /// playlist: YouTube refuses a share of requests so, at random and in
++    /// runs, and answers the same request moments later.
++    pub(crate) fn is_stray_refusal(&self) -> bool {
++        matches!(self, Self::HttpStatus(403, msg) if !msg.to_ascii_lowercase().contains("permission"))
++    }
+ }
+ 
+ impl ExtractionError {
 diff --git a/src/util/visitor_data.rs b/src/util/visitor_data.rs
 index 8bc64c7..0d050eb 100644
 --- a/src/util/visitor_data.rs
