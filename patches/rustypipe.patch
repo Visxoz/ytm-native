@@ -11,10 +11,86 @@ index 542a882..224a195 100644
  
  [dependencies.tracing]
 diff --git a/src/client/mod.rs b/src/client/mod.rs
-index 06386bc..3904e76 100644
+index 06386bc..3a7d04a 100644
 --- a/src/client/mod.rs
 +++ b/src/client/mod.rs
-@@ -348,7 +348,7 @@ const DISABLE_PRETTY_PRINT_PARAMETER: &str = "prettyPrint=false";
+@@ -328,6 +328,75 @@ impl AuthCookie {
+     }
+ }
+ 
++/// What tells apart the logins `Cookie` headers are for.
++fn cookie_login(cookie: &str) -> Option<&str> {
++    let value = |name: &str| {
++        cookie
++            .split(';')
++            .find_map(|c| c.trim().strip_prefix(name)?.strip_prefix('='))
++    };
++    value("SAPISID").or_else(|| value("__Secure-3PAPISID"))
++}
++
++/// `cookie` with the youtube.com-wide cookies of `set_cookie` (`Set-Cookie`
++/// values) put in by name, or `None` when that changes nothing. Deletions are
++/// left out, so a session is only ever ended by signing out.
++pub fn merge_set_cookies<'c, 's: 'c>(
++    cookie: &'c str,
++    set_cookie: impl IntoIterator<Item = &'s str>,
++) -> Option<String> {
++    let this_year = OffsetDateTime::now_utc().year();
++    let mut jar: Vec<(&str, &str)> = cookie
++        .split(';')
++        .filter_map(|c| c.trim().split_once('='))
++        .collect();
++    let mut changed = false;
++    for line in set_cookie {
++        let mut attrs = line.split(';').map(|a| {
++            let a = a.trim();
++            a.split_once('=').unwrap_or((a, ""))
++        });
++        let Some((name, value)) = attrs.next() else {
++            continue;
++        };
++        let mut domain_wide = false;
++        let mut deleted = value.is_empty();
++        for (key, v) in attrs {
++            if key.eq_ignore_ascii_case("domain") {
++                domain_wide = v.trim_start_matches('.').eq_ignore_ascii_case("youtube.com");
++            } else if key.eq_ignore_ascii_case("max-age") {
++                deleted |= v.parse::<i64>().is_ok_and(|s| s <= 0);
++            } else if key.eq_ignore_ascii_case("expires") {
++                // Google deletes with a date in 1970, so the year is enough.
++                deleted |= v
++                    .split(|c: char| !c.is_ascii_digit())
++                    .find(|t| t.len() == 4)
++                    .and_then(|y| y.parse::<i32>().ok())
++                    .is_some_and(|y| y < this_year);
++            }
++        }
++        if name.is_empty() || !domain_wide || deleted {
++            continue;
++        }
++        let mut found = false;
++        for (_, v) in jar.iter_mut().filter(|(n, _)| *n == name) {
++            found = true;
++            changed |= *v != value;
++            *v = value;
++        }
++        if !found {
++            jar.push((name, value));
++            changed = true;
++        }
++    }
++    changed.then(|| {
++        jar.iter()
++            .map(|(n, v)| format!("{n}={v}"))
++            .collect::<Vec<_>>()
++            .join("; ")
++    })
++}
++
+ pub(crate) const DEFAULT_UA: &str =
+     "Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0";
+ pub(crate) const MOBILE_UA: &str = "Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.6778.135 Mobile Safari/537.36";
+@@ -348,7 +417,7 @@ const DISABLE_PRETTY_PRINT_PARAMETER: &str = "prettyPrint=false";
  
  // Web client
  const DESKTOP_CLIENT_VERSION: &str = "2.20241216.05.00";
@@ -23,6 +99,84 @@ index 06386bc..3904e76 100644
  const MOBILE_CLIENT_VERSION: &str = "2.20241217.07.00";
  const TV_CLIENT_VERSION: &str = "7.20241211.14.00";
  
+@@ -1099,6 +1168,7 @@ impl RustyPipe {
+ 
+             let err = match resp {
+                 Ok(resp) => {
++                    self.take_response_cookies(request, &resp);
+                     let status = resp.status();
+                     // Immediately return in case of success or unrecoverable status code
+                     if status.is_success()
+@@ -1325,7 +1395,11 @@ impl RustyPipe {
+     }
+ 
+     /// Write the current cache data to the storage backend.
+-    async fn store_cache(&self) {
++    pub async fn store_cache(&self) {
++        // One at a time, so an older copy, such as a signed-out session's, is
++        // never written over a newer one.
++        static STORING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
++        let _storing = STORING.lock().await;
+         let mut cache_clients = HashMap::new();
+         for (c, lk) in &self.inner.cache.clients {
+             let v = lk.read().await.clone();
+@@ -1663,6 +1737,48 @@ impl RustyPipe {
+         Ok(())
+     }
+ 
++    /// The stored authentication cookie, as a `Cookie` header value
++    pub fn user_auth_cookie_header(&self) -> Option<String> {
++        let cookie = self.inner.cache.auth_cookie.read().unwrap();
++        cookie.as_ref().map(|c| c.cookie.clone())
++    }
++
++    /// Take in the `Set-Cookie` values of a response to a request that sent the
++    /// cookie `sent`, as a browser does, so the stored session keeps up with Google
++    /// rotating it. Answers for another login are left out. Kept in memory until
++    /// the cache is next stored.
++    pub fn user_auth_take_cookies<'a>(
++        &self,
++        sent: &str,
++        set_cookie: impl IntoIterator<Item = &'a str>,
++    ) -> bool {
++        let Some(login) = cookie_login(sent) else {
++            return false;
++        };
++        let mut stored = self.inner.cache.auth_cookie.write().unwrap();
++        let Some(auth) = stored.as_mut().filter(|a| cookie_login(&a.cookie) == Some(login)) else {
++            return false;
++        };
++        match merge_set_cookies(&auth.cookie, set_cookie) {
++            Some(cookie) => {
++                auth.cookie = cookie;
++                true
++            }
++            None => false,
++        }
++    }
++
++    fn take_response_cookies(&self, request: &Request, response: &Response) {
++        let set_cookie = response.headers().get_all(header::SET_COOKIE);
++        if set_cookie.iter().next().is_none() {
++            return;
++        }
++        if let Some(sent) = request.headers().get(header::COOKIE) {
++            let sent = sent.to_str().unwrap_or_default();
++            self.user_auth_take_cookies(sent, set_cookie.iter().filter_map(|v| v.to_str().ok()));
++        }
++    }
++
+     /// Attempt to fetch the YouTube website with login cookies to check if the user is successfully logged in
+     /// and the session is still valid.
+     pub async fn user_auth_check_cookie(&self) -> Result<(), Error> {
+@@ -2370,6 +2486,7 @@ impl RustyPipeQuery {
+             .http
+             .execute(request.try_clone().unwrap())
+             .await?;
++        self.client.take_response_cookies(&request, &response);
+ 
+         let status = response.status();
+         let body = response.text().await?;
 diff --git a/src/client/response/music_playlist.rs b/src/client/response/music_playlist.rs
 index 84202f0..63f2fdb 100644
 --- a/src/client/response/music_playlist.rs

@@ -44,6 +44,50 @@ impl Api {
         self.q().auth_enabled(ClientType::DesktopMusic)
     }
 
+    /// The stored session's `Cookie` header, kept current by rustypipe's
+    /// signed-in responses and by `rotate_cookies`.
+    pub fn cookie(&self) -> Option<String> {
+        self.rp.user_auth_cookie_header()
+    }
+
+    /// Asks Google for fresh session cookies, as an open YouTube tab does
+    /// every few minutes: nothing else renews the app's own session.
+    pub async fn rotate_cookies(&self) -> Result<()> {
+        let Some(cookie) = self.cookie() else {
+            return Ok(());
+        };
+        let response = crate::http::client()
+            .post(ROTATE_URL)
+            .header(
+                reqwest::header::USER_AGENT,
+                crate::streams::premium::WEB_USER_AGENT,
+            )
+            .header(reqwest::header::ORIGIN, ROTATE_ORIGIN)
+            .header(reqwest::header::CONTENT_TYPE, "application/json")
+            .header(reqwest::header::COOKIE, &cookie)
+            .body(ROTATE_BODY)
+            .send()
+            .await
+            .and_then(reqwest::Response::error_for_status)
+            .map_err(|e| err(e.without_url()))?;
+        // Only youtube.com may set youtube.com's cookies, should it redirect.
+        if !crate::http::within(response.url(), &["youtube.com"]) {
+            return Err("the renewal was redirected off youtube.com".into());
+        }
+        let set_cookie = response.headers().get_all(reqwest::header::SET_COOKIE);
+        let set_cookie = set_cookie.iter().filter_map(|v| v.to_str().ok());
+        if self.rp.user_auth_take_cookies(&cookie, set_cookie) {
+            log::info!("renewed the sign-in");
+        }
+        self.save_session().await;
+        Ok(())
+    }
+
+    /// Saves the session's cookie with what responses have changed in it.
+    pub async fn save_session(&self) {
+        self.rp.store_cache().await;
+    }
+
     /// Checks the stored cookie with YouTube, which costs a page load.
     /// `None` when YouTube could not be asked.
     pub async fn cookie_valid(&self) -> Option<bool> {
@@ -57,6 +101,11 @@ impl Api {
         }
     }
 }
+
+const ROTATE_URL: &str = "https://accounts.youtube.com/RotateCookies";
+/// YouTube calls it from a frame on accounts.youtube.com.
+const ROTATE_ORIGIN: &str = "https://accounts.youtube.com";
+const ROTATE_BODY: &str = r#"[000,"-0000000000000000000"]"#;
 
 const GUIDE_PHOTO: &str = "/userProfile/accountPhoto/thumbnails";
 const MENU_PHOTO: &str = "/actions/0/openPopupAction/popup/multiPageMenuRenderer/header/activeAccountHeaderRenderer/accountPhoto/thumbnails";
@@ -102,5 +151,35 @@ mod tests {
         assert_eq!(account_photo(menu, GUIDE_PHOTO), None);
         assert_eq!(account_photo("{}", MENU_PHOTO), None);
         assert_eq!(account_photo("not json", MENU_PHOTO), None);
+    }
+
+    #[test]
+    fn takes_renewed_cookies_but_not_deletions() {
+        use rustypipe::client::merge_set_cookies;
+        let cookie = "SID=a; __Secure-1PSIDTS=old; SAPISID=s";
+        let merged = merge_set_cookies(
+            cookie,
+            [
+                "__Secure-1PSIDTS=new; Domain=.youtube.com; Path=/; Secure; HttpOnly",
+                "SIDCC=c; expires=Fri, 19-Nov-2099 10:00:00 GMT; path=/; domain=youtube.com",
+                "SID=EXPIRED; Domain=.youtube.com; Expires=Thu, 01-Jan-1970 00:00:10 GMT",
+                "SAPISID=gone; Domain=.youtube.com; Max-Age=0",
+                "YSC=host-only; Path=/",
+                "NID=z; Domain=.google.com",
+            ],
+        );
+        assert_eq!(
+            merged.as_deref(),
+            Some("SID=a; __Secure-1PSIDTS=new; SAPISID=s; SIDCC=c")
+        );
+        assert_eq!(
+            merge_set_cookies(cookie, ["SID=a; Domain=.youtube.com"]),
+            None,
+            "nothing changed"
+        );
+        assert_eq!(
+            merge_set_cookies(cookie, ["SID=; Domain=.youtube.com"]),
+            None
+        );
     }
 }

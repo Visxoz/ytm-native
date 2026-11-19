@@ -5,7 +5,6 @@ use slint::{ComponentHandle, Image, Model, SharedString, Timer, TimerMode};
 use super::{App, items::card_item};
 use crate::{
     Api as ApiGlobal, CardItem, api::Route, google_sign_in::GoogleSignIn, images, settings,
-    streams::premium,
 };
 
 impl App {
@@ -19,7 +18,6 @@ impl App {
         ui.set_signing_in(true);
         ui.set_sign_in_error(SharedString::new());
         let api = self.api.clone();
-        let header = premium::cookie_header(&cookie);
         self.spawn(
             async move { api.sign_in(&cookie).await },
             move |app, result| {
@@ -37,8 +35,7 @@ impl App {
                         settings::remove_home();
                         app.load_library();
                         app.load_account_photo(true);
-                        settings::save_cookie(&header);
-                        app.premium.set_cookie(Some(header));
+                        app.premium.reset();
                         app.update_settings(|s| {
                             s.premium_account = false;
                             s.no_premium = false;
@@ -241,12 +238,21 @@ impl App {
         );
     }
 
+    /// Keeps the session from going stale or being revoked.
+    pub(super) fn rotate_cookies(&self) {
+        let api = self.api.clone();
+        self.rt.spawn(async move {
+            if let Err(e) = api.rotate_cookies().await {
+                log::warn!("could not renew the sign-in: {e}");
+            }
+        });
+    }
+
     pub(super) fn sign_out(self: &Rc<Self>) {
         let api = self.api.clone();
         self.spawn(async move { api.sign_out().await }, |app, ()| {
             app.show_signed_out();
-            settings::remove_cookie();
-            app.premium.set_cookie(None);
+            app.premium.reset();
             app.update_settings(|s| {
                 s.premium_account = false;
                 s.no_premium = false;

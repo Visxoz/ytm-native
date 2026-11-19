@@ -113,21 +113,12 @@ impl Saves {
 pub static SESSION_SAVES: Saves = Saves::new();
 pub static HISTORY_SAVES: Saves = Saves::new();
 
-/// The signed-in session's `Cookie` header, for Premium stream requests.
-pub fn load_cookie() -> Option<String> {
+/// Older versions kept a second copy of the session cookie for Premium,
+/// which would go stale now that the cookie is renewed.
+pub fn remove_old_cookie() {
     let dir = data_dir();
-    crate::secret::read_migrating(&dir.join("cookie.bin"), &dir.join("cookie"))
-        .filter(|c| !c.trim().is_empty())
-}
-
-pub fn save_cookie(cookie: &str) {
-    if let Err(e) = crate::secret::write(&data_dir().join("cookie.bin"), cookie) {
-        log::warn!("could not save the session for Premium audio: {e}");
-    }
-}
-
-pub fn remove_cookie() {
-    let _ = std::fs::remove_file(data_dir().join("cookie.bin"));
+    let _ = std::fs::remove_file(dir.join("cookie.bin"));
+    let _ = std::fs::remove_file(dir.join("cookie"));
 }
 
 fn settings_path() -> PathBuf {

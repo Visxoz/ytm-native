@@ -61,8 +61,11 @@ const SPEEDS: [f32; 6] = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3];
 /// Equaliser animation step; a few frames a second keeps repaints cheap.
 const EQ_FRAME: Duration = Duration::from_millis(125);
 const TOAST_FOR: Duration = Duration::from_secs(5);
-const UPDATE_FIRST_CHECK: Duration = Duration::from_secs(10);
+/// After the first page has had the network.
+const AFTER_STARTUP: Duration = Duration::from_secs(10);
 const UPDATE_CHECK_EVERY: Duration = Duration::from_secs(12 * 60 * 60);
+/// As often as an open YouTube tab renews its session cookies.
+const ROTATE_COOKIES_EVERY: Duration = Duration::from_secs(10 * 60);
 
 struct HistoryEntry {
     route: Route,
@@ -215,6 +218,7 @@ pub struct App {
     sign_in_timer: Timer,
     update: RefCell<Option<update::Update>>,
     update_timer: Timer,
+    cookie_timer: Timer,
     persist_timer: Timer,
     /// Retries scrobbles Last.fm could not take.
     scrobble_timer: Timer,
@@ -279,11 +283,8 @@ impl App {
         player.set_speed(settings.speed);
         player.set_output_device(settings.output_device.as_ref().map(|d| d.id.clone()));
 
-        let premium = PremiumShared::new(
-            settings::load_cookie(),
-            settings.premium_account,
-            settings.no_premium,
-        );
+        let premium = PremiumShared::new(settings.premium_account, settings.no_premium);
+        settings::remove_old_cookie();
         let presence = PresenceHandle::spawn().expect("presence thread spawns");
         let mut queue = Queue::new();
         queue.repeat = Repeat::from_index(settings.repeat);
@@ -341,6 +342,7 @@ impl App {
             sign_in_timer: Timer::default(),
             update: RefCell::new(None),
             update_timer: Timer::default(),
+            cookie_timer: Timer::default(),
             persist_timer: Timer::default(),
             scrobble_timer: Timer::default(),
             home_ahead: RefCell::new(home_ahead),
@@ -696,12 +698,12 @@ impl App {
         // Plays left over from a run that could not reach Last.fm.
         self.send_scrobbles();
         self.navigate(Route::Home, false);
-        // Once at startup, after the first page has had the network, then
-        // twice a day for a copy left running.
+        // Once at startup, then again on their timers for a copy left running.
         let weak = Rc::downgrade(self);
-        Timer::single_shot(UPDATE_FIRST_CHECK, move || {
+        Timer::single_shot(AFTER_STARTUP, move || {
             if let Some(app) = weak.upgrade() {
                 app.check_for_update();
+                app.rotate_cookies();
             }
         });
         let weak = Rc::downgrade(self);
@@ -709,6 +711,13 @@ impl App {
             .start(TimerMode::Repeated, UPDATE_CHECK_EVERY, move || {
                 if let Some(app) = weak.upgrade() {
                     app.check_for_update();
+                }
+            });
+        let weak = Rc::downgrade(self);
+        self.cookie_timer
+            .start(TimerMode::Repeated, ROTATE_COOKIES_EVERY, move || {
+                if let Some(app) = weak.upgrade() {
+                    app.rotate_cookies();
                 }
             });
     }

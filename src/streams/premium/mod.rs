@@ -301,31 +301,6 @@ pub async fn resolve(
     Err(last_error)
 }
 
-/// Turns a pasted `Cookie:` header or cookies.txt into a `Cookie` header.
-pub fn cookie_header(pasted: &str) -> String {
-    let pasted = pasted.trim();
-    if pasted.contains('\t') {
-        return pasted
-            .lines()
-            // Exporters write HttpOnly cookies, the session ones among them,
-            // behind this prefix.
-            .map(|l| l.strip_prefix("#HttpOnly_").unwrap_or(l))
-            .filter(|l| !l.starts_with('#'))
-            .filter_map(|line| {
-                let fields: Vec<&str> = line.split('\t').collect();
-                (fields.len() >= 7 && fields[0].contains("youtube.com"))
-                    .then(|| format!("{}={}", fields[5], fields[6].trim()))
-            })
-            .collect::<Vec<_>>()
-            .join("; ");
-    }
-    pasted
-        .strip_prefix("Cookie:")
-        .unwrap_or(pasted)
-        .trim()
-        .to_owned()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -383,12 +358,5 @@ mod tests {
             Ok(Some(251)),
             "a dry run takes what there is"
         );
-    }
-
-    #[test]
-    fn converts_pasted_cookies() {
-        assert_eq!(cookie_header("Cookie: SID=a; HSID=b"), "SID=a; HSID=b");
-        let txt = "# Netscape\n.youtube.com\tTRUE\t/\tTRUE\t0\tSID\ta\n#HttpOnly_.youtube.com\tTRUE\t/\tTRUE\t0\tHSID\tb\n.google.com\tTRUE\t/\tTRUE\t0\tNID\tz\n";
-        assert_eq!(cookie_header(txt), "SID=a; HSID=b");
     }
 }

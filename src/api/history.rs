@@ -48,8 +48,9 @@ fn cpn() -> String {
 impl Api {
     /// Adds `video_id` to the signed-in account's history, as YouTube
     /// Music's web player does: the account's player response for the song
-    /// carries a stats URL, which is then requested with its `cookie`.
-    pub async fn report_play(&self, video_id: &str, cookie: &str) -> Result<()> {
+    /// carries a stats URL, which is then requested with the session's cookie.
+    pub async fn report_play(&self, video_id: &str) -> Result<()> {
+        let cookie = self.cookie().ok_or("signed out")?;
         let json = self
             .q()
             .authenticated()
@@ -76,7 +77,7 @@ impl Api {
                 reqwest::header::USER_AGENT,
                 crate::streams::premium::WEB_USER_AGENT,
             )
-            .header(reqwest::header::COOKIE, cookie)
+            .header(reqwest::header::COOKIE, &cookie)
             .send()
             .await
             .and_then(reqwest::Response::error_for_status)

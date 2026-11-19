@@ -11,6 +11,7 @@ use crate::{api::Page, settings};
 /// How long after the last change the session and history are written.
 /// Skipping through songs then costs one write, after the sound starts.
 const PERSIST_AFTER: Duration = Duration::from_secs(2);
+const SAVE_SESSION_FOR: Duration = Duration::from_secs(1);
 /// Heard this long, or half a shorter song, a play reaches Listen again.
 const PLAY_COUNTS_AFTER: Duration = Duration::from_secs(30);
 
@@ -110,18 +111,12 @@ impl App {
             };
             track.id.clone()
         };
-        let Some(cookie) = self.premium.cookie() else {
-            return;
-        };
         let api = self.api.clone();
-        self.spawn(
-            async move { api.report_play(&id, &cookie).await },
-            |_, result| {
-                if let Err(e) = result {
-                    log::warn!("could not add a play to the YouTube history: {e}");
-                }
-            },
-        );
+        self.spawn(async move { api.report_play(&id).await }, |_, result| {
+            if let Err(e) = result {
+                log::warn!("could not add a play to the YouTube history: {e}");
+            }
+        });
     }
 
     pub(super) fn history_page(&self) -> Option<Page> {
@@ -177,6 +172,12 @@ impl App {
         }
         state.searches.save();
         state.scrobbler.save();
+        drop(state);
+        // Bounded, as it waits on rustypipe's locks, which a request may hold.
+        let api = self.api.clone();
+        let _ = self.rt.block_on(async move {
+            tokio::time::timeout(SAVE_SESSION_FOR, api.save_session()).await
+        });
     }
 
     pub(super) fn take_resume_position(&self) -> f64 {

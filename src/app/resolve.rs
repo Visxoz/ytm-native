@@ -5,7 +5,7 @@ use std::{
     future::Future,
     rc::Rc,
     sync::{
-        Arc, Mutex, RwLock,
+        Arc, Mutex,
         atomic::{AtomicU8, Ordering},
     },
     time::{Duration, Instant},
@@ -38,7 +38,6 @@ const PREMIUM_MAX_ERRORS: u8 = 3;
 pub(super) struct PremiumShared {
     /// The cut-down player script, loaded once per session.
     player: tokio::sync::Mutex<Option<Arc<premium::Player>>>,
-    cookie: RwLock<Option<String>>,
     status: AtomicU8,
     /// Songs in a row that offered no Premium formats.
     misses: AtomicU8,
@@ -56,7 +55,7 @@ pub(super) struct PremiumShared {
 impl PremiumShared {
     /// `known`: served Premium formats before; `none`: last taken as without
     /// Premium, which is rechecked on the first song as `recheck_at` starts unset.
-    pub(super) fn new(cookie: Option<String>, known: bool, none: bool) -> Self {
+    pub(super) fn new(known: bool, none: bool) -> Self {
         let status = match (known, none) {
             (true, _) => PREMIUM_YES,
             (false, true) => PREMIUM_NO,
@@ -64,7 +63,6 @@ impl PremiumShared {
         };
         Self {
             player: tokio::sync::Mutex::new(None),
-            cookie: RwLock::new(cookie),
             status: AtomicU8::new(status),
             misses: AtomicU8::new(0),
             errors: AtomicU8::new(0),
@@ -78,16 +76,8 @@ impl PremiumShared {
         self.status.load(Ordering::Relaxed)
     }
 
-    /// The signed-in account's cookie, cloned so no lock is held across an
-    /// await.
-    pub(super) fn cookie(&self) -> Option<String> {
-        self.cookie.read().unwrap().clone()
-    }
-
-    /// Takes the cookie of a new sign-in, or none on signing out, which says
-    /// nothing yet about Premium.
-    pub(super) fn set_cookie(&self, cookie: Option<String>) {
-        *self.cookie.write().unwrap() = cookie;
+    /// Signing in or out says nothing yet about Premium.
+    pub(super) fn reset(&self) {
         self.status.store(PREMIUM_UNKNOWN, Ordering::Relaxed);
         self.misses.store(0, Ordering::Relaxed);
         *self.recheck_at.lock().unwrap() = None;
@@ -258,7 +248,7 @@ impl Resolver {
         }
         let started = Instant::now();
         let visitor = api.visitor_data(false).await?;
-        let cookie = premium.cookie().filter(|_| *want_premium);
+        let cookie = api.cookie().filter(|_| *want_premium);
         if let Some(cookie) = cookie.as_deref().filter(|_| !premium.skipped()) {
             match premium_player(premium).await {
                 Ok(player) => {
@@ -334,8 +324,10 @@ impl Resolver {
             return Err("not a YouTube song".into());
         }
         let visitor = self.api.visitor_data(false).await?;
-        let cookie =
-            (self.premium.cookie()).filter(|_| self.want_premium && !self.premium.skipped());
+        let cookie = self
+            .api
+            .cookie()
+            .filter(|_| self.want_premium && !self.premium.skipped());
         if let Some(cookie) = cookie
             && let Ok(stream) =
                 solved_stream(&self.premium, video_id, &cookie, &visitor, false, None).await
@@ -357,7 +349,7 @@ impl Resolver {
         if !was_premium {
             return self.free(&visitor).await;
         }
-        let cookie = self.premium.cookie().ok_or("signed out")?;
+        let cookie = self.api.cookie().ok_or("signed out")?;
         solved_stream(&self.premium, video_id, &cookie, &visitor, false, None).await
     }
 
@@ -396,7 +388,7 @@ impl Resolver {
             Ok(stream) => Ok(stream),
             // Signed in, the web client's scrambled URLs are a last resort,
             // read by the Premium solver whether or not the account has Premium.
-            Err(e) => match premium.cookie() {
+            Err(e) => match api.cookie() {
                 Some(cookie) => web_fallback(premium, video_id, &cookie, visitor, max_kbps)
                     .await
                     .map_err(|web| {
@@ -499,9 +491,7 @@ impl App {
     pub(super) fn warm_premium(self: &Rc<Self>) {
         let wanted = {
             let state = self.state.borrow();
-            state.signed_in
-                && state.settings.quality == Quality::High
-                && self.premium.cookie.read().unwrap().is_some()
+            state.signed_in && state.settings.quality == Quality::High && self.api.has_cookie()
         };
         if !wanted && !premium_dry_run() {
             return;
@@ -521,7 +511,7 @@ mod tests {
 
     #[test]
     fn only_a_long_run_of_misses_turns_off_a_known_premium_account() {
-        let shared = PremiumShared::new(Some("SID=a".into()), true, false);
+        let shared = PremiumShared::new(true, false);
         for _ in 1..LAPSED_AFTER {
             shared.record_miss();
         }
@@ -544,7 +534,7 @@ mod tests {
 
     #[test]
     fn checks_again_in_the_background_after_taking_an_account_as_without_premium() {
-        let shared = PremiumShared::new(Some("SID=a".into()), false, false);
+        let shared = PremiumShared::new(false, false);
         shared.record_miss();
         shared.record_miss();
         assert!(!shared.skipped(), "two songs say nothing yet");
@@ -568,18 +558,18 @@ mod tests {
 
     #[test]
     fn a_new_sign_in_starts_unknown() {
-        let shared = PremiumShared::new(Some("SID=a".into()), false, false);
+        let shared = PremiumShared::new(false, false);
         for _ in 0..3 {
             shared.record_miss();
         }
-        shared.set_cookie(Some("SID=b".into()));
+        shared.reset();
         assert_eq!(shared.status(), PREMIUM_UNKNOWN);
         assert!(!shared.skipped());
     }
 
     #[test]
     fn a_remembered_no_plays_free_and_is_checked_at_once() {
-        let shared = PremiumShared::new(Some("SID=a".into()), false, true);
+        let shared = PremiumShared::new(false, true);
         assert!(shared.skipped(), "no Premium request before the first song");
         assert!(
             shared.take_recheck(),

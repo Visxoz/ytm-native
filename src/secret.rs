@@ -84,7 +84,7 @@ pub fn write(path: &Path, text: &str) -> io::Result<()> {
 
 /// Reads `path`, or failing that the plain-text `legacy` file an older
 /// version wrote, which is then encrypted and removed.
-pub fn read_migrating(path: &Path, legacy: &Path) -> Option<String> {
+fn read_migrating(path: &Path, legacy: &Path) -> Option<String> {
     if let Some(text) = read(path) {
         return Some(text);
     }
