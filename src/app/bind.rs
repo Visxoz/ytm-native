@@ -150,6 +150,10 @@ impl App {
                 app.change_crossfade(|s| s.crossfade_secs = secs);
             }
         });
+        on!(on_set_pause_on_unplug, |app, value| {
+            app.update_settings(|s| s.pause_on_unplug = value);
+            app.player.set_pause_on_unplug(value);
+        });
         on!(on_set_equaliser, |app, on| app
             .change_equaliser(true, |s| s.equaliser = on));
         on!(on_set_eq_preset, |app, index| {

@@ -318,6 +318,7 @@ impl App {
                 PlayerEvent::Ended => ("ended", String::new()),
                 PlayerEvent::Error(e) => ("error", e),
                 PlayerEvent::Dropped(e) => ("dropped", e),
+                PlayerEvent::Unplugged => ("unplugged", String::new()),
             };
             let _ = weak.upgrade_in_event_loop(move |ui| {
                 ui.invoke_player_event(kind.into(), message.into())
@@ -330,6 +331,7 @@ impl App {
         player.set_mono(settings.mono);
         player.set_balance(settings.balance);
         player.set_speed(settings.speed);
+        player.set_pause_on_unplug(settings.pause_on_unplug);
         player.set_output_device(settings.output_device.as_ref().map(|d| d.id.clone()));
 
         let premium = PremiumShared::new(settings.premium_account, settings.no_premium);
@@ -587,6 +589,7 @@ impl App {
                 .position(|&s| s == settings.crossfade_secs)
                 .map_or(-1, |i| i as i32),
         );
+        ui.set_pause_on_unplug(settings.pause_on_unplug);
         ui.set_speed(
             SPEEDS
                 .iter()

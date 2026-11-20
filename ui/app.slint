@@ -139,6 +139,7 @@ export component AppWindow inherits Window {
     /// The lengths offered, and the index of the one chosen, or -1.
     in property <[string]> crossfade-lengths;
     in property <int> crossfade-secs;
+    in property <bool> pause-on-unplug;
     in property <bool> close-to-tray;
     /// "System default", then each output device; the chosen one's index,
     /// or -1 while it is unplugged.
@@ -238,6 +239,7 @@ export component AppWindow inherits Window {
     callback set-quality(value: int);
     callback set-crossfade(value: bool);
     callback set-crossfade-secs(index: int);
+    callback set-pause-on-unplug(value: bool);
     callback set-close-to-tray(value: bool);
     callback list-output-devices();
     callback set-output-device(index: int);
@@ -567,6 +569,7 @@ export component AppWindow inherits Window {
             crossfade: root.crossfade;
             crossfade-lengths: root.crossfade-lengths;
             crossfade-secs: root.crossfade-secs;
+            pause-on-unplug: root.pause-on-unplug;
             output-devices: root.output-devices;
             output-device: root.output-device;
             output-detail: root.output-detail;
@@ -605,6 +608,7 @@ export component AppWindow inherits Window {
             set-normalise(v) => { root.set-normalise(v); }
             set-crossfade(v) => { root.set-crossfade(v); }
             set-crossfade-secs(i) => { root.set-crossfade-secs(i); }
+            set-pause-on-unplug(v) => { root.set-pause-on-unplug(v); }
             set-autoplay(v) => { root.set-autoplay(v); }
             youtube-history: root.youtube-history;
             set-youtube-history(v) => { root.set-youtube-history(v); }

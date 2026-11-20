@@ -95,6 +95,8 @@ pub enum PlayerEvent {
     Error(String),
     /// The track's download gave up on a connection that stopped answering.
     Dropped(String),
+    /// The device playing was unplugged, so the player paused itself.
+    Unplugged,
 }
 
 enum Command {
@@ -173,6 +175,7 @@ struct Shared {
     paused: AtomicBool,
     /// Set by the device's error callback once its stream needs reopening.
     device_lost: AtomicBool,
+    pause_on_unplug: AtomicBool,
     /// The volume and the loudness correction, as f32 bits.
     volume: AtomicU32,
     /// A `Normalise`, as its index.
@@ -232,6 +235,7 @@ impl Player {
             }),
             paused: AtomicBool::new(false),
             device_lost: AtomicBool::new(false),
+            pause_on_unplug: AtomicBool::new(true),
             volume: AtomicU32::new(1f32.to_bits()),
             normalise: AtomicU8::new(Normalise::Normal as u8),
             loudness_gain: AtomicU32::new(1f32.to_bits()),
@@ -328,6 +332,10 @@ impl Player {
         // every change of the flag, as the engine sleeps while paused.
         self.shared.paused.store(paused, Ordering::Relaxed);
         let _ = self.tx.send(Command::Pause);
+    }
+
+    pub fn set_pause_on_unplug(&self, on: bool) {
+        self.shared.pause_on_unplug.store(on, Ordering::Relaxed);
     }
 
     pub fn is_paused(&self) -> bool {

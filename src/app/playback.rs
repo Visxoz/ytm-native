@@ -265,6 +265,11 @@ impl App {
             }
             "ended" => self.next(false),
             "dropped" => self.connection_lost(message),
+            // The player paused itself; the rest follows as for the user's pause.
+            "unplugged" => {
+                self.set_paused(true);
+                self.toast("Paused, as the device playing was unplugged");
+            }
             "error" => {
                 let title = self
                     .state

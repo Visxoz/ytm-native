@@ -300,6 +300,9 @@ pub struct Settings {
     pub no_premium: bool,
     pub crossfade: bool,
     pub crossfade_secs: f32,
+    /// Pauses as the device playing is unplugged, rather than carrying on
+    /// through the default.
+    pub pause_on_unplug: bool,
     /// Playback speed, the pitch moving with it.
     pub speed: f32,
     /// Closing the window leaves the app playing in the tray.
@@ -400,6 +403,7 @@ impl Default for Settings {
             crossfade: false,
             // Long enough to blend two songs, short enough to keep most of an ending.
             crossfade_secs: 6.0,
+            pause_on_unplug: true,
             speed: 1.0,
             close_to_tray: true,
             check_updates: true,
@@ -886,6 +890,7 @@ mod tests {
             CROSSFADE_SECS.contains(&settings.crossfade_secs),
             "a length Settings offers"
         );
+        assert!(settings.pause_on_unplug);
         assert_eq!(settings.quality, Quality::High);
     }
 

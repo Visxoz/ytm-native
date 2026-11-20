@@ -188,6 +188,9 @@ pub(super) struct Engine {
     shared: Arc<Shared>,
     on_event: Box<dyn Fn(PlayerEvent) + Send>,
     stream: Option<(cpal::Stream, u32, usize)>,
+    /// The device the open stream plays on, by its ID then, as the default's
+    /// changes under it.
+    playing_on: Option<cpal::DeviceId>,
     track: Option<Track>,
     next: Option<Next>,
     /// The track still audible after the queued one took over decoding,
@@ -208,6 +211,10 @@ pub(super) struct Engine {
     chosen_failures: u32,
     /// When to try again to open a device, after none would open.
     retry_at: Option<Instant>,
+    /// The pause last applied. The shared flag runs ahead of its command, so a
+    /// loss found as Play wakes the engine was heard while paused, and one
+    /// found as Pause wakes it came after the user's pause.
+    paused: bool,
     /// When the open stream, on whichever device, started.
     started_at: Option<Instant>,
 }
@@ -223,6 +230,7 @@ impl Engine {
             shared,
             on_event,
             stream: None,
+            playing_on: None,
             track: None,
             next: None,
             previous: None,
@@ -234,6 +242,7 @@ impl Engine {
             chosen_since: None,
             chosen_failures: 0,
             retry_at: None,
+            paused: false,
             started_at: None,
         }
     }
@@ -716,6 +725,10 @@ impl Engine {
         // A device open at another format closes before the format changes
         // under its callback, and a lost one closes to be opened afresh.
         if lost || !matches!(&self.stream, Some((_, r, c)) if *r == rate && *c == channels) {
+            // A load or a format change can be the first to see the loss.
+            if lost {
+                self.pause_if_unplugged();
+            }
             if broken {
                 self.chosen_failures = self.chosen_failures.saturating_add(1);
             } else if played.is_some_and(|p| p >= START_GRACE) {
@@ -749,7 +762,7 @@ impl Engine {
         {
             match self
                 .build(&device, rate, channels)
-                .and_then(|stream| self.start(stream, rate, channels))
+                .and_then(|stream| self.start(&device, stream, rate, channels))
             {
                 Ok(()) => {
                     self.fallback_since = None;
@@ -765,7 +778,7 @@ impl Engine {
             .default_output_device()
             .ok_or("no audio output device")?;
         let stream = self.build(&device, rate, channels)?;
-        self.start(stream, rate, channels)
+        self.start(&device, stream, rate, channels)
     }
 
     /// An unstarted stream on `device`, its rate scaled by the speed.
@@ -808,11 +821,18 @@ impl Engine {
             .map_err(|e| format!("could not open audio output: {e}"))
     }
 
-    fn start(&mut self, stream: cpal::Stream, rate: u32, channels: usize) -> Result<(), String> {
+    fn start(
+        &mut self,
+        device: &cpal::Device,
+        stream: cpal::Stream,
+        rate: u32,
+        channels: usize,
+    ) -> Result<(), String> {
         stream
             .play()
             .map_err(|e| format!("could not start audio output: {e}"))?;
         self.stream = Some((stream, rate, channels));
+        self.playing_on = device.id().ok();
         self.started_at = Some(Instant::now());
         // A format change reached while paused opens a stream that must not run.
         self.apply_paused();
@@ -829,6 +849,7 @@ impl Engine {
         {
             return;
         }
+        self.pause_if_unplugged();
         // The default failing to start leaves nothing to fall back on, so it
         // closes and waits as if there were no device; a track load still tries.
         if self.stream.is_some()
@@ -864,11 +885,11 @@ impl Engine {
         }
         self.fallback_since = Some(Instant::now());
         let chosen = self.shared.device.lock().unwrap().clone();
+        let Some(device) = chosen.and_then(|id| find_device(&cpal::default_host(), &id)) else {
+            return;
+        };
         // Built while the default plays, so a failure leaves the sound alone.
-        let Some(stream) = chosen
-            .and_then(|id| find_device(&cpal::default_host(), &id))
-            .and_then(|device| self.build(&device, rate, channels).ok())
-        else {
+        let Ok(stream) = self.build(&device, rate, channels) else {
             return;
         };
         // Closed first, as both would drain the queue; closing waits for its
@@ -878,9 +899,31 @@ impl Engine {
         self.shared.output.lock().unwrap().gain = 0.0;
         self.fallback_since = None;
         self.chosen_since = Some(Instant::now());
-        if let Err(e) = self.start(stream, rate, channels) {
+        if let Err(e) = self.start(&device, stream, rate, channels) {
             log::warn!("{e}");
             self.shared.device_lost.store(true, Ordering::Relaxed);
+        }
+    }
+
+    /// Pauses ahead of reopening a lost stream, should its device be gone, so
+    /// nothing meant for headphones plays through the speakers. The queue and
+    /// position stay, for Play to carry on from on the default. Another
+    /// device becoming the default leaves this one active, so the sound
+    /// moves to it.
+    fn pause_if_unplugged(&mut self) {
+        if self.stream.is_none()
+            || !self.shared.pause_on_unplug.load(Ordering::Relaxed)
+            || self.paused
+            || self.shared.paused.load(Ordering::Relaxed)
+        {
+            return;
+        }
+        // Unreadable, it counts as gone, pausing being the safe side.
+        let host = cpal::default_host();
+        if !(self.playing_on.as_ref()).is_some_and(|id| host.device_by_id(id).is_some()) {
+            self.paused = true;
+            self.shared.paused.store(true, Ordering::Relaxed);
+            (self.on_event)(PlayerEvent::Unplugged);
         }
     }
 
@@ -888,6 +931,7 @@ impl Engine {
     /// that keeps Windows from sleeping. The stop waits `PAUSE_AFTER`, as WASAPI
     /// would replay what is left in its buffer on the next start.
     fn apply_paused(&mut self) {
+        self.paused = self.shared.paused.load(Ordering::Relaxed);
         let Some((stream, ..)) = &self.stream else {
             return;
         };

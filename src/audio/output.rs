@@ -187,6 +187,7 @@ mod tests {
             }),
             paused: AtomicBool::new(false),
             device_lost: AtomicBool::new(false),
+            pause_on_unplug: AtomicBool::new(false),
             volume: AtomicU32::new(1f32.to_bits()),
             normalise: AtomicU8::new(crate::audio::Normalise::Normal as u8),
             loudness_gain: AtomicU32::new(loudness.to_bits()),

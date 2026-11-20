@@ -136,6 +136,7 @@ export component SettingsDialog inherits Dialog {
     in property <bool> crossfade;
     in property <[string]> crossfade-lengths;
     in property <int> crossfade-secs;
+    in property <bool> pause-on-unplug;
     in property <[string]> output-devices;
     in property <int> output-device;
     in property <string> output-detail;
@@ -172,6 +173,7 @@ export component SettingsDialog inherits Dialog {
     callback set-normalise(value: int);
     callback set-crossfade(value: bool);
     callback set-crossfade-secs(index: int);
+    callback set-pause-on-unplug(value: bool);
     callback set-output-device(index: int);
     callback list-output-devices();
     callback set-speed(index: int);
@@ -254,6 +256,13 @@ export component SettingsDialog inherits Dialog {
                 checked: root.crossfade;
                 toggled(v) => { root.set-crossfade(v); }
             }
+        }
+
+        ToggleRow {
+            label: "Pause when unplugged";
+            detail: "Pauses when headphones or the device playing are unplugged, rather than carrying on through another.";
+            checked: root.pause-on-unplug;
+            toggled(v) => { root.set-pause-on-unplug(v); }
         }
 
         ToggleRow {
