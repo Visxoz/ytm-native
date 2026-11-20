@@ -303,6 +303,7 @@ pub struct Settings {
     pub check_updates: bool,
     pub equaliser: bool,
     /// Each band's gain in dB, kept while the equaliser is off.
+    #[serde(deserialize_with = "equaliser_gains")]
     pub equaliser_gains: crate::audio::eq::Gains,
     pub look: Look,
     pub accent: Accent,
@@ -332,6 +333,35 @@ fn normalise_level<'de, D: serde::Deserializer<'de>>(
         Stored::Old(false) => crate::audio::Normalise::Off,
         Stored::Level(level) => level,
     })
+}
+
+/// Older versions had six bands, which are carried over to the ten by
+/// interpolating in log-frequency between their centres, to the whole dB
+/// the sliders step in, so the old presets land on the new ones.
+fn equaliser_gains<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<crate::audio::eq::Gains, D::Error> {
+    use crate::audio::eq::BANDS;
+    const OLD: [f64; 6] = [60.0, 150.0, 400.0, 1_000.0, 2_400.0, 15_000.0];
+    let gains = Vec::<f32>::deserialize(d)?;
+    if let Ok(gains) = gains.as_slice().try_into() {
+        return Ok(gains);
+    }
+    let old: [f32; 6] = gains.as_slice().try_into().map_err(|_| {
+        serde::de::Error::invalid_length(gains.len(), &"ten gains, or six from older versions")
+    })?;
+    Ok(BANDS.map(|hz| {
+        let db = match OLD.partition_point(|&c| c <= hz) {
+            0 => old[0],
+            6 => old[5],
+            i => {
+                let t = ((hz / OLD[i - 1]).ln() / (OLD[i] / OLD[i - 1]).ln()) as f32;
+                old[i - 1] + (old[i] - old[i - 1]) * t
+            }
+        };
+        // Adding 0 turns a rounded -0 into 0.
+        db.round() + 0.0
+    }))
 }
 
 /// An output device by cpal's ID, with its name for while it is unplugged.
@@ -723,8 +753,21 @@ mod tests {
         assert!(!settings.youtube_history, "the opt-out is kept");
         assert_eq!(settings.volume, 0.5);
         assert_eq!(settings.accent, Accent::Lily);
-        assert_eq!(settings.equaliser_gains, [0.0; 6]);
+        assert_eq!(settings.equaliser_gains, [0.0; 10]);
         assert_eq!(Settings::parse(b"not json"), Settings::default());
+    }
+
+    #[test]
+    fn six_old_equaliser_bands_carry_over_to_ten() {
+        let old = Settings::parse(br#"{"equaliser_gains": [1, 2, 3, 4, 5, 6]}"#);
+        let gains = old.equaliser_gains;
+        // 31 Hz holds the old lowest, at 60 Hz; 62 Hz is just past it.
+        // 250 Hz is about halfway, in octaves, from 150 to 400 Hz.
+        assert_eq!(gains, [1.0, 1.0, 2.0, 3.0, 3.0, 4.0, 5.0, 5.0, 6.0, 6.0]);
+        let bass = Settings::parse(br#"{"equaliser_gains": [6, 4, 1, 0, 0, 0]}"#);
+        assert_eq!(bass.equaliser_gains, crate::audio::eq::PRESETS[1].1);
+        let ten = Settings::parse(br#"{"equaliser_gains": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]}"#);
+        assert_eq!(ten.equaliser_gains[9], 10.0);
     }
 
     #[test]

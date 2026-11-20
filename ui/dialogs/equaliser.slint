@@ -53,31 +53,35 @@ export component EqualiserDialog inherits Dialog {
         }
     }
 
-    for band[i] in root.eq-bands: HorizontalLayout {
-        spacing: 16px;
-        Text {
-            width: 64px;
-            text: band;
-            vertical-alignment: center;
-            font-size: 13px;
-            color: Theme.text-secondary;
-        }
+    // Closer together than the dialog's rows, so ten bands fit.
+    VerticalLayout {
+        spacing: 8px;
+        for band[i] in root.eq-bands: HorizontalLayout {
+            spacing: 16px;
+            Text {
+                width: 64px;
+                text: band;
+                vertical-alignment: center;
+                font-size: 13px;
+                color: Theme.text-secondary;
+            }
 
-        Slider {
-            horizontal-stretch: 1;
-            enabled: root.equaliser;
-            value: (root.eq-gains[i] / root.eq-max-db + 1) / 2;
-            changed(v) => { root.set-eq-band(i, v, false); }
-            seek(v) => { root.set-eq-band(i, v, true); }
-        }
+            Slider {
+                horizontal-stretch: 1;
+                enabled: root.equaliser;
+                value: (root.eq-gains[i] / root.eq-max-db + 1) / 2;
+                changed(v) => { root.set-eq-band(i, v, false); }
+                seek(v) => { root.set-eq-band(i, v, true); }
+            }
 
-        Text {
-            width: 48px;
-            text: (root.eq-gains[i] > 0 ? "+" : "") + round(root.eq-gains[i]) + " dB";
-            horizontal-alignment: right;
-            vertical-alignment: center;
-            font-size: 13px;
-            color: root.equaliser ? Theme.text : Theme.text-dim;
+            Text {
+                width: 48px;
+                text: (root.eq-gains[i] > 0 ? "+" : "") + round(root.eq-gains[i]) + " dB";
+                horizontal-alignment: right;
+                vertical-alignment: center;
+                font-size: 13px;
+                color: root.equaliser ? Theme.text : Theme.text-dim;
+            }
         }
     }
 }
