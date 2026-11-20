@@ -23,6 +23,17 @@ pub struct Track {
     pub video: bool,
 }
 
+impl crate::queue::Spread for Track {
+    // By name, as rows don't all carry the artist's id.
+    fn artist(&self) -> &str {
+        self.artists.first().map_or("", |a| a.name.as_str())
+    }
+
+    fn album(&self) -> &str {
+        self.album_name()
+    }
+}
+
 impl Track {
     pub fn artist_names(&self) -> String {
         join_artists(&self.artists)

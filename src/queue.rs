@@ -36,6 +36,12 @@ impl Repeat {
     }
 }
 
+/// What shuffle spreads apart, so one artist's or album's songs don't bunch.
+pub trait Spread {
+    fn artist(&self) -> &str;
+    fn album(&self) -> &str;
+}
+
 #[derive(Debug, Clone)]
 struct Entry<T> {
     uid: u64,
@@ -57,13 +63,13 @@ pub struct Queue<T> {
     revision: u64,
 }
 
-impl<T: Clone> Default for Queue<T> {
+impl<T: Clone + Spread> Default for Queue<T> {
     fn default() -> Self {
         Self::new()
     }
 }
 
-impl<T: Clone> Queue<T> {
+impl<T: Clone + Spread> Queue<T> {
     pub fn new() -> Self {
         let seed = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -109,12 +115,66 @@ impl<T: Clone> Queue<T> {
         (self.random() % n.max(1) as u64) as usize
     }
 
+    /// Uniform in [0, 1).
+    fn unit(&mut self) -> f64 {
+        (self.random() >> 11) as f64 / (1u64 << 53) as f64
+    }
+
     fn shuffle_after_current(&mut self) {
         let start = self.current.map_or(0, |c| c + 1);
-        for i in (start + 1..self.entries.len()).rev() {
-            let j = start + (self.random() % (i - start + 1) as u64) as usize;
-            self.entries.swap(i, j);
+        let rest = self.entries.split_off(start);
+        let items: Vec<&T> = rest.iter().map(|e| &e.item).collect();
+        let order = self.spread(&items, &[T::artist, T::album]);
+        let mut rest: Vec<_> = rest.into_iter().map(Some).collect();
+        self.entries
+            .extend(order.into_iter().filter_map(|i| rest[i].take()));
+        // The spread doesn't see the current entry, so its artist may follow it.
+        if let Some(current) = self.current {
+            let artist = self.entries[current].item.artist();
+            if let Some(other) = self.entries[start..]
+                .iter()
+                .position(|e| e.item.artist() != artist)
+            {
+                self.entries[start..=start + other].rotate_right(1);
+            }
         }
+    }
+
+    /// A random order of `items` in which each key's items sit evenly apart
+    /// from a random offset, with a little jitter, as a plain shuffle bunches
+    /// them by chance; within a key, the next key is spread the same way.
+    fn spread(&mut self, items: &[&T], keys: &[fn(&T) -> &str]) -> Vec<usize> {
+        let Some((key, keys)) = keys.split_first() else {
+            let mut order: Vec<usize> = (0..items.len()).collect();
+            for i in (1..order.len()).rev() {
+                order.swap(i, self.random_below(i + 1));
+            }
+            return order;
+        };
+        // Groups in order of first appearance, as a map's order would make the
+        // draws below differ from run to run.
+        let mut index = HashMap::new();
+        let mut groups: Vec<Vec<usize>> = Vec::new();
+        for (i, item) in items.iter().enumerate() {
+            let g = *index.entry(key(item)).or_insert_with(|| {
+                groups.push(Vec::new());
+                groups.len() - 1
+            });
+            groups[g].push(i);
+        }
+        let mut placed = Vec::with_capacity(items.len());
+        for group in groups {
+            let members: Vec<&T> = group.iter().map(|&i| items[i]).collect();
+            let order = self.spread(&members, keys);
+            let gap = 1.0 / group.len() as f64;
+            let offset = self.unit();
+            for (n, m) in order.into_iter().enumerate() {
+                let jitter = 0.4 * self.unit() - 0.2;
+                placed.push(((n as f64 + offset + jitter) * gap, group[m]));
+            }
+        }
+        placed.sort_by(|a, b| a.0.total_cmp(&b.0));
+        placed.into_iter().map(|(_, i)| i).collect()
     }
 
     pub fn set(&mut self, items: Vec<T>, start: usize, shuffle: bool) {
@@ -336,13 +396,32 @@ impl<T: Clone> Queue<T> {
             let at = match (start, &mut self.unshuffled) {
                 (Some(start), Some(order)) => {
                     order.push(entry.uid);
-                    start + self.random_below(self.entries.len() - start + 1)
+                    // A few draws for a place not beside the same artist, as
+                    // spreading again would reorder what is already shown.
+                    let mut at = start;
+                    for _ in 0..4 {
+                        at = start + self.random_below(self.entries.len() - start + 1);
+                        if !self.beside(at, entry.item.artist()) {
+                            break;
+                        }
+                    }
+                    at
                 }
                 _ => self.entries.len(),
             };
             self.entries.insert(at, entry);
             self.current.get_or_insert(at);
         }
+    }
+
+    /// Whether an item put in at `at` would sit beside one by `artist`.
+    fn beside(&self, at: usize, artist: &str) -> bool {
+        let same = |i: usize| {
+            self.entries
+                .get(i)
+                .is_some_and(|e| e.item.artist() == artist)
+        };
+        (at > 0 && same(at - 1)) || same(at)
     }
 
     /// Never removes the current entry. Returns the indices removed, in order.
@@ -458,6 +537,130 @@ impl<T: Clone> Queue<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const NAMES: [&str; 10] = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "j"];
+
+    impl Spread for u32 {
+        fn artist(&self) -> &str {
+            NAMES[*self as usize % 3]
+        }
+
+        fn album(&self) -> &str {
+            ""
+        }
+    }
+
+    /// An artist and an album, by index into `NAMES`.
+    impl Spread for (usize, usize) {
+        fn artist(&self) -> &str {
+            NAMES[self.0]
+        }
+
+        fn album(&self) -> &str {
+            NAMES[self.1]
+        }
+    }
+
+    fn neighbours(
+        order: &[(usize, usize)],
+        same: impl Fn(&(usize, usize), &(usize, usize)) -> bool,
+    ) -> usize {
+        order.windows(2).filter(|w| same(&w[0], &w[1])).count()
+    }
+
+    /// Ten artists of uneven sizes, none much more than a fifth, each across three albums.
+    fn library() -> Vec<(usize, usize)> {
+        [60, 47, 41, 33, 29, 23, 19, 13, 11, 7]
+            .into_iter()
+            .enumerate()
+            .flat_map(|(artist, n)| (0..n).map(move |i| (artist, i % 3)))
+            .collect()
+    }
+
+    #[test]
+    fn shuffle_spreads_artists_and_albums() {
+        let songs = library();
+        let n = songs.len() as f64;
+        let mut by_artist = [0usize; 10];
+        songs.iter().for_each(|s| by_artist[s.0] += 1);
+        // What a plain shuffle averages: (n - 1) times the chance two songs share an artist.
+        let plain: f64 = (n - 1.0)
+            * by_artist
+                .iter()
+                .map(|&k| (k as f64 / n).powi(2))
+                .sum::<f64>();
+        let (mut artists, mut albums) = (0, 0);
+        for seed in 0..20 {
+            let mut q = Queue::with_seed(seed);
+            q.set(songs.clone(), 0, true);
+            let order: Vec<_> = q.items().copied().collect();
+            artists += neighbours(&order[1..], |a, b| a.0 == b.0);
+            for artist in 0..10 {
+                let own: Vec<_> = order.iter().copied().filter(|s| s.0 == artist).collect();
+                albums += neighbours(&own, |a, b| a.1 == b.1);
+            }
+        }
+        assert!(
+            artists as f64 * 10.0 < plain * 20.0,
+            "{artists} same-artist neighbours, where a plain shuffle averages {}",
+            plain * 20.0
+        );
+        // A plain shuffle puts two of an artist's songs from one album together a third of the time.
+        let plain_albums = (songs.len() - 10) as f64 / 3.0 * 20.0;
+        assert!(
+            albums as f64 * 5.0 < plain_albums,
+            "{albums} same-album neighbours, where a plain shuffle averages {plain_albums}"
+        );
+    }
+
+    #[test]
+    fn spreading_keeps_the_current_and_restores_the_order() {
+        let songs = library();
+        let mut q = Queue::with_seed(3);
+        q.set(songs.clone(), 0, false);
+        q.jump(40);
+        q.set_shuffle(true);
+        let order: Vec<_> = q.items().copied().collect();
+        assert_eq!(&order[..41], &songs[..41], "what has played stays put");
+        let mut sorted = order.clone();
+        sorted.sort();
+        let mut all = songs.clone();
+        all.sort();
+        assert_eq!(sorted, all, "nothing lost or doubled");
+        q.advance(false);
+        let playing = *q.current().unwrap();
+        q.set_shuffle(false);
+        assert_eq!(q.items().copied().collect::<Vec<_>>(), songs);
+        assert_eq!(q.current(), Some(&playing));
+    }
+
+    #[test]
+    fn a_playlist_arriving_in_pages_is_spread_too() {
+        let songs = library();
+        let mut same = 0;
+        for seed in 0..20 {
+            let mut q = Queue::with_seed(seed);
+            q.set(songs[..100].to_vec(), 0, true);
+            for page in songs[100..].chunks(100) {
+                q.extend(page.iter().copied());
+            }
+            let order: Vec<_> = q.items().copied().collect();
+            same += neighbours(&order, |a, b| a.0 == b.0);
+        }
+        // A plain shuffle of these averages about 37 per queue.
+        assert!(same < 20 * 12, "{same} same-artist neighbours in 20 queues");
+    }
+
+    #[test]
+    fn shuffle_is_the_same_for_the_same_seed() {
+        let shuffled = || {
+            let mut q = Queue::with_seed(7);
+            q.set(library(), 3, true);
+            q.extend((0..50).map(|i| (i % 10, 0)));
+            q.items().copied().collect::<Vec<_>>()
+        };
+        assert_eq!(shuffled(), shuffled());
+    }
 
     fn queue(n: u32) -> Queue<u32> {
         let mut q = Queue::with_seed(42);
