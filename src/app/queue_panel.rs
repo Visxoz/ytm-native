@@ -154,7 +154,7 @@ impl App {
     }
 
     pub(super) fn queue_inserted(self: &Rc<Self>, index: usize) {
-        let (item, art) = {
+        let item = {
             let state = self.state.borrow();
             let Some(track) = state.queue.get(index) else {
                 return;
@@ -163,9 +163,6 @@ impl App {
             queue_item(track, &state.downloads, current, false, false)
         };
         self.queue_model.insert(index, item);
-        if let Some(url) = art {
-            self.load_queue_art(index, url);
-        }
         self.queue_edited();
     }
 
@@ -186,15 +183,13 @@ impl App {
             return;
         }
         let mut selection = self.selection.get();
-        let mut missing = Vec::new();
         {
             let state = self.state.borrow();
             for &i in rows {
                 let Some(track) = state.queue.get(i) else {
                     continue;
                 };
-                let (item, art) = queue_item(track, &state.downloads, false, true, false);
-                missing.extend(art.map(|url| (i, url)));
+                let item = queue_item(track, &state.downloads, false, true, false);
                 self.queue_model.insert(i, item);
                 if let Some(anchor) = selection.anchor.as_mut()
                     && *anchor >= i
@@ -205,9 +200,6 @@ impl App {
             self.queue_shown.set(Some(state.queue.revision()));
         }
         self.selection.set(selection);
-        for (i, url) in missing {
-            self.load_queue_art(i, url);
-        }
     }
 
     /// After rows changed in place, so the model is at the queue's revision.

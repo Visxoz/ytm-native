@@ -78,9 +78,13 @@ impl Cache {
     }
 }
 
-fn permits() -> &'static Arc<Semaphore> {
-    static PERMITS: OnceLock<Arc<Semaphore>> = OnceLock::new();
-    PERMITS.get_or_init(|| Arc::new(Semaphore::new(PARALLEL_FETCHES)))
+/// Song rows ask once on screen, after a page's cards are queued, so they
+/// get their own downloads rather than wait behind every card.
+fn permits(edge: u32) -> &'static Arc<Semaphore> {
+    static ROWS: OnceLock<Arc<Semaphore>> = OnceLock::new();
+    static OTHERS: OnceLock<Arc<Semaphore>> = OnceLock::new();
+    let pool = if edge == ROW { &ROWS } else { &OTHERS };
+    pool.get_or_init(|| Arc::new(Semaphore::new(PARALLEL_FETCHES)))
 }
 
 /// Returns a cached image without fetching. `edge` is in logical pixels.
@@ -152,7 +156,7 @@ pub async fn load(
     let permit = if matches!(edge, PLAYER | HEADER | BANNER | COVER) {
         None
     } else {
-        Arc::clone(permits()).acquire_owned().await.ok()
+        Arc::clone(permits(edge)).acquire_owned().await.ok()
     };
     let alone = PENDING.with(|p| p.borrow().get(&key).is_some_and(Vec::is_empty));
     let fetched = if alone && !wanted() {

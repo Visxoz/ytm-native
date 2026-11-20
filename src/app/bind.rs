@@ -71,9 +71,7 @@ impl App {
         on!(on_queue_clear, |app| app.queue_clear());
         on!(on_queue_save, |app| app.save_queue_as_playlist());
         on!(on_panel_tab_changed, |app, tab| {
-            if tab == 0 {
-                app.load_missing_queue_art();
-            } else if tab == 1 {
+            if tab == 1 {
                 app.load_lyrics();
             }
         });
@@ -85,9 +83,6 @@ impl App {
                 app.load_lyrics();
                 // The lit line stood still while the lyrics were hidden.
                 app.show_lyric_line(f64::from(ui.get_np_position()));
-            } else if ui.get_queue_shown() {
-                // Rows added while the queue was out of sight lack artwork.
-                app.load_missing_queue_art();
             }
         });
         on!(on_lyric_clicked, |app, index| {
@@ -255,6 +250,10 @@ impl App {
             };
             app.navigate(route, true);
         });
+        on!(api.on_row_art, |app, row| app
+            .on_row_art(App::load_row_art, row));
+        on!(api.on_queue_art, |app, row| app
+            .on_row_art(App::load_queue_art, row));
         on!(api.on_play_track, |app, section, index| app
             .play_from_section(section as usize, index as usize));
         on!(api.on_track_action, |app, action, section, index| app

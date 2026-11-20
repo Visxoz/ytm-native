@@ -56,6 +56,9 @@ use resolve::PremiumShared;
 use song_version::SongVersion;
 
 const TICK: Duration = Duration::from_millis(250);
+/// A row's artwork still waiting once this many more rows have asked is for
+/// one scrolled past, as a screen shows far fewer.
+const RECENT_ASKS: u64 = 64;
 /// In the order Settings lists them.
 const SPEEDS: [f32; 6] = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3];
 /// Equaliser animation step; a few frames a second keeps repaints cheap.
@@ -230,6 +233,9 @@ pub struct App {
     /// Queue revision the queue model shows.
     queue_shown: Cell<Option<u64>>,
     selection: Cell<queue_panel::Selection>,
+    /// How many page and queue rows have asked for their artwork.
+    row_asks: Cell<u64>,
+    queue_asks: Cell<u64>,
     tick: Timer,
     eq_timer: Timer,
     /// Lights up the next lyric line as it starts, between ticks.
@@ -357,6 +363,8 @@ impl App {
             eq_gains: Rc::new(VecModel::from(vec![0.0; eq::BANDS.len()])),
             queue_shown: Cell::new(None),
             selection: Cell::new(queue_panel::Selection::default()),
+            row_asks: Cell::new(0),
+            queue_asks: Cell::new(0),
             tick: Timer::default(),
             eq_timer: Timer::default(),
             lyric_timer: Timer::default(),
@@ -478,6 +486,37 @@ impl App {
                 apply(&app, image);
             }
         });
+    }
+
+    /// Rows ask during Slint's layout pass, so the model is changed once it ends.
+    fn on_row_art(self: &Rc<Self>, load: fn(&Rc<Self>, usize), row: i32) {
+        let app = Rc::clone(self);
+        Timer::single_shot(Duration::ZERO, move || load(&app, row as usize));
+    }
+
+    /// A list row's artwork, asked for by the row once on screen, put in by
+    /// `apply` while the row still `wants` it. Skipped should `RECENT_ASKS`
+    /// more rows of the list (`asks`) ask before its download's turn comes.
+    fn load_row_image(
+        self: &Rc<Self>,
+        url: Option<String>,
+        asks: fn(&Self) -> &Cell<u64>,
+        wants: impl Fn(&Rc<Self>) -> bool + Clone + 'static,
+        apply: impl FnOnce(&Rc<Self>, Image) + 'static,
+    ) {
+        let ask = asks(self).get() + 1;
+        asks(self).set(ask);
+        let still = wants.clone();
+        self.load_image_while(
+            url,
+            images::ROW,
+            move |app| asks(app).get() - ask < RECENT_ASKS && still(app),
+            move |app, image| {
+                if wants(app) {
+                    apply(app, image);
+                }
+            },
+        );
     }
 
     /// How much faster than the clock song time passes.

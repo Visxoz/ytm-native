@@ -26,36 +26,26 @@ fn quality_label(stream: &ResolvedStream) -> String {
     }
 }
 
-/// The queue row for `track`, and the artwork it still has to load.
+/// The queue row for `track`, with its artwork once cached.
 pub(super) fn queue_item(
     track: &Track,
     downloads: &Downloads,
     current: bool,
     recommended: bool,
     selected: bool,
-) -> (QueueItem, Option<String>) {
-    let art = track
-        .thumb
-        .as_deref()
-        .and_then(|u| images::cached(u, images::ROW));
-    let missing = if art.is_none() {
-        track.thumb.clone()
-    } else {
-        None
-    };
-    let item = QueueItem {
+) -> QueueItem {
+    QueueItem {
         id: s(&track.id),
         title: s(&track.title),
         artists: s(track.artist_names()),
         duration: s(track.duration.map(api::format_duration).unwrap_or_default()),
-        art: art.unwrap_or_default(),
+        art: images::cached_or_empty(track.thumb.as_deref(), images::ROW),
         current,
         recommended,
         selected,
         local: track.is_local(),
         downloaded: downloads.contains(&track.id),
-    };
-    (item, missing)
+    }
 }
 
 impl App {
@@ -271,7 +261,6 @@ impl App {
         }
         self.queue_shown.set(Some(revision));
 
-        let mut missing = Vec::new();
         let items: Vec<QueueItem> = {
             let state = self.state.borrow();
             state
@@ -279,18 +268,12 @@ impl App {
                 .entries()
                 .enumerate()
                 .map(|(i, (t, recommended))| {
-                    let (item, art) =
-                        queue_item(t, &state.downloads, i as i32 == current, recommended, false);
-                    missing.extend(art.map(|url| (i, url)));
-                    item
+                    queue_item(t, &state.downloads, i as i32 == current, recommended, false)
                 })
                 .collect()
         };
         self.queue_model.set_vec(items);
         self.forget_selection();
-        for (i, url) in missing {
-            self.load_queue_art(i, url);
-        }
     }
 
     /// Shows the queue entries at `rows`, whose tracks were replaced in
@@ -302,89 +285,54 @@ impl App {
             return;
         }
         let current = self.ui().get_queue_current();
-        let mut missing = Vec::new();
-        {
-            let state = self.state.borrow();
-            for &i in rows {
-                let Some(track) = state.queue.get(i) else {
-                    continue;
-                };
-                let selected = self
-                    .queue_model
-                    .row_data(i)
-                    .is_some_and(|item| item.selected);
-                let (item, art) = queue_item(
-                    track,
-                    &state.downloads,
-                    i as i32 == current,
-                    state.queue.is_recommended(i),
-                    selected,
-                );
-                missing.extend(art.map(|url| (i, url)));
-                self.queue_model.set_row_data(i, item);
-            }
-        }
-        for (i, url) in missing {
-            self.load_queue_art(i, url);
-        }
-    }
-
-    /// Loads the artwork of the entry at `index` into its row. The entry may
-    /// have moved meanwhile, or been replaced in place; the row that still
-    /// wants this artwork gets it.
-    pub(super) fn load_queue_art(self: &Rc<Self>, index: usize, url: String) {
-        // Rows nobody can see aren't worth a download; `load_missing_queue_art`
-        // catches up when Up next is shown.
-        let ui = self.ui();
-        if !ui.get_queue_shown() {
-            return;
-        }
-        let expected = url.clone();
-        self.load_image(Some(url), images::ROW, move |app, image| {
-            let row = {
-                let state = app.state.borrow();
-                let wants = |i: usize| {
-                    state.queue.get(i).and_then(|t| t.thumb.as_deref()) == Some(expected.as_str())
-                        && app
-                            .queue_model
-                            .row_data(i)
-                            .is_some_and(|item| item.art.size().width == 0)
-                };
-                if wants(index) {
-                    Some(index)
-                } else {
-                    (0..state.queue.len()).find(|&i| wants(i))
-                }
+        let state = self.state.borrow();
+        for &i in rows {
+            let Some(track) = state.queue.get(i) else {
+                continue;
             };
-            if let Some(row) = row
-                && let Some(mut item) = app.queue_model.row_data(row)
-            {
-                item.art = image;
-                app.queue_model.set_row_data(row, item);
-            }
-        });
+            let selected = self
+                .queue_model
+                .row_data(i)
+                .is_some_and(|item| item.selected);
+            let item = queue_item(
+                track,
+                &state.downloads,
+                i as i32 == current,
+                state.queue.is_recommended(i),
+                selected,
+            );
+            self.queue_model.set_row_data(i, item);
+        }
     }
 
-    /// Loads the artwork of every row still without it, from the current
-    /// entry onwards, so the rows near what is playing are fetched first.
-    pub(super) fn load_missing_queue_art(self: &Rc<Self>) {
-        let len = self.queue_model.row_count();
-        let current = usize::try_from(self.ui().get_queue_current()).map_or(0, |i| i.min(len));
-        let missing: Vec<(usize, String)> = {
-            let state = self.state.borrow();
-            (current..len)
-                .chain(0..current)
-                .filter(|&i| {
-                    self.queue_model
-                        .row_data(i)
-                        .is_some_and(|item| item.art.size().width == 0)
-                })
-                .filter_map(|i| Some((i, state.queue.get(i)?.thumb.clone()?)))
-                .collect()
+    /// Loads the artwork of queue row `index`, asked for by the row once on screen.
+    pub(super) fn load_queue_art(self: &Rc<Self>, index: usize) {
+        let (Some(item), Some(url)) = (
+            self.queue_model.row_data(index),
+            self.state
+                .borrow()
+                .queue
+                .get(index)
+                .and_then(|t| t.thumb.clone()),
+        ) else {
+            return;
         };
-        for (i, url) in missing {
-            self.load_queue_art(i, url);
-        }
+        let id = item.id;
+        self.load_row_image(
+            Some(url),
+            |app| &app.queue_asks,
+            move |app| {
+                app.queue_model
+                    .row_data(index)
+                    .is_some_and(|item| item.id == id && item.art.size().width == 0)
+            },
+            move |app, image| {
+                if let Some(mut item) = app.queue_model.row_data(index) {
+                    item.art = image;
+                    app.queue_model.set_row_data(index, item);
+                }
+            },
+        );
     }
 
     pub(super) fn load_lyrics(self: &Rc<Self>) {

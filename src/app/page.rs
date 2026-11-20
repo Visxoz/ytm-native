@@ -41,25 +41,13 @@ fn on_page(generation: u64) -> impl Fn(&Rc<App>) -> bool + Copy {
     move |app| app.state.borrow().page_generation == generation
 }
 
+#[derive(Default)]
 struct Built {
-    /// Model index of the first row, so artwork finds its row once shown.
-    first: usize,
     rows: Vec<RowItem>,
-    /// (row, thumbnail) for track artwork to fetch.
-    track_art: Vec<(usize, String)>,
     card_art: Vec<CardArt>,
 }
 
 impl Built {
-    fn new(first: usize) -> Self {
-        Self {
-            first,
-            rows: Vec::new(),
-            track_art: Vec::new(),
-            card_art: Vec::new(),
-        }
-    }
-
     fn section(&mut self, section_index: usize, section: &Section, downloads: &Downloads) {
         let title = section.title();
         if !title.is_empty() {
@@ -82,12 +70,6 @@ impl Built {
                     });
                 }
                 for (i, track) in tracks.iter().enumerate() {
-                    if let Some(thumb) = &track.thumb
-                        && !*numbered
-                    {
-                        self.track_art
-                            .push((self.first + self.rows.len(), thumb.clone()));
-                    }
                     self.rows.push(track_row(
                         track,
                         i,
@@ -139,7 +121,7 @@ impl App {
             }
             (state.page_generation, state.route.clone())
         };
-        let mut built = Built::new(0);
+        let mut built = Built::default();
 
         if route == Route::Home {
             built.rows.push(RowItem {
@@ -193,12 +175,7 @@ impl App {
 
         let more = page.more.is_some();
         self.state.borrow_mut().page = page;
-        let Built {
-            rows,
-            track_art,
-            card_art,
-            ..
-        } = built;
+        let Built { rows, card_art } = built;
         self.rows.set_vec(rows);
         let scroll = self.state.borrow_mut().restore_scroll.take().unwrap_or(0.0);
         ui.set_page_scroll(scroll);
@@ -220,7 +197,7 @@ impl App {
                 app.rows.set_row_data(index, row);
             }
         });
-        self.load_art(track_art, card_art, generation);
+        self.load_card_art(card_art, generation);
         if more {
             self.complete_page(route, generation);
         }
@@ -230,15 +207,7 @@ impl App {
         (0..self.rows.row_count()).find(|&i| self.rows.row_data(i).is_some_and(|r| r.kind == kind))
     }
 
-    fn load_art(
-        self: &Rc<Self>,
-        track_art: Vec<(usize, String)>,
-        card_art: Vec<CardArt>,
-        generation: u64,
-    ) {
-        for (row_index, url) in track_art {
-            self.load_row_art(row_index, Some(url), generation);
-        }
+    fn load_card_art(self: &Rc<Self>, card_art: Vec<CardArt>, generation: u64) {
         for (model, urls, edge) in card_art {
             for (i, url) in urls.into_iter().enumerate() {
                 let model = Rc::clone(&model);
@@ -252,17 +221,39 @@ impl App {
         }
     }
 
-    fn load_row_art(self: &Rc<Self>, row_index: usize, url: Option<String>, generation: u64) {
-        let on_page = on_page(generation);
-        self.load_image_while(url, images::ROW, on_page, move |app, image| {
-            if !on_page(app) {
-                return;
-            }
-            if let Some(mut row) = app.rows.row_data(row_index) {
-                row.track.art = image;
-                app.rows.set_row_data(row_index, row);
-            }
-        });
+    /// Loads the artwork of track row `row`, asked for by the row once on screen.
+    pub(super) fn load_row_art(self: &Rc<Self>, row: usize) {
+        let Some(item) = self.rows.row_data(row).filter(|r| r.kind == RowKind::Track) else {
+            return;
+        };
+        let (url, on_page) = {
+            let state = self.state.borrow();
+            let url = match state.page.sections.get(item.section as usize) {
+                Some(Section::Tracks { tracks, .. }) => tracks
+                    .get(item.index as usize)
+                    .and_then(|t| t.thumb.clone()),
+                _ => None,
+            };
+            (url, on_page(state.page_generation))
+        };
+        let id = item.track.id;
+        self.load_row_image(
+            url,
+            |app| &app.row_asks,
+            move |app| {
+                on_page(app)
+                    && app
+                        .rows
+                        .row_data(row)
+                        .is_some_and(|r| r.track.id == id && r.track.art.size().width == 0)
+            },
+            move |app, image| {
+                if let Some(mut item) = app.rows.row_data(row) {
+                    item.track.art = image;
+                    app.rows.set_row_data(row, item);
+                }
+            },
+        );
     }
 
     /// Fetches one step of `Page.more`; the next follows once it is on screen.
@@ -347,9 +338,6 @@ impl App {
                 let downloaded = self.state.borrow().downloads.contains(&track.id);
                 self.rows
                     .insert(row_index, track_row(track, index, *numbered, 0, downloaded));
-                if !*numbered {
-                    self.load_row_art(row_index, track.thumb.clone(), generation);
-                }
             }
             if let Some(header) = &page.header
                 && let Some(i) = self.find_row(RowKind::Header)
@@ -363,20 +351,15 @@ impl App {
         }
 
         if page.sections.len() > shown_sections {
-            let mut built = Built::new(self.rows.row_count());
+            let mut built = Built::default();
             let state = self.state.borrow();
             for (section_index, section) in page.sections.iter().enumerate().skip(shown_sections) {
                 built.section(section_index, section, &state.downloads);
             }
             drop(state);
-            let Built {
-                rows,
-                track_art,
-                card_art,
-                ..
-            } = built;
+            let Built { rows, card_art } = built;
             self.rows.extend(rows);
-            self.load_art(track_art, card_art, generation);
+            self.load_card_art(card_art, generation);
         }
 
         let more = page.more.is_some();

@@ -86,6 +86,9 @@ export struct PlaylistChoice {
 export global Api {
     callback navigate(kind: string, id: string);
     callback play-track(section: int, index: int);
+    /// A page or queue row without its artwork has come on screen.
+    callback row-art(row: int);
+    callback queue-art(row: int);
     callback track-action(action: string, section: int, index: int);
     callback play-card(kind: string, id: string);
     callback card-radio(kind: string, id: string);

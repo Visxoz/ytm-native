@@ -140,6 +140,7 @@ export component SidePanel inherits Rectangle {
                             selected-count: root.queue-selected;
                             scroll: queue-list.content-y;
                             viewport: queue-list.visible-height;
+                            shown: root.shown;
                             clicked(control, shift) => { root.queue-clicked(i, control, shift); }
                             remove => { root.queue-remove(i); }
                             remove-selected => { root.queue-remove-selected(); }

@@ -1,5 +1,5 @@
 import { Theme } from "../theme.slint";
-import { RowItem, RowKind } from "../types.slint";
+import { Api, RowItem, RowKind } from "../types.slint";
 import { CardGrid, GenreGrid } from "cards.slint";
 import { Carousel } from "carousel.slint";
 import { PageHeader, TopResult } from "header.slint";
@@ -9,9 +9,22 @@ import { Columns, TrackRow } from "track-row.slint";
 export component PageRow {
     in property <RowItem> data;
     in property <length> content-width;
+    in property <int> index;
     property <length> inner: root.content-width - 2 * Theme.page-padding;
+    // Only rows on screen exist, so each asks for its own artwork, and again
+    // once the list hands it another row.
+    property <string> art-key: root.data.kind == RowKind.track && !root.data.numbered && root.data.track.art.width == 0
+        ? "\{root.index}/\{root.data.track.id}" : "";
     width: root.content-width;
     height: Rows.height(root.data, root.inner);
+
+    function ask-art() {
+        if root.art-key != "" {
+            Api.row-art(root.index);
+        }
+    }
+    init => { root.ask-art(); }
+    changed art-key => { root.ask-art(); }
 
     if root.data.kind == RowKind.greeting: Text {
         x: Theme.page-padding;

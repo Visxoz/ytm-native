@@ -48,8 +48,9 @@ export component PageView inherits Rectangle {
             width: 100%;
             height: 100%;
             content-y <=> root.page-scroll;
-            for row in root.rows: PageRow {
+            for row[i] in root.rows: PageRow {
                 data: row;
+                index: i;
                 content-width: list.visible-width;
             }
         }

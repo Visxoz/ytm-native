@@ -35,6 +35,8 @@ export component QueueRow inherits Rectangle {
     /// as the list scrolls under it.
     in property <length> scroll;
     in property <length> viewport;
+    /// The panel is open, which a closed one keeps its rows through.
+    in property <bool> shown;
     callback clicked(control: bool, shift: bool);
     callback remove();
     callback remove-selected();
@@ -54,8 +56,18 @@ export component QueueRow inherits Rectangle {
     // The remove button counts as hovering the row, or they would flicker;
     // nothing is hot while a row is dragged over the others.
     property <bool> hot: (touch.has-hover || remove-button.has-hover) && Drag.from < 0;
+    // As `PageRow`'s.
+    property <string> art-key: root.shown && root.item.art.width == 0 ? "\{root.index}/\{root.item.id}" : "";
     height: Theme.queue-row;
     z: root.dragging ? 1 : 0;
+
+    function ask-art() {
+        if root.art-key != "" {
+            Api.queue-art(root.index);
+        }
+    }
+    init => { root.ask-art(); }
+    changed art-key => { root.ask-art(); }
 
     function track-pointer() {
         root.pointer-y = root.y + root.scroll + touch.mouse-y;
