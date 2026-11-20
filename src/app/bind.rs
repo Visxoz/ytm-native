@@ -143,11 +143,12 @@ impl App {
             app.player.clear_next();
             app.warm_premium();
         });
-        on!(on_set_crossfade, |app, value| {
-            app.update_settings(|s| s.crossfade = value);
-            // A track queued with the old setting is queued again.
-            app.state.borrow_mut().playback.unqueue();
-            app.player.clear_next();
+        on!(on_set_crossfade, |app, value| app
+            .change_crossfade(|s| s.crossfade = value));
+        on!(on_set_crossfade_secs, |app, index| {
+            if let Some(&secs) = crate::settings::CROSSFADE_SECS.get(index as usize) {
+                app.change_crossfade(|s| s.crossfade_secs = secs);
+            }
         });
         on!(on_set_equaliser, |app, on| app
             .change_equaliser(true, |s| s.equaliser = on));

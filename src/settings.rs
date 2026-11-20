@@ -267,6 +267,9 @@ impl Accent {
     }
 }
 
+/// The crossfade lengths Settings offers, in seconds.
+pub const CROSSFADE_SECS: [f32; 9] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 8.0, 10.0, 12.0];
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct Settings {
@@ -296,6 +299,7 @@ pub struct Settings {
     /// on the free stream at once while a background check confirms it.
     pub no_premium: bool,
     pub crossfade: bool,
+    pub crossfade_secs: f32,
     /// Playback speed, the pitch moving with it.
     pub speed: f32,
     /// Closing the window leaves the app playing in the tray.
@@ -394,6 +398,8 @@ impl Default for Settings {
             premium_account: false,
             no_premium: false,
             crossfade: false,
+            // Long enough to blend two songs, short enough to keep most of an ending.
+            crossfade_secs: 6.0,
             speed: 1.0,
             close_to_tray: true,
             check_updates: true,
@@ -427,6 +433,9 @@ impl Settings {
             .speed
             .clamp(crate::audio::MIN_SPEED, crate::audio::MAX_SPEED);
         settings.balance = settings.balance.clamp(-1.0, 1.0);
+        settings.crossfade_secs = settings
+            .crossfade_secs
+            .clamp(CROSSFADE_SECS[0], CROSSFADE_SECS[CROSSFADE_SECS.len() - 1]);
         settings
     }
 
@@ -873,6 +882,10 @@ mod tests {
         assert_eq!(settings.volume, 0.5);
         assert_eq!(settings.normalise, crate::audio::Normalise::Normal);
         assert!(!settings.crossfade, "off until chosen");
+        assert!(
+            CROSSFADE_SECS.contains(&settings.crossfade_secs),
+            "a length Settings offers"
+        );
         assert_eq!(settings.quality, Quality::High);
     }
 

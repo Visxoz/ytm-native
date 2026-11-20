@@ -134,6 +134,8 @@ export component SettingsDialog inherits Dialog {
     in property <string> premium-status;
     in property <int> normalise;
     in property <bool> crossfade;
+    in property <[string]> crossfade-lengths;
+    in property <int> crossfade-secs;
     in property <[string]> output-devices;
     in property <int> output-device;
     in property <string> output-detail;
@@ -169,6 +171,7 @@ export component SettingsDialog inherits Dialog {
     callback set-quality(value: int);
     callback set-normalise(value: int);
     callback set-crossfade(value: bool);
+    callback set-crossfade-secs(index: int);
     callback set-output-device(index: int);
     callback list-output-devices();
     callback set-speed(index: int);
@@ -236,11 +239,21 @@ export component SettingsDialog inherits Dialog {
             }
         }
 
-        ToggleRow {
+        SettingRow {
             label: "Crossfade";
             detail: "Fades each track into the next. Tracks of an album played in order still run straight on.";
-            checked: root.crossfade;
-            toggled(v) => { root.set-crossfade(v); }
+            if root.crossfade: ChoiceButton {
+                text: root.crossfade-secs >= 0 ? root.crossfade-lengths[root.crossfade-secs] : "Custom";
+                choices: root.crossfade-lengths;
+                current: root.crossfade-secs;
+                menu-width: 120px;
+                picked(i) => { root.set-crossfade-secs(i); }
+            }
+            Toggle {
+                y: (parent.height - self.height) / 2;
+                checked: root.crossfade;
+                toggled(v) => { root.set-crossfade(v); }
+            }
         }
 
         ToggleRow {

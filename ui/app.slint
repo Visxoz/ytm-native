@@ -136,6 +136,9 @@ export component AppWindow inherits Window {
     /// 0 low, 1 normal, 2 high.
     in property <int> quality: 2;
     in property <bool> crossfade;
+    /// The lengths offered, and the index of the one chosen, or -1.
+    in property <[string]> crossfade-lengths;
+    in property <int> crossfade-secs;
     in property <bool> close-to-tray;
     /// "System default", then each output device; the chosen one's index,
     /// or -1 while it is unplugged.
@@ -234,6 +237,7 @@ export component AppWindow inherits Window {
     callback set-rating-buttons(value: bool);
     callback set-quality(value: int);
     callback set-crossfade(value: bool);
+    callback set-crossfade-secs(index: int);
     callback set-close-to-tray(value: bool);
     callback list-output-devices();
     callback set-output-device(index: int);
@@ -561,6 +565,8 @@ export component AppWindow inherits Window {
             premium-status: root.premium-status;
             normalise: root.normalise;
             crossfade: root.crossfade;
+            crossfade-lengths: root.crossfade-lengths;
+            crossfade-secs: root.crossfade-secs;
             output-devices: root.output-devices;
             output-device: root.output-device;
             output-detail: root.output-detail;
@@ -598,6 +604,7 @@ export component AppWindow inherits Window {
             set-accent(i) => { root.set-accent(i); }
             set-normalise(v) => { root.set-normalise(v); }
             set-crossfade(v) => { root.set-crossfade(v); }
+            set-crossfade-secs(i) => { root.set-crossfade-secs(i); }
             set-autoplay(v) => { root.set-autoplay(v); }
             youtube-history: root.youtube-history;
             set-youtube-history(v) => { root.set-youtube-history(v); }

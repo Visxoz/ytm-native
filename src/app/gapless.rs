@@ -1,13 +1,11 @@
 use std::{rc::Rc, time::Instant};
 
 use super::App;
-use crate::{api::Track, audio::SILENCE_TRIM_SECS};
+use crate::{api::Track, audio::SILENCE_TRIM_SECS, settings::Settings};
 
 /// Time for the next stream to start downloading and its decoder to open. A
 /// crossfade adds its length and trimmed silence, as the player holds that back.
 const GAPLESS_LEAD_SECS: f64 = 15.0;
-/// Long enough to blend two songs, short enough to keep most of an ending.
-const CROSSFADE_SECS: f64 = 6.0;
 
 /// Whether `next` follows `current` on its album, which is often written to
 /// run straight on, so it is never faded into.
@@ -22,6 +20,13 @@ fn in_album_order(current: Option<&Track>, next: &Track) -> bool {
 }
 
 impl App {
+    pub(super) fn change_crossfade(&self, change: impl FnOnce(&mut Settings)) {
+        self.update_settings(change);
+        // A track queued with the old setting is queued again.
+        self.state.borrow_mut().playback.unqueue();
+        self.player.clear_next();
+    }
+
     /// Runs every tick, so it copies nothing until a track is due.
     pub(super) fn update_gapless(self: &Rc<Self>, position: f64) {
         let (stale, due, generation) = {
@@ -31,7 +36,7 @@ impl App {
             let crossfade = if state.settings.crossfade
                 && next.is_some_and(|next| !in_album_order(state.queue.current(), next))
             {
-                CROSSFADE_SECS
+                f64::from(state.settings.crossfade_secs)
             } else {
                 0.0
             };

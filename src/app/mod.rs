@@ -48,7 +48,7 @@ use crate::{
     media_controls::{Action, Controls},
     presence::PresenceHandle,
     queue::{Queue, Repeat},
-    settings::{self, Accent, Look, Settings},
+    settings::{self, Accent, CROSSFADE_SECS, Look, Settings},
     streams::ResolvedStream,
     update,
 };
@@ -451,6 +451,11 @@ impl App {
             .map(|speed| format!("{speed}×").into())
             .collect();
         ui.set_speeds(ModelRc::new(VecModel::from(speeds)));
+        let lengths: Vec<SharedString> = CROSSFADE_SECS
+            .iter()
+            .map(|secs| format!("{secs} s").into())
+            .collect();
+        ui.set_crossfade_lengths(ModelRc::new(VecModel::from(lengths)));
         app
     }
 
@@ -576,6 +581,12 @@ impl App {
         ui.set_rating_buttons(settings.rating_buttons);
         ui.set_quality(settings.quality.index());
         ui.set_crossfade(settings.crossfade);
+        ui.set_crossfade_secs(
+            CROSSFADE_SECS
+                .iter()
+                .position(|&s| s == settings.crossfade_secs)
+                .map_or(-1, |i| i as i32),
+        );
         ui.set_speed(
             SPEEDS
                 .iter()
