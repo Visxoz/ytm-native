@@ -1,7 +1,7 @@
 use std::{collections::HashSet, rc::Rc};
 
 use super::App;
-use crate::api::{CardKind, QueueMode, Route, Section, Track};
+use crate::api::{CardKind, Page, QueueMode, Route, Section, Track};
 
 fn card_kind(kind: &str) -> Option<CardKind> {
     match kind {
@@ -43,25 +43,25 @@ impl App {
     }
 
     fn play_with_radio(self: &Rc<Self>, track: Track) {
-        let id = track.id.clone();
-        {
+        let seed = track.id.clone();
+        let queue_generation = {
             let mut state = self.state.borrow_mut();
-            state.set_queue(vec![track], 0, false);
+            // Shuffled, if on, so the radio is shuffled in as it arrives.
+            let shuffle = state.settings.shuffle;
+            state.set_queue(vec![track], 0, shuffle);
             // Autoplay would otherwise fetch the same radio once this starts.
             state.playback.extending = true;
-        }
+            state.queue_generation
+        };
         self.start_current();
         let api = self.api.clone();
-        let seed = id.clone();
         self.spawn(
             async move { api.track_radio(&seed).await },
             move |app, result| {
                 app.state.borrow_mut().playback.extending = false;
                 match result {
                     Ok(tracks) => {
-                        let still_first =
-                            app.state.borrow().queue.get(0).is_some_and(|t| t.id == id);
-                        if still_first {
+                        if app.state.borrow().queue_generation == queue_generation {
                             app.append_unique(tracks);
                         }
                     }
@@ -74,27 +74,27 @@ impl App {
         );
     }
 
+    /// For radios, which may repeat what is queued.
     pub(super) fn append_unique(self: &Rc<Self>, tracks: Vec<Track>) {
-        {
-            let mut state = self.state.borrow_mut();
-            let fresh: Vec<Track> = {
-                let known: HashSet<&str> = state.queue.items().map(|t| t.id.as_str()).collect();
-                tracks
-                    .into_iter()
-                    .filter(|t| !known.contains(t.id.as_str()))
-                    .collect()
-            };
-            let shuffle = state.settings.shuffle;
-            state.queue.extend(fresh);
-            // Keep newly added tracks in the shuffle. Recommendations are
-            // taken out first, as they are placed again where they are due.
-            if shuffle {
-                state.queue.remove_recommended();
-                state.queue.set_shuffle(false);
-                state.queue.set_shuffle(true);
-            }
+        let fresh: Vec<Track> = {
+            let state = self.state.borrow();
+            let known: HashSet<&str> = state.queue.items().map(|t| t.id.as_str()).collect();
+            tracks
+                .into_iter()
+                .filter(|t| !known.contains(t.id.as_str()))
+                .collect()
+        };
+        self.append(fresh);
+    }
+
+    fn append(self: &Rc<Self>, tracks: Vec<Track>) {
+        if tracks.is_empty() {
+            return;
         }
+        self.state.borrow_mut().queue.extend(tracks);
         self.refresh_queue();
+        // Shuffled in, one may now be next.
+        self.drop_stale_next();
         self.prefetch_next();
     }
 
@@ -157,6 +157,17 @@ impl App {
             )
         };
         match action {
+            // Played from what has loaded, with the rest queued as it arrives.
+            "play" | "shuffle" if unloaded.is_some() => {
+                if action == "shuffle" && !self.state.borrow().settings.shuffle {
+                    self.update_settings(|s| s.set_shuffle(true));
+                }
+                let (route, page) = {
+                    let state = self.state.borrow();
+                    (state.route.clone(), state.page.clone())
+                };
+                self.play_page(route, page, false);
+            }
             "play" => self.play_tracks(tracks, false),
             "shuffle" => self.with_all_tracks(tracks, shuffle_playlist, |app, tracks| {
                 app.play_tracks(tracks, true);
@@ -228,16 +239,97 @@ impl App {
             self.play_radio(format!("RDAMPL{id}"));
             return;
         }
+        let route = match kind {
+            CardKind::Album => Route::Album(id),
+            CardKind::Playlist => Route::Playlist(id),
+            _ => {
+                let api = self.api.clone();
+                self.spawn(
+                    async move { api.card_tracks(kind, &id).await },
+                    move |app, result| match result {
+                        Ok(tracks) => app.play_card_tracks(tracks, radio),
+                        Err(e) => app.toast(format!("Couldn't load: {e}")),
+                    },
+                );
+                return;
+            }
+        };
+        // An expired copy may be missing songs added since.
+        if let Some((page, true, _)) = self.cached_page(&route) {
+            self.play_page(route, page, radio);
+            return;
+        }
+        let api = self.api.clone();
+        let (signed_in, account) = {
+            let state = self.state.borrow();
+            (state.signed_in, state.account)
+        };
+        let asked = route.clone();
+        self.spawn(
+            async move { api.page(&asked, signed_in).await },
+            move |app, result| match result {
+                Ok(page) => {
+                    // So opening it next shows it at once.
+                    if app.state.borrow().account == account {
+                        app.cache_page(route.clone(), page.clone());
+                    }
+                    app.play_page(route, page, radio);
+                }
+                Err(e) => app.toast(format!("Couldn't load: {e}")),
+            },
+        );
+    }
+
+    /// Plays `tracks`, or with `radio` the first one's radio.
+    fn play_card_tracks(self: &Rc<Self>, tracks: Vec<Track>, radio: bool) {
+        if !radio {
+            self.play_tracks(tracks, false);
+            return;
+        }
+        match tracks.into_iter().next() {
+            Some(first) => self.play_with_radio(first),
+            None => self.toast("Nothing to play here"),
+        }
+    }
+
+    /// Plays an album or playlist page's tracks, or its first one's radio, at
+    /// once, and queues the rest of a long playlist as it arrives.
+    fn play_page(self: &Rc<Self>, route: Route, mut page: Page, radio: bool) {
+        let more = page.more.is_some() && !radio;
+        let tracks = match page.sections.first_mut() {
+            // Taken rather than copied when the page is done with.
+            Some(Section::Tracks { tracks, .. }) if !more => std::mem::take(tracks),
+            Some(Section::Tracks { tracks, .. }) => tracks.clone(),
+            Some(Section::Cards { .. }) | None => Vec::new(),
+        };
+        let shown = tracks.len();
+        self.play_card_tracks(tracks, radio);
+        if !more || shown == 0 {
+            return;
+        }
+        // Read once the queue is set, so it is this queue's.
+        let (queue_generation, account) = {
+            let state = self.state.borrow();
+            (state.queue_generation, state.account)
+        };
         let api = self.api.clone();
         self.spawn(
-            async move { api.card_tracks(kind, &id).await },
-            move |app, result| match result {
-                Ok(tracks) if radio => match tracks.into_iter().next() {
-                    Some(first) => app.play_with_radio(first),
-                    None => app.toast("Nothing to play here"),
-                },
-                Ok(tracks) => app.play_tracks(tracks, false),
-                Err(e) => app.toast(format!("Couldn't load: {e}")),
+            async move { api.complete(page).await },
+            move |app, (mut page, whole)| {
+                let keep = whole && app.state.borrow().account == account;
+                if keep && let Some((cached, _)) = app.state.borrow_mut().page_cache.get_mut(&route)
+                {
+                    *cached = page.clone();
+                }
+                if app.state.borrow().queue_generation != queue_generation {
+                    return;
+                }
+                // Not deduplicated, as a playlist may list a song twice.
+                if let Some(Section::Tracks { tracks, .. }) = page.sections.first_mut()
+                    && tracks.len() > shown
+                {
+                    app.append(tracks.split_off(shown));
+                }
             },
         );
     }

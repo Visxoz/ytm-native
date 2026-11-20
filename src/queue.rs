@@ -2,7 +2,7 @@
 //! does, and turning it off restores the original order.
 
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     time::{SystemTime, UNIX_EPOCH},
 };
 
@@ -121,9 +121,14 @@ impl<T: Clone> Queue<T> {
         self.revision += 1;
         self.entries = items.into_iter().map(|item| self.entry(item)).collect();
         self.current = (!self.entries.is_empty()).then(|| start.min(self.entries.len() - 1));
-        self.unshuffled = None;
+        self.unshuffled = shuffle.then(|| self.entries.iter().map(|e| e.uid).collect());
         if shuffle {
-            self.set_shuffle(true);
+            // Nothing has played yet, so those before the start are shuffled in too.
+            if let Some(start) = self.current {
+                self.entries[..=start].rotate_right(1);
+                self.current = Some(0);
+            }
+            self.shuffle_after_current();
         }
     }
 
@@ -143,7 +148,8 @@ impl<T: Clone> Queue<T> {
                     .enumerate()
                     .map(|(i, uid)| (uid, i))
                     .collect();
-                // Entries added while shuffled stay behind the entry they
+                // Entries pushed, played next or recommended while shuffled,
+                // which the order doesn't know, stay behind the entry they
                 // followed, so the one playing never jumps to the end.
                 let mut anchor = None;
                 let mut keyed: Vec<_> = std::mem::take(&mut self.entries)
@@ -311,9 +317,31 @@ impl<T: Clone> Queue<T> {
         }
     }
 
+    /// While shuffled, each item goes in at random among the entries still to
+    /// play, and goes last should shuffle be turned off.
     pub fn extend(&mut self, items: impl IntoIterator<Item = T>) {
+        // Behind the entries played next or recommended right after the
+        // current, which the order doesn't know, so they still play next.
+        let start = self.unshuffled.as_ref().map(|order| {
+            let known: HashSet<u64> = order.iter().copied().collect();
+            let after = self.current.map_or(0, |c| c + 1);
+            after
+                + self.entries[after..]
+                    .iter()
+                    .take_while(|e| !known.contains(&e.uid))
+                    .count()
+        });
         for item in items {
-            self.push(item);
+            let entry = self.entry(item);
+            let at = match (start, &mut self.unshuffled) {
+                (Some(start), Some(order)) => {
+                    order.push(entry.uid);
+                    start + self.random_below(self.entries.len() - start + 1)
+                }
+                _ => self.entries.len(),
+            };
+            self.entries.insert(at, entry);
+            self.current.get_or_insert(at);
         }
     }
 
@@ -503,6 +531,51 @@ mod tests {
         q.set_shuffle(false);
         assert_eq!(items(&q), (0..20).collect::<Vec<_>>());
         assert_eq!(q.current(), Some(&playing));
+    }
+
+    #[test]
+    fn a_shuffled_start_part_way_through_plays_every_track() {
+        let mut q = Queue::with_seed(42);
+        q.set((0..20).collect(), 10, true);
+        let mut heard = vec![*q.current().unwrap()];
+        while let Some(&t) = q.advance(false) {
+            heard.push(t);
+        }
+        assert_eq!(heard[0], 10);
+        heard.sort();
+        assert_eq!(heard, (0..20).collect::<Vec<_>>());
+        q.set_shuffle(false);
+        assert_eq!(items(&q), (0..20).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn tracks_added_while_shuffled_mix_in_and_go_last_unshuffled() {
+        let mut q = queue(10);
+        q.set_shuffle(true);
+        q.advance(false);
+        q.advance(false);
+        let played = items(&q)[..3].to_vec();
+        q.extend(10..20);
+        let order = items(&q);
+        assert_eq!(&order[..3], played, "what has played stays put");
+        assert!(
+            order[3..10].iter().any(|&t| t >= 10),
+            "mixed in among those still to play"
+        );
+        let mut sorted = order.clone();
+        sorted.sort();
+        assert_eq!(sorted, (0..20).collect::<Vec<_>>());
+        q.set_shuffle(false);
+        assert_eq!(items(&q), (0..20).collect::<Vec<_>>());
+    }
+
+    #[test]
+    fn tracks_added_while_shuffled_go_behind_one_played_next() {
+        let mut q = queue(10);
+        q.set_shuffle(true);
+        q.play_next(99);
+        q.extend(10..400);
+        assert_eq!(q.peek_next(), Some(&99));
     }
 
     #[test]

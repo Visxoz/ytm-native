@@ -276,6 +276,9 @@ impl App {
                     if current {
                         app.complete_home(&page, shown, whole);
                     }
+                } else if !whole {
+                    // Cut short, it would play and show as whole; the next visit asks again.
+                    app.state.borrow_mut().page_cache.remove(&route);
                 } else if let Some((cached, _)) = app.state.borrow_mut().page_cache.get_mut(&route)
                 {
                     *cached = page.clone();

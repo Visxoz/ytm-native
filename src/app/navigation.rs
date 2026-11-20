@@ -88,18 +88,8 @@ impl App {
             _ => {}
         }
 
-        // An expired copy shows while a fresh one loads behind it, unless it
-        // was left half-loaded, as its continuation would have expired too.
-        let cached = self
-            .state
-            .borrow()
-            .page_cache
-            .get(&route)
-            .and_then(|(page, at)| {
-                let fresh = at.elapsed() < PAGE_FRESH_FOR;
-                (fresh || page.more.is_none()).then(|| (page.clone(), fresh, *at))
-            });
-        if let Some((page, fresh, cached_at)) = cached {
+        // An expired copy shows while a fresh one loads behind it.
+        if let Some((page, fresh, cached_at)) = self.cached_page(&route) {
             ui.set_page_loading(false);
             self.show_page(page);
             if !fresh {
@@ -125,6 +115,19 @@ impl App {
                 app.page_loaded(generation, result, cache_as)
             },
         );
+    }
+
+    /// The cached copy of `route`, whether it is fresh, and when it was cached.
+    /// One left half-loaded is none once expired, as its continuation has too.
+    pub(super) fn cached_page(&self, route: &Route) -> Option<(Page, bool, Instant)> {
+        self.state
+            .borrow()
+            .page_cache
+            .get(route)
+            .and_then(|(page, at)| {
+                let fresh = at.elapsed() < PAGE_FRESH_FOR;
+                (fresh || page.more.is_none()).then(|| (page.clone(), fresh, *at))
+            })
     }
 
     fn page_loaded(
@@ -294,7 +297,7 @@ impl App {
         self.spawn(async move { settings::save_home(&sections) }, |_, ()| {});
     }
 
-    fn cache_page(&self, route: Route, page: Page) {
+    pub(super) fn cache_page(&self, route: Route, page: Page) {
         let mut state = self.state.borrow_mut();
         let cache = &mut state.page_cache;
         // Expired pages are kept to show while they reload, but not those

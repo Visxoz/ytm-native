@@ -347,7 +347,7 @@ impl App {
 
     /// Queues a radio when the last track starts, so playback carries on.
     pub(super) fn extend_with_radio_if_ending(self: &Rc<Self>) {
-        let (seed, revision, generation) = {
+        let (seed, queue_generation) = {
             let state = self.state.borrow();
             if !state.settings.autoplay
                 || state.queue.repeat != Repeat::Off
@@ -360,11 +360,7 @@ impl App {
             let Some(current) = state.queue.current().filter(|t| !t.is_local()) else {
                 return;
             };
-            (
-                current.id.clone(),
-                state.queue.revision(),
-                state.playback.generation,
-            )
+            (current.id.clone(), state.queue_generation)
         };
         self.state.borrow_mut().playback.extending = true;
         let api = self.api.clone();
@@ -372,13 +368,9 @@ impl App {
             async move { api.track_radio(&seed).await },
             move |app, result| {
                 app.state.borrow_mut().playback.extending = false;
-                // Both changing means another queue was started, which the
-                // radio is not for; should that one end, `next` asks again.
-                // One alone is an edit, or a skip, in the same queue.
-                let replaced = {
-                    let state = app.state.borrow();
-                    state.queue.revision() != revision && state.playback.generation != generation
-                };
+                // Another queue the radio is not for; should that one end,
+                // `next` asks again.
+                let replaced = app.state.borrow().queue_generation != queue_generation;
                 match result {
                     Ok(_) if replaced => {}
                     Ok(tracks) => app.append_unique(tracks),

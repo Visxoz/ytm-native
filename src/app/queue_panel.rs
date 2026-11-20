@@ -148,7 +148,12 @@ impl App {
     }
 
     pub(super) fn queue_clear(self: &Rc<Self>) {
-        self.state.borrow_mut().queue.clear_upcoming();
+        {
+            let mut state = self.state.borrow_mut();
+            state.queue.clear_upcoming();
+            // So the rest of a playlist, or a radio, still loading isn't added.
+            state.queue_generation += 1;
+        }
         self.refresh_queue();
         self.queue_edited();
     }
@@ -205,7 +210,21 @@ impl App {
     /// After rows changed in place, so the model is at the queue's revision.
     fn queue_edited(self: &Rc<Self>) {
         self.clear_selection();
-        let (revision, current, stale) = {
+        let (revision, current) = {
+            let state = self.state.borrow();
+            (state.queue.revision(), state.queue.current_index())
+        };
+        self.queue_shown.set(Some(revision));
+        self.ui()
+            .set_queue_current(current.map_or(-1, |i| i as i32));
+        self.drop_stale_next();
+        self.persist_soon();
+        self.prefetch_next();
+    }
+
+    /// Drops the track queued in the player should it no longer be next.
+    pub(super) fn drop_stale_next(&self) {
+        let stale = {
             let mut state = self.state.borrow_mut();
             let State {
                 queue, playback, ..
@@ -218,16 +237,11 @@ impl App {
             if stale {
                 playback.unqueue();
             }
-            (queue.revision(), queue.current_index(), stale)
+            stale
         };
-        self.queue_shown.set(Some(revision));
-        self.ui()
-            .set_queue_current(current.map_or(-1, |i| i as i32));
         if stale {
             self.player.clear_next();
         }
-        self.persist_soon();
-        self.prefetch_next();
     }
 
     pub(super) fn save_queue_as_playlist(self: &Rc<Self>) {

@@ -182,6 +182,9 @@ struct State {
     page_generation: u64,
     restore_scroll: Option<f32>,
     queue: Queue<Track>,
+    /// Bumped as the queue is replaced or cleared, so tracks fetched for one
+    /// never join the next.
+    queue_generation: u64,
     playback: Playback,
     lyrics_for: Option<String>,
     /// Each lyric line's start in seconds, when the lyrics shown are synced.
@@ -214,6 +217,7 @@ impl State {
             self.playback.resume = None;
         }
         self.queue.set(tracks, start, shuffle);
+        self.queue_generation += 1;
         self.smart.reset();
     }
 }
@@ -340,6 +344,7 @@ impl App {
                 page_generation: 0,
                 restore_scroll: None,
                 queue,
+                queue_generation: 0,
                 playback: Playback::default(),
                 lyrics_for: None,
                 lyric_starts: Vec::new(),
