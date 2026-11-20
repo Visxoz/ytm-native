@@ -125,12 +125,11 @@ impl App {
             let batch = scrobbler.pending.batch(scrobbler.singles > 0);
             (session, batch, scrobbler.generation)
         };
+        // Only the result comes back, so a panic still clears `sending`.
+        let sent = batch.clone();
         self.spawn(
-            async move {
-                let result = lastfm::scrobble(&session, &batch).await;
-                (result, batch)
-            },
-            move |app, (result, batch)| {
+            async move { lastfm::scrobble(&session, &sent).await },
+            move |app, result| {
                 let more = {
                     let mut state = app.state.borrow_mut();
                     let scrobbler = &mut state.scrobbler;

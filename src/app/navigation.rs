@@ -104,13 +104,11 @@ impl App {
         }
 
         let api = self.api.clone();
+        let asked = route.clone();
         self.spawn(
-            async move {
-                let page = api.page(&route, signed_in).await;
-                (route, page)
-            },
+            async move { api.page(&asked, signed_in).await },
             // The history isn't cached, so a song just played shows.
-            move |app, (route, result)| {
+            move |app, result| {
                 let cache_as = (route != Route::History).then_some(route);
                 app.page_loaded(generation, result, cache_as)
             },

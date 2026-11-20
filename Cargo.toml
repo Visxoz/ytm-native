@@ -62,7 +62,9 @@ opt-level = "s"
 lto = true
 codegen-units = 1
 strip = true
-panic = "abort"
+# Unwinding, so a panicking request fails alone; `logger` still aborts on
+# panics anywhere but the Tokio runtime's threads.
+panic = "unwind"
 
 [profile.release.package.unsafe-libopus]
 opt-level = 3

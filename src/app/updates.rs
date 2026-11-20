@@ -62,11 +62,10 @@ impl App {
                 });
             }
         };
-        let download = async move {
-            let result = update::download(&found, progress).await;
-            (found, result)
-        };
-        self.spawn(download, |app, (found, result)| {
+        // Only the result comes back, so a panic ends the wait as a failure.
+        let asked = found.clone();
+        let download = async move { update::download(&asked, progress).await };
+        self.spawn(download, move |app, result| {
             let ui = app.ui();
             match result.and_then(|path| update::stage(&found, path)) {
                 Ok(()) => {

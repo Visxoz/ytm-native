@@ -25,7 +25,7 @@
 
 <br><br>
 
-<img src="docs/stats.svg" width="100%" alt="24 MB, one exe. 0.1% CPU while a song plays. 0 MB of GPU memory once minimised. 256 kbps Opus with YouTube Premium.">
+<img src="docs/stats.svg" width="100%" alt="33 MB, one exe. 0.1% CPU while a song plays. 0 MB of GPU memory once minimised. 256 kbps Opus with YouTube Premium.">
 
 </div>
 
@@ -42,7 +42,7 @@
 <td width="33%" valign="top">
 
 ### Weighs nothing
-One 24 MB exe, drawn by the GPU, using 0.1% of the CPU while it plays. Minimised, it hands back its GPU memory and drops to about 41 MB of RAM.
+One 33 MB exe, drawn by the GPU, using 0.1% of the CPU while it plays. Minimised, it hands back its GPU memory and drops to about 41 MB of RAM.
 
 </td>
 <td width="33%" valign="top">
@@ -270,7 +270,7 @@ The patches:
 - `i-slint-renderer-skia` draws those fonts from the mappings, and drops its GPU surface and caches while the window is minimised.
 - `rustypipe` opens playlists the signed-in user owns, fetches visitor IDs from YouTube's API rather than the Music home page, and returns an error instead of crashing when YouTube refuses one.
 
-`YTM_LOG=info` turns on logging in release builds.
+Release builds write warnings, errors and crashes to `%APPDATA%\Lily\lily.log`, with every URL cut down to its host; `YTM_LOG=info` (or `debug`) logs more. A request that crashes fails on its own rather than closing the app.
 
 </details>
 

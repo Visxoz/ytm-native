@@ -43,24 +43,24 @@ impl App {
 
     fn look_up_song_version(self: &Rc<Self>, video: Track) {
         let api = self.api.clone();
-        let lookup = async move {
-            let song = api.song_version(&video).await;
-            (video.id, song)
-        };
-        self.spawn(lookup, |app, (id, result)| {
-            // A failed lookup counts as none, so it is not retried per track.
-            let song = result.unwrap_or_else(|e| {
-                log::debug!("{id}: could not look for a song version: {e}");
-                None
-            });
-            app.state
-                .borrow_mut()
-                .song_versions
-                .insert(id.clone(), SongVersion::Known(song.clone()));
-            if let Some(song) = song {
-                app.prefetch_song_version(id, song);
-            }
-        });
+        let id = video.id.clone();
+        self.spawn(
+            async move { api.song_version(&video).await },
+            move |app, result| {
+                // A failed lookup counts as none, so it is not retried per track.
+                let song = result.unwrap_or_else(|e| {
+                    log::debug!("{id}: could not look for a song version: {e}");
+                    None
+                });
+                app.state
+                    .borrow_mut()
+                    .song_versions
+                    .insert(id.clone(), SongVersion::Known(song.clone()));
+                if let Some(song) = song {
+                    app.prefetch_song_version(id, song);
+                }
+            },
+        );
     }
 
     /// Until the song's stream resolves, the queue keeps the video and its stream.
