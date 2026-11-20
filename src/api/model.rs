@@ -84,7 +84,7 @@ impl CardKind {
     }
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Card {
     pub kind: CardKind,
     pub id: String,
@@ -115,7 +115,7 @@ pub enum CardLayout {
     Top,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Section {
     Tracks {
         title: String,
@@ -139,7 +139,7 @@ impl Section {
     }
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct Header {
     /// "Album", "Playlist", "Artist"…, shown above the title.
     pub label: String,

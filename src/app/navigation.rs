@@ -12,7 +12,7 @@ use crate::{
     settings,
 };
 
-const PAGE_CACHE_FOR: Duration = Duration::from_secs(5 * 60);
+const PAGE_FRESH_FOR: Duration = Duration::from_secs(5 * 60);
 const PAGE_CACHE_SIZE: usize = 12;
 const SUGGEST_DELAY: Duration = Duration::from_millis(150);
 
@@ -88,16 +88,23 @@ impl App {
             _ => {}
         }
 
+        // An expired copy shows while a fresh one loads behind it, unless it
+        // was left half-loaded, as its continuation would have expired too.
         let cached = self
             .state
             .borrow()
             .page_cache
             .get(&route)
-            .filter(|(_, at)| at.elapsed() < PAGE_CACHE_FOR)
-            .map(|(page, _)| page.clone());
-        if let Some(page) = cached {
+            .and_then(|(page, at)| {
+                let fresh = at.elapsed() < PAGE_FRESH_FOR;
+                (fresh || page.more.is_none()).then(|| (page.clone(), fresh, *at))
+            });
+        if let Some((page, fresh, cached_at)) = cached {
             ui.set_page_loading(false);
             self.show_page(page);
+            if !fresh {
+                self.refresh_page(route, signed_in, generation, cached_at);
+            }
             return;
         }
 
@@ -143,6 +150,88 @@ impl App {
                 ui.set_page_error(e.into());
             }
         }
+    }
+
+    /// Fetches the whole of the expired page on screen, cached at `cached_at`,
+    /// and swaps it in where the user has scrolled to should it differ. A
+    /// failure keeps the copy.
+    fn refresh_page(
+        self: &Rc<Self>,
+        route: Route,
+        signed_in: bool,
+        generation: u64,
+        cached_at: Instant,
+    ) {
+        let home = route == Route::Home && signed_in;
+        if home {
+            // As with each fresh feed, so a changed picture shows.
+            self.load_account_photo();
+        }
+        let api = self.api.clone();
+        let asked = route.clone();
+        self.spawn(
+            async move {
+                let mut page = api.page(&asked, signed_in).await?;
+                while page.more.is_some() {
+                    let whole;
+                    (page, whole) = api.complete(page).await;
+                    if !whole {
+                        return Err("part of it failed".to_owned());
+                    }
+                }
+                Ok(page)
+            },
+            move |app, result: api::Result<Page>| {
+                let page = match result {
+                    Ok(page) => page,
+                    Err(e) => {
+                        log::warn!("could not refresh the page: {e}");
+                        return;
+                    }
+                };
+                let (ours, swap) = {
+                    let state = app.state.borrow();
+                    // Gone, as after a like or signing out, it is to load
+                    // afresh. Still ours, it is cached even once the user has
+                    // moved on. Replaced while still on screen, it was by an
+                    // earlier refresh from a visit left and come back to.
+                    let Some((_, at)) = state.page_cache.get(&route) else {
+                        return;
+                    };
+                    let ours = *at == cached_at;
+                    let current = state.page_generation == generation;
+                    if !ours && !current {
+                        return;
+                    }
+                    // Home's shelves differ on every load and Home never moves
+                    // what is shown, so its fresh feed waits for the next visit.
+                    let swap = current
+                        && !home
+                        && (state.page.header != page.header
+                            || state.page.sections != page.sections);
+                    (ours, swap)
+                };
+                if ours && home {
+                    app.save_home(page.sections.clone());
+                }
+                if !swap {
+                    if ours {
+                        app.cache_page(route, page);
+                    }
+                    return;
+                }
+                if ours {
+                    app.cache_page(route, page.clone());
+                }
+                {
+                    let mut state = app.state.borrow_mut();
+                    state.restore_scroll = Some(app.ui().get_page_scroll());
+                    // Rows move, so art still on its way to their old places is dropped.
+                    state.page_generation += 1;
+                }
+                app.show_page(page);
+            },
+        );
     }
 
     /// Should the feed fail before any of it shows, the last whole one stands
@@ -208,8 +297,11 @@ impl App {
     fn cache_page(&self, route: Route, page: Page) {
         let mut state = self.state.borrow_mut();
         let cache = &mut state.page_cache;
-        cache.retain(|_, (_, at)| at.elapsed() < PAGE_CACHE_FOR);
-        if cache.len() >= PAGE_CACHE_SIZE
+        // Expired pages are kept to show while they reload, but not those
+        // left half-loaded, which `navigate` loads afresh.
+        cache.retain(|_, (page, at)| at.elapsed() < PAGE_FRESH_FOR || page.more.is_none());
+        if !cache.contains_key(&route)
+            && cache.len() >= PAGE_CACHE_SIZE
             && let Some(oldest) = cache
                 .iter()
                 .min_by_key(|(_, (_, at))| *at)
