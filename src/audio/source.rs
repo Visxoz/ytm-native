@@ -1,6 +1,7 @@
 //! Downloads a stream into memory in the background and serves it to the
-//! demuxer as a seekable file, blocking reads until their bytes arrive. A
-//! file on disk is served in place.
+//! demuxer as a seekable file, blocking reads until their bytes arrive. The
+//! download follows the reader, so a seek ahead is fetched next and the gaps
+//! after. A file on disk is served in place.
 
 use std::{
     fs::File,
@@ -15,11 +16,15 @@ use std::{
 use symphonia::core::io::MediaSource;
 
 /// googlevideo throttles large single requests, so the file is fetched in
-/// ranges no bigger than this.
+/// ranges no bigger than this, each within one aligned block.
 const CHUNK: u64 = 1024 * 1024;
 const READ_BUF: usize = 64 * 1024;
-/// Caps the up-front allocation should a reported size be wrong; enough for a long mix.
-const MAX_RESERVE: u64 = 1024 * 1024 * 1024;
+/// Streams longer than this, which only long mixes and uploads reach, keep
+/// only the blocks around the read position; songs are held whole, for replays.
+const WINDOW_FROM: u64 = 64 * CHUNK;
+/// Blocks a window keeps behind the read position, and fetches ahead of it.
+const KEEP_BEHIND: usize = 8;
+const KEEP_AHEAD: usize = 24;
 const MAX_RETRIES: u32 = 4;
 /// How long a connection that stops answering is retried, so one that
 /// comes back within it plays on.
@@ -46,13 +51,95 @@ pub type Refresh = Box<dyn FnMut(bool) -> Result<Source, String> + Send>;
 
 #[derive(Default)]
 struct State {
-    data: Vec<u8>,
+    /// The stream by `CHUNK`, each block held from its start.
+    blocks: Vec<Vec<u8>>,
     total: u64,
+    /// Where the reader last read, which the download serves first.
+    pos: u64,
+    /// Keeps only the blocks around `pos`, as the stream is too long to hold.
+    window: bool,
+    readers: usize,
+    /// Every reader has gone, so a window has nothing left to follow.
+    abandoned: bool,
+    /// Every byte is held.
     done: bool,
     cancelled: bool,
     error: Option<String>,
     /// The error is the connection's, which outlasted `RIDE_OUT`.
     dropped: bool,
+}
+
+impl State {
+    fn held(&self, block: usize) -> usize {
+        self.blocks.get(block).map_or(0, Vec::len)
+    }
+
+    /// The end of the bytes held unbroken from `pos`, or `pos` if its byte is missing.
+    fn run_end(&self, pos: u64) -> u64 {
+        let mut block = (pos / CHUNK) as usize;
+        while self.held(block) == CHUNK as usize {
+            block += 1;
+        }
+        (block as u64 * CHUNK + self.held(block) as u64).max(pos)
+    }
+
+    /// Where the next range starts: the read position's block and on from
+    /// it, then any gap from the start. `None` once all a window may hold is.
+    fn next_range(&self) -> Option<u64> {
+        if self.total == 0 {
+            return Some(self.run_end(0));
+        }
+        let count = self.total.div_ceil(CHUNK) as usize;
+        let from = ((self.pos / CHUNK) as usize).min(count - 1);
+        let (ahead, behind) = if self.window {
+            ((from + KEEP_AHEAD).min(count), 0)
+        } else {
+            (count, from)
+        };
+        let missing =
+            |&b: &usize| (self.held(b) as u64) < (self.total - b as u64 * CHUNK).min(CHUNK);
+        (from..ahead)
+            .chain(0..behind)
+            .find(missing)
+            .map(|b| b as u64 * CHUNK + self.held(b) as u64)
+    }
+
+    /// Drops a window's blocks away from the read position, to be fetched again if read.
+    fn evict(&mut self) {
+        for b in 0..self.blocks.len() {
+            if !self.kept(b) {
+                self.blocks[b] = Vec::new();
+            }
+        }
+    }
+
+    /// Whether block `b` is within the window around the read position.
+    fn kept(&self, b: usize) -> bool {
+        let from = (self.pos / CHUNK) as usize;
+        !self.window || (b + KEEP_BEHIND >= from && b < from + KEEP_AHEAD)
+    }
+
+    /// Adds `bytes` at `at`, which follows what its block holds.
+    fn put(&mut self, mut at: u64, mut bytes: &[u8]) {
+        while !bytes.is_empty() {
+            let b = (at / CHUNK) as usize;
+            if self.blocks.len() <= b {
+                self.blocks.resize_with(b + 1, Vec::new);
+            }
+            let size = match self.total {
+                0 => CHUNK,
+                total => total.saturating_sub(b as u64 * CHUNK).min(CHUNK),
+            } as usize;
+            let block = &mut self.blocks[b];
+            debug_assert_eq!(at, b as u64 * CHUNK + block.len() as u64);
+            // Sized once, as growing by doubling can hold twice the block.
+            block.reserve_exact(size.saturating_sub(block.len()));
+            let n = bytes.len().min(CHUNK as usize - block.len());
+            block.extend_from_slice(&bytes[..n]);
+            bytes = &bytes[n..];
+            at += n as u64;
+        }
+    }
 }
 
 #[derive(Default)]
@@ -68,13 +155,7 @@ pub struct Download {
 impl Download {
     fn sized(size: u64) -> Self {
         let download = Self::default();
-        {
-            let mut state = download.state.lock().unwrap();
-            state.total = size;
-            // Sized once, as growing by doubling can hold twice the file.
-            // Tried, so a wrong size too big to set aside grows as it downloads.
-            let _ = state.data.try_reserve_exact(size.min(MAX_RESERVE) as usize);
-        }
+        download.state.lock().unwrap().total = size;
         download
     }
 
@@ -83,15 +164,12 @@ impl Download {
             url: source.url.clone(),
             ..Self::sized(source.size)
         };
+        let state = download.state.get_mut().unwrap();
+        // Only here, as `fetch_all` must keep every byte.
+        state.window = source.size > WINDOW_FROM;
         // `run` carries on after the bytes held. Taken, as the source is kept
         // for refreshes all song long.
-        let head = std::mem::take(&mut source.head);
-        download
-            .state
-            .get_mut()
-            .unwrap()
-            .data
-            .extend_from_slice(&head);
+        state.put(0, &std::mem::take(&mut source.head));
         let download = Arc::new(download);
         let worker = Arc::clone(&download);
         thread::Builder::new()
@@ -131,7 +209,15 @@ impl Download {
         let download = Self::sized(source.size);
         download.run(source, refresh);
         let state = download.state.into_inner().unwrap();
-        state.error.map_or(Ok(state.data), Err)
+        if let Some(e) = state.error {
+            return Err(e);
+        }
+        let mut data = Vec::with_capacity(state.blocks.iter().map(Vec::len).sum());
+        // Each block freed as it is copied, so the stream is not held twice.
+        for block in state.blocks {
+            data.extend_from_slice(&block);
+        }
+        Ok(data)
     }
 
     /// Stops the download and fails any blocked read.
@@ -140,11 +226,13 @@ impl Download {
         state.cancelled = true;
         // Nothing reads a cancelled download, though a slot or a thread
         // waiting on the network may hold it a while yet.
-        state.data = Vec::new();
+        state.blocks = Vec::new();
         drop(state);
         self.changed.notify_all();
     }
 
+    /// Where the bytes held from the read position run to, as a fraction of
+    /// the stream.
     pub fn progress(&self) -> f32 {
         let state = self.state.lock().unwrap();
         if state.done {
@@ -152,12 +240,12 @@ impl Download {
         } else if state.total == 0 {
             0.0
         } else {
-            state.data.len() as f32 / state.total as f32
+            state.run_end(state.pos) as f32 / state.total as f32
         }
     }
 
     /// Whether all of `url` is held in memory, so it can play again from
-    /// there. A cancelled download is emptied, though `run` marks it done.
+    /// there. A cancelled download is emptied, even one that was done.
     pub fn whole(&self, url: &str) -> bool {
         let state = self.state.lock().unwrap();
         !self.url.is_empty() && self.url == url && state.done && !state.cancelled
@@ -170,6 +258,7 @@ impl Download {
     }
 
     pub fn reader(self: &Arc<Self>) -> StreamReader {
+        self.state.lock().unwrap().readers += 1;
         StreamReader {
             download: Arc::clone(self),
             pos: 0,
@@ -189,18 +278,38 @@ impl Download {
         let mut buf = vec![0; READ_BUF];
         loop {
             let (offset, total) = {
-                let state = self.state.lock().unwrap();
-                if state.cancelled {
-                    return;
+                let mut state = self.state.lock().unwrap();
+                loop {
+                    if state.cancelled {
+                        return;
+                    }
+                    if state.total > 0 && state.run_end(0) >= state.total {
+                        state.done = true;
+                        drop(state);
+                        self.changed.notify_all();
+                        return;
+                    }
+                    state.evict();
+                    if let Some(offset) = state.next_range() {
+                        break (offset, state.total);
+                    }
+                    if state.abandoned {
+                        // Frees the window, and fails any late reader at once.
+                        drop(state);
+                        return self.cancel();
+                    }
+                    // The window ahead is held, so on once the reader moves.
+                    let block = state.pos / CHUNK;
+                    state = self
+                        .changed
+                        .wait_while(state, |s| {
+                            !s.cancelled && !s.abandoned && s.pos / CHUNK == block
+                        })
+                        .unwrap();
                 }
-                (state.data.len() as u64, state.total)
             };
-            if total > 0 && offset >= total {
-                break;
-            }
             let error = match self.fetch(&source, offset, total, &mut buf) {
-                Ok(true) => break,
-                Ok(false) => {
+                Ok(()) => {
                     retries = 0;
                     drops = 0;
                     refreshes = 0;
@@ -217,7 +326,7 @@ impl Download {
                 }
                 // A range that broke off after some bytes still got somewhere,
                 // so only a stretch with nothing arriving gives up.
-                if state.data.len() as u64 > offset {
+                if state.run_end(offset) > offset {
                     retries = 0;
                     drops = 0;
                     failing_since = None;
@@ -253,8 +362,6 @@ impl Download {
             log::warn!("download failed: {error}");
             return self.fail(error.to_string());
         }
-        self.state.lock().unwrap().done = true;
-        self.changed.notify_all();
     }
 
     /// Sleeps for `delay`, or until cancelled.
@@ -271,24 +378,26 @@ impl Download {
         self.changed.notify_all();
     }
 
-    /// Fetches one range starting at `offset`, reading through `buf`.
-    /// Returns `true` once the whole file has arrived.
+    /// Fetches one range starting at `offset`, reading through `buf`: to the
+    /// end of its block, or all of a stream of unknown length.
     fn fetch(
         &self,
         source: &Source,
         offset: u64,
         total: u64,
         buf: &mut [u8],
-    ) -> Result<bool, Box<dyn std::error::Error>> {
+    ) -> Result<(), Box<dyn std::error::Error>> {
         let mut request = crate::http::blocking_client().get(&source.url);
         for (name, value) in &source.headers {
             request = request.header(name, value);
         }
+        let mut end = u64::MAX;
         if total > 0 {
             // Ends on a megabyte, so starting after a prefetched head doesn't
             // push the first range past where cut-off URLs start refusing.
-            let end = ((offset / CHUNK + 1) * CHUNK).min(total) - 1;
-            request = request.header(reqwest::header::RANGE, format!("bytes={offset}-{end}"));
+            end = ((offset / CHUNK + 1) * CHUNK).min(total);
+            let last = end - 1;
+            request = request.header(reqwest::header::RANGE, format!("bytes={offset}-{last}"));
         }
         let mut response = request
             .send()
@@ -300,35 +409,40 @@ impl Download {
             return Err("the answer does not follow the bytes held".into());
         }
         if total == 0 {
-            let length = response.content_length().unwrap_or(0);
-            let mut state = self.state.lock().unwrap();
-            state.total = length;
-            let _ = state
-                .data
-                .try_reserve_exact(length.min(MAX_RESERVE) as usize);
+            self.state.lock().unwrap().total = response.content_length().unwrap_or(0);
         }
 
+        let mut at = offset;
         loop {
-            let n = response.read(buf)?;
+            if at == end {
+                break;
+            }
+            // Never past the range, as the next block may be held already.
+            let room = usize::try_from(end - at).unwrap_or(usize::MAX);
+            let n = response.read(buf)?.min(room);
             if n == 0 {
                 break;
             }
             let mut state = self.state.lock().unwrap();
-            if state.cancelled {
-                return Ok(true);
+            // A seek out of the window would only see this block dropped.
+            if state.cancelled || !state.kept((at / CHUNK) as usize) {
+                return Ok(());
             }
-            state.data.extend_from_slice(&buf[..n]);
+            state.put(at, &buf[..n]);
+            at += n as u64;
             drop(state);
             self.changed.notify_all();
         }
-        let state = self.state.lock().unwrap();
-        let len = state.data.len() as u64;
-        // Only this thread adds to the data, so nothing past where the range
-        // started means an empty answer, which would be asked again forever.
-        if len == offset {
+        // An empty answer would be asked again forever.
+        if at == offset {
             return Err("the server sent no bytes".into());
         }
-        Ok(total == 0 || len >= state.total)
+        let mut state = self.state.lock().unwrap();
+        // All of a stream of unknown length has arrived, so now it is known.
+        if state.total == 0 {
+            state.total = at;
+        }
+        Ok(())
     }
 }
 
@@ -398,6 +512,11 @@ pub struct StreamReader {
 impl Read for StreamReader {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         let mut state = self.download.state.lock().unwrap();
+        // The download follows the reader, and a window waits on it moving on.
+        if state.pos / CHUNK != self.pos / CHUNK {
+            self.download.changed.notify_all();
+        }
+        state.pos = self.pos;
         loop {
             if state.cancelled {
                 // Not `Interrupted`, which Symphonia's exact reads retry
@@ -411,15 +530,15 @@ impl Read for StreamReader {
                 self.pos += n as u64;
                 return Ok(n);
             }
-            let available = state.data.len() as u64;
-            if self.pos < available {
-                let start = self.pos as usize;
-                let n = buf.len().min(state.data.len() - start);
-                buf[..n].copy_from_slice(&state.data[start..start + n]);
+            let block = state.blocks.get((self.pos / CHUNK) as usize);
+            let held = block.and_then(|b| b.get((self.pos % CHUNK) as usize..));
+            if let Some(held) = held.filter(|h| !h.is_empty()) {
+                let n = buf.len().min(held.len());
+                buf[..n].copy_from_slice(&held[..n]);
                 self.pos += n as u64;
                 return Ok(n);
             }
-            if state.done || (state.total > 0 && self.pos >= state.total) {
+            if state.total > 0 && self.pos >= state.total {
                 return Ok(0);
             }
             if let Some(e) = &state.error {
@@ -427,6 +546,18 @@ impl Read for StreamReader {
             }
             state = self.download.changed.wait(state).unwrap();
         }
+    }
+}
+
+impl Drop for StreamReader {
+    fn drop(&mut self) {
+        // A download whose track is dropped is not always cancelled, so a
+        // window waiting on its reader would otherwise wait for ever.
+        if let Ok(mut state) = self.download.state.lock() {
+            state.readers -= 1;
+            state.abandoned = state.readers == 0;
+        }
+        self.download.changed.notify_all();
     }
 }
 
@@ -553,12 +684,12 @@ mod tests {
     #[test]
     fn a_cancelled_read_fails_for_good() {
         let download = Arc::new(Download::default());
-        download.state.lock().unwrap().data = vec![1; 8];
+        download.state.lock().unwrap().put(0, &[1; 8]);
         download.cancel();
         let kind = download.reader().read(&mut [0; 4]).unwrap_err().kind();
         assert_ne!(kind, io::ErrorKind::Interrupted, "Symphonia would retry");
         assert_ne!(kind, io::ErrorKind::UnexpectedEof, "not the stream's end");
-        assert_eq!(download.state.lock().unwrap().data.capacity(), 0);
+        assert_eq!(download.state.lock().unwrap().blocks.capacity(), 0);
     }
 
     #[test]
@@ -567,7 +698,7 @@ mod tests {
             url: URL.into(),
             ..Download::default()
         });
-        download.state.lock().unwrap().data = vec![1, 2, 3];
+        download.state.lock().unwrap().put(0, &[1, 2, 3]);
         assert!(!download.whole(URL), "still downloading");
         download.state.lock().unwrap().done = true;
         assert!(download.whole(URL));
@@ -577,6 +708,132 @@ mod tests {
         );
         download.cancel();
         assert!(!download.whole(URL), "cancelled, so emptied");
+    }
+
+    const MB: u64 = CHUNK;
+
+    fn sized(total: u64) -> State {
+        State {
+            total,
+            ..State::default()
+        }
+    }
+
+    fn fill(state: &mut State, block: u64) {
+        let len = (state.total - block * MB).min(MB) as usize;
+        let at = block * MB + state.held(block as usize) as u64;
+        let rest = len - state.held(block as usize);
+        state.put(at, &vec![block as u8; rest]);
+    }
+
+    #[test]
+    fn fetches_a_seek_first_then_fills_the_gaps() {
+        let mut state = sized(5 * MB + 100);
+        state.put(0, &[0; 64 * 1024]);
+        assert_eq!(state.next_range(), Some(64 * 1024), "on from the head");
+        state.pos = 3 * MB + 10;
+        assert_eq!(state.next_range(), Some(3 * MB), "the seek's block first");
+        state.put(3 * MB, &[3; 1000]);
+        assert_eq!(
+            state.next_range(),
+            Some(3 * MB + 1000),
+            "then the rest of it"
+        );
+        fill(&mut state, 3);
+        fill(&mut state, 4);
+        assert_eq!(state.next_range(), Some(5 * MB), "on to the end");
+        fill(&mut state, 5);
+        assert_eq!(state.next_range(), Some(64 * 1024), "then the gap before");
+        assert_eq!(state.run_end(state.pos), state.total);
+        assert_eq!(state.run_end(MB), MB, "nothing held there");
+        for block in 0..3 {
+            fill(&mut state, block);
+        }
+        assert_eq!(state.next_range(), None);
+        assert_eq!(state.run_end(0), state.total, "all of it");
+    }
+
+    #[test]
+    fn a_stream_of_unknown_length_runs_on_across_blocks() {
+        let mut state = State::default();
+        state.put(0, &vec![1; MB as usize + 5]);
+        assert_eq!(state.blocks.len(), 2);
+        assert_eq!(state.next_range(), Some(MB + 5));
+    }
+
+    #[test]
+    fn reads_a_block_held_past_a_gap() {
+        let download = Arc::new(Download::sized(4 * MB));
+        fill(&mut download.state.lock().unwrap(), 2);
+        let next = || download.state.lock().unwrap().next_range();
+        let mut reader = download.reader();
+        reader.seek(SeekFrom::Start(2 * MB + 1)).unwrap();
+        assert_eq!(next(), Some(0), "a seek alone moves nothing");
+        let mut buf = [0; 4];
+        assert_eq!(reader.read(&mut buf).unwrap(), 4);
+        assert_eq!(buf, [2; 4]);
+        assert_eq!(next(), Some(3 * MB), "on from where it read");
+        reader.seek(SeekFrom::Start(4 * MB)).unwrap();
+        assert_eq!(reader.read(&mut buf).unwrap(), 0, "the end, gaps or not");
+    }
+
+    #[test]
+    fn a_window_holds_only_blocks_around_the_reader() {
+        let mut state = State {
+            window: true,
+            ..sized(100 * MB)
+        };
+        for block in 0..40 {
+            fill(&mut state, block);
+        }
+        state.pos = 30 * MB;
+        state.evict();
+        let held: Vec<_> = (0..100).filter(|&b| state.held(b) > 0).collect();
+        assert_eq!(held, (22..40).collect::<Vec<_>>());
+        assert_eq!(
+            state.next_range(),
+            Some(40 * MB),
+            "ahead, not the gap behind"
+        );
+        for block in 40..54 {
+            fill(&mut state, block);
+        }
+        assert_eq!(state.next_range(), None, "far enough ahead");
+        state.pos = 5 * MB;
+        state.evict();
+        assert!(
+            state.blocks.iter().skip(29).all(Vec::is_empty),
+            "dropped ahead too"
+        );
+        assert_eq!(
+            state.next_range(),
+            Some(5 * MB),
+            "a seek back fetches again"
+        );
+    }
+
+    #[test]
+    fn a_window_stops_once_nothing_reads_it() {
+        let download = Arc::new(Download::sized(100 * MB));
+        {
+            let mut state = download.state.lock().unwrap();
+            state.window = true;
+            for block in 0..KEEP_AHEAD as u64 {
+                fill(&mut state, block);
+            }
+        }
+        let reader = download.reader();
+        let (tx, stopped) = std::sync::mpsc::channel();
+        let worker = Arc::clone(&download);
+        thread::spawn(move || {
+            worker.run(source(URL, 100 * MB), refresh_to(URL, 100 * MB));
+            let _ = tx.send(());
+        });
+        let wait = Duration::from_millis(200);
+        assert!(stopped.recv_timeout(wait).is_err(), "waits on the reader");
+        drop(reader);
+        assert!(stopped.recv_timeout(Duration::from_secs(5)).is_ok());
+        assert!(!download.whole(URL), "never done");
     }
 
     #[test]
