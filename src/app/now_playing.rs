@@ -131,9 +131,6 @@ impl App {
     pub(super) fn load_cover(self: &Rc<Self>) {
         let ui = self.ui();
         ui.set_np_cover(Image::default());
-        if !ui.get_full_player() {
-            return;
-        }
         let Some((id, url)) = self
             .state
             .borrow()
@@ -143,6 +140,13 @@ impl App {
         else {
             return;
         };
+        if !ui.get_full_player() {
+            // Shown until now, so counted as used: reopening finds it cached.
+            if let Some(url) = &url {
+                images::cached(url, images::COVER);
+            }
+            return;
+        }
         let wanted = move |app: &Rc<Self>| app.ui().get_full_player() && app.is_current(&id);
         self.load_image_while(url, images::COVER, wanted.clone(), move |app, image| {
             if wanted(app) {

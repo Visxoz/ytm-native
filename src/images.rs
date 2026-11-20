@@ -2,13 +2,13 @@
 
 use std::{
     cell::{Cell, RefCell},
-    collections::{HashMap, VecDeque},
+    collections::HashMap,
     path::{Path, PathBuf},
     sync::{
         Arc, OnceLock,
         atomic::{AtomicU64, Ordering},
     },
-    time::{Duration, SystemTime},
+    time::{Duration, Instant, SystemTime},
 };
 
 use sha1::{Digest, Sha1};
@@ -31,6 +31,10 @@ pub const AVATAR: u32 = 26;
 /// Decoded artwork kept for reuse, in bytes. Images still on screen stay
 /// alive regardless, as Slint holds its own reference.
 const CACHE_BUDGET: usize = 32 * 1024 * 1024;
+/// Covers and wide banners (and, at high DPI, headers and cards), dropped
+/// once unused for `LARGE_UNUSED_FOR` even under the budget.
+const LARGE: usize = 1024 * 1024;
+const LARGE_UNUSED_FOR: Duration = Duration::from_secs(5 * 60);
 /// Thumbnails are a few KB each and share HTTP/2 connections, so a page's
 /// worth is fetched widely in parallel.
 const PARALLEL_FETCHES: usize = 16;
@@ -50,36 +54,67 @@ pub fn set_scale(scale: f32) {
 
 #[derive(Default)]
 struct Cache {
-    images: HashMap<String, Image>,
+    images: HashMap<String, Cached>,
     accents: HashMap<String, Color>,
     backdrops: HashMap<String, Image>,
-    order: VecDeque<String>,
     bytes: usize,
 }
 
-fn byte_size(image: &Image) -> usize {
-    let size = image.size();
-    size.width as usize * size.height as usize * 4
+struct Cached {
+    image: Image,
+    bytes: usize,
+    used: Instant,
 }
 
 impl Cache {
-    fn insert(&mut self, key: String, image: Image) {
-        self.bytes += byte_size(&image);
-        if let Some(old) = self.images.insert(key.clone(), image) {
-            self.bytes -= byte_size(&old);
-        } else {
-            self.order.push_back(key);
+    /// Marks `key` as just used, so eviction keeps it longest.
+    fn used(&mut self, key: &str, now: Instant) -> Option<&Image> {
+        let entry = self.images.get_mut(key)?;
+        entry.used = now;
+        Some(&entry.image)
+    }
+
+    fn insert(&mut self, key: String, image: Image, now: Instant) {
+        let size = image.size();
+        let bytes = size.width as usize * size.height as usize * 4;
+        self.bytes += bytes;
+        let entry = Cached {
+            image,
+            bytes,
+            used: now,
+        };
+        if let Some(old) = self.images.insert(key, entry) {
+            self.bytes -= old.bytes;
         }
+        // Checked on insert, which a new song's art usually brings, so a cover
+        // opened once doesn't pin megabytes for a days-long session.
+        self.evict(|e| e.bytes >= LARGE && now.duration_since(e.used) > LARGE_UNUSED_FOR);
+        // Searched only when evicting, so a hit (per row on scroll) stays one write.
         while self.bytes > CACHE_BUDGET {
-            let Some(oldest) = self.order.pop_front() else {
+            let Some(oldest) = self.images.values().map(|e| e.used).min() else {
                 break;
             };
-            if let Some(old) = self.images.remove(&oldest) {
-                self.bytes -= byte_size(&old);
-            }
-            self.accents.remove(&oldest);
-            self.backdrops.remove(&oldest);
+            self.evict(|e| e.used == oldest);
         }
+    }
+
+    /// Drops every image `stale` picks, with its accent and backdrop.
+    fn evict(&mut self, stale: impl Fn(&Cached) -> bool) {
+        let Self {
+            images,
+            accents,
+            backdrops,
+            bytes,
+        } = self;
+        images.retain(|key, e| {
+            if !stale(e) {
+                return true;
+            }
+            *bytes -= e.bytes;
+            accents.remove(key);
+            backdrops.remove(key);
+            false
+        });
     }
 }
 
@@ -98,7 +133,7 @@ pub fn cached(url: &str, edge: u32) -> Option<Image> {
 }
 
 fn cached_key(key: &str) -> Option<Image> {
-    CACHE.with(|c| c.borrow().images.get(key).cloned())
+    CACHE.with(|c| c.borrow_mut().used(key, Instant::now()).cloned())
 }
 
 /// The cached artwork for `url`, or an empty image, which the UI shows as a
@@ -109,12 +144,22 @@ pub fn cached_or_empty(url: Option<&str>, edge: u32) -> Image {
 
 /// A colour from the artwork for backgrounds behind it, once loaded.
 pub fn accent(url: &str, edge: u32) -> Option<Color> {
-    CACHE.with(|c| c.borrow().accents.get(&key(url, edge)).copied())
+    let key = key(url, edge);
+    CACHE.with(|c| {
+        let mut cache = c.borrow_mut();
+        cache.used(&key, Instant::now());
+        cache.accents.get(&key).copied()
+    })
 }
 
 /// The player artwork's colours where they sit in it, once loaded.
 pub fn backdrop(url: &str) -> Option<Image> {
-    CACHE.with(|c| c.borrow().backdrops.get(&key(url, PLAYER)).cloned())
+    let key = key(url, PLAYER);
+    CACHE.with(|c| {
+        let mut cache = c.borrow_mut();
+        cache.used(&key, Instant::now());
+        cache.backdrops.get(&key).cloned()
+    })
 }
 
 fn key(url: &str, edge: u32) -> String {
@@ -181,7 +226,7 @@ pub async fn load(
                     .backdrops
                     .insert(key.clone(), Image::from_rgba8(backdrop));
             }
-            cache.insert(key.clone(), image.clone());
+            cache.insert(key.clone(), image.clone(), Instant::now());
         });
         image
     });
@@ -586,6 +631,47 @@ mod tests {
             let (r2, g2, b2) = hsl_to_rgb(h, s, l);
             assert!((r - r2).abs() < 1e-4 && (g - g2).abs() < 1e-4 && (b - b2).abs() < 1e-4);
         }
+    }
+
+    fn blank(edge: u32) -> Image {
+        Image::from_rgba8(SharedPixelBuffer::new(edge, edge))
+    }
+
+    #[test]
+    fn evicts_the_least_recently_used() {
+        let mut cache = Cache::default();
+        let start = Instant::now();
+        let at = |s| start + Duration::from_secs(s);
+        // Eight 4 MB images fill the budget exactly.
+        for i in 0..8 {
+            cache.insert(i.to_string(), blank(1024), at(i));
+        }
+        cache.insert("7".into(), blank(1024), at(7));
+        assert_eq!(cache.bytes, CACHE_BUDGET, "a key put in again counts once");
+        assert!(cache.used("0", at(8)).is_some());
+        cache.accents.insert("1".into(), Color::default());
+        cache.backdrops.insert("1".into(), blank(4));
+        cache.insert("8".into(), blank(1024), at(9));
+        assert!(cache.images.contains_key("0"), "used most recently but one");
+        assert!(!cache.images.contains_key("1"), "the least recently used");
+        assert!(!cache.accents.contains_key("1") && !cache.backdrops.contains_key("1"));
+        assert_eq!(cache.bytes, CACHE_BUDGET);
+    }
+
+    #[test]
+    fn drops_large_images_left_unused() {
+        let mut cache = Cache::default();
+        let start = Instant::now();
+        cache.insert("cover".into(), blank(512), start);
+        cache.insert("kept cover".into(), blank(512), start);
+        cache.insert("row".into(), blank(48), start);
+        let later = start + LARGE_UNUSED_FOR + Duration::from_secs(1);
+        cache.used("kept cover", later);
+        cache.insert("next".into(), blank(64), later);
+        assert!(!cache.images.contains_key("cover"));
+        assert!(cache.images.contains_key("kept cover"));
+        assert!(cache.images.contains_key("row"), "small images stay");
+        assert_eq!(cache.bytes, (512 * 512 + 48 * 48 + 64 * 64) * 4);
     }
 
     #[test]
