@@ -39,6 +39,12 @@ export component Card {
             icon: Icons.download;
             activated => { Api.card-download(root.card.kind, root.card.id); }
         }
+
+        if root.card.kind != "genre": MenuEntry {
+            text: "Copy link";
+            icon: Icons.link;
+            activated => { Api.card-action("copy-link", root.card.kind, root.card.id); }
+        }
     }
 
     Rectangle {

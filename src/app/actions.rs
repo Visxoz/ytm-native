@@ -1,7 +1,7 @@
 use std::{collections::HashSet, rc::Rc};
 
 use super::App;
-use crate::api::{CardKind, Page, QueueMode, Route, Section, Track};
+use crate::api::{self, CardKind, Page, QueueMode, Route, Section, Track};
 
 fn card_kind(kind: &str) -> Option<CardKind> {
     match kind {
@@ -139,6 +139,10 @@ impl App {
     }
 
     pub(super) fn header_action(self: &Rc<Self>, action: &str) {
+        if action == "copy-link" {
+            let link = self.state.borrow().route.link();
+            return self.copy_link(link);
+        }
         let (tracks, shuffle_playlist, unloaded, radio_id) = {
             let state = self.state.borrow();
             let Some(header) = &state.page.header else {
@@ -181,6 +185,22 @@ impl App {
                 }
             }
             _ => {}
+        }
+    }
+
+    /// An action on a song, album, playlist or artist by its kind and ID,
+    /// from a card's menu or the player bar's.
+    pub(super) fn card_action(self: &Rc<Self>, action: &str, kind: &str, id: &str) {
+        if action == "copy-link" {
+            self.copy_link(api::link(kind, id));
+        }
+    }
+
+    fn copy_link(self: &Rc<Self>, link: Option<String>) {
+        let Some(link) = link else { return };
+        match clipboard_win::set_clipboard_string(&link) {
+            Ok(()) => self.toast("Link copied"),
+            Err(e) => self.toast(format!("Couldn't copy the link: {e}")),
         }
     }
 
@@ -413,6 +433,7 @@ impl App {
                     self.navigate(Route::Album(id.to_owned()), true);
                 }
             }
+            "copy-link" if !track.is_local() => self.copy_link(api::link("song", &track.id)),
             _ => {}
         }
     }

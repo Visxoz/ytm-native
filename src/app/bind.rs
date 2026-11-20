@@ -299,6 +299,8 @@ impl App {
             .download_queued(&id, remove));
         on!(api.on_header_action, |app, action| app
             .header_action(&action));
+        on!(api.on_card_action, |app, action, kind, id| app
+            .card_action(&action, &kind, &id));
         on!(api.on_rate, |app, id, rating| app
             .rate(id.to_string(), Rating::from_index(rating)));
         on!(api.on_save_to_playlist, |app, id| app

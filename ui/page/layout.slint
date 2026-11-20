@@ -38,6 +38,11 @@ export global Layout {
     public pure function header-art-height(row: RowItem) -> length {
         return row.banner ? self.banner-height : row.art.width > 0 || row.can-play ? self.header-height : 160px;
     }
+
+    // Whether a page header has its row of buttons beneath it.
+    public pure function header-actions(row: RowItem) -> bool {
+        return row.can-play || row.can-radio || row.can-share;
+    }
 }
 
 /// The height a row needs at a given content width.
@@ -47,7 +52,7 @@ export global Rows {
             return 76px;
         }
         if row.kind == RowKind.header {
-            return Layout.header-art-height(row) + (row.can-play || row.can-radio ? Layout.actions-height : 8px);
+            return Layout.header-art-height(row) + (Layout.header-actions(row) ? Layout.actions-height : 8px);
         }
         if row.kind == RowKind.title {
             return 68px;

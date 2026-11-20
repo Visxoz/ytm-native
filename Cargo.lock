@@ -3170,6 +3170,7 @@ dependencies = [
 name = "lily"
 version = "0.1.18"
 dependencies = [
+ "clipboard-win",
  "cpal",
  "discord-rich-presence",
  "http",

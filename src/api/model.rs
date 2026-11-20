@@ -218,7 +218,31 @@ pub enum Route {
     Genre(String),
 }
 
+/// A song's, album's, playlist's or artist's address on YouTube Music, by
+/// the kind names cards use.
+pub fn link(kind: &str, id: &str) -> Option<String> {
+    let path = match kind {
+        "song" => "watch?v=",
+        // Albums go by their MPREb_ browse ID.
+        "album" => "browse/",
+        "playlist" => "playlist?list=",
+        "artist" => "channel/",
+        _ => return None,
+    };
+    Some(format!("https://music.youtube.com/{path}{id}"))
+}
+
 impl Route {
+    /// The page's address on YouTube Music, for those that have one.
+    pub fn link(&self) -> Option<String> {
+        match self {
+            Route::Album(id) => link("album", id),
+            Route::Playlist(id) => link("playlist", id),
+            Route::Artist(id) => link("artist", id),
+            _ => None,
+        }
+    }
+
     pub fn nav_name(&self) -> &'static str {
         match self {
             Route::Home => "home",
@@ -229,5 +253,33 @@ impl Route {
             Route::LocalFiles => "local",
             _ => "",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn links_name_each_kind_and_skip_pages_without_one() {
+        assert_eq!(
+            link("song", "dQw4w9WgXcQ").as_deref(),
+            Some("https://music.youtube.com/watch?v=dQw4w9WgXcQ")
+        );
+        assert_eq!(
+            Route::Album("MPREb_x".into()).link().as_deref(),
+            Some("https://music.youtube.com/browse/MPREb_x")
+        );
+        assert_eq!(
+            Route::Playlist("PLx".into()).link().as_deref(),
+            Some("https://music.youtube.com/playlist?list=PLx")
+        );
+        assert_eq!(
+            Route::Artist("UCx".into()).link().as_deref(),
+            Some("https://music.youtube.com/channel/UCx")
+        );
+        assert_eq!(link("genre", "x"), None);
+        assert_eq!(Route::Home.link(), None);
+        assert_eq!(Route::Search("x".into()).link(), None);
     }
 }

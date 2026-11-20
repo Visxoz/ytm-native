@@ -107,6 +107,12 @@ export component PlayerBar inherits Rectangle {
             enabled: root.np-has-album;
             activated => { root.np-go-album(); }
         }
+
+        if !Api.playing-local: MenuEntry {
+            text: "Copy link";
+            icon: Icons.link;
+            activated => { Api.card-action("copy-link", "song", Api.playing-id); }
+        }
     }
 
     TouchArea {

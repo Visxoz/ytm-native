@@ -2,6 +2,7 @@ import { Icons, Theme } from "../theme.slint";
 import { Api, CardItem, RowItem } from "../types.slint";
 import { Art } from "../widgets/art.slint";
 import { IconButton, PlayButton } from "../widgets/buttons.slint";
+import { MenuEntry, PopupMenu } from "../widgets/menu.slint";
 import { Layout } from "layout.slint";
 
 export component TopResult inherits Rectangle {
@@ -76,6 +77,19 @@ export component PageHeader {
     // A banner is darkened behind its text, which stays white in every look.
     property <color> fg: root.data.banner ? Theme.on-colour : Theme.text;
     property <color> fg-secondary: root.data.banner ? Theme.on-colour.with-alpha(0.7) : Theme.text-secondary;
+
+    /// Where the menu was asked for, in window coordinates.
+    property <Point> menu-at;
+
+    menu := PopupMenu {
+        x: root.menu-at.x - root.absolute-position.x;
+        y: root.menu-at.y - root.absolute-position.y;
+        MenuEntry {
+            text: "Copy link";
+            icon: Icons.link;
+            activated => { Api.header-action("copy-link"); }
+        }
+    }
 
     if root.data.banner: Rectangle {
         x: -Theme.page-padding;
@@ -159,7 +173,7 @@ export component PageHeader {
         }
     }
 
-    if root.data.can-play || root.data.can-radio: HorizontalLayout {
+    if Layout.header-actions(root.data): HorizontalLayout {
         y: root.art-height;
         height: Layout.actions-height;
         spacing: 20px;
@@ -187,6 +201,15 @@ export component PageHeader {
             size: 48px;
             icon-size: 28px;
             clicked => { Api.header-action("download"); }
+        }
+        if root.data.can-share: IconButton {
+            icon: Icons.more;
+            size: 48px;
+            icon-size: 28px;
+            clicked => {
+                root.menu-at = { x: self.absolute-position.x, y: self.absolute-position.y + self.height };
+                menu.show();
+            }
         }
     }
 }

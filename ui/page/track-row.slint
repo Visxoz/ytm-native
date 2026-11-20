@@ -120,6 +120,12 @@ export component TrackRow inherits Rectangle {
             enabled: root.track.has-album;
             activated => { Api.track-action("album", root.section, root.index); }
         }
+
+        if !root.track.local: MenuEntry {
+            text: "Copy link";
+            icon: Icons.link;
+            activated => { Api.track-action("copy-link", root.section, root.index); }
+        }
     }
 
     touch := TouchArea {

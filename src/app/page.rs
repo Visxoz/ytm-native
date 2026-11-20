@@ -153,6 +153,7 @@ impl App {
                 can_shuffle: has_tracks || header.shuffle_playlist.is_some(),
                 can_radio: header.radio_id.is_some(),
                 can_download: has_tracks && matches!(route, Route::Album(_) | Route::Playlist(_)),
+                can_share: route.link().is_some(),
                 downloaded: has_tracks && tracks.iter().all(|t| downloads.contains(&t.id)),
                 ..Default::default()
             });

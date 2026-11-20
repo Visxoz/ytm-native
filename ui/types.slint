@@ -40,6 +40,8 @@ export struct RowItem {
     can-shuffle: bool,
     can-radio: bool,
     can-download: bool,
+    /// The page has a YouTube Music link to copy.
+    can-share: bool,
     /// Every one of the page's tracks is downloaded.
     downloaded: bool,
     // track rows and their column header
@@ -93,6 +95,8 @@ export global Api {
     callback play-card(kind: string, id: string);
     callback card-radio(kind: string, id: string);
     callback card-download(kind: string, id: string);
+    /// A menu action on a song, album, playlist or artist, by its card kind.
+    callback card-action(action: string, kind: string, id: string);
     /// Downloads a song in the queue, or removes its download.
     callback download(id: string, remove: bool);
     callback header-action(action: string);
