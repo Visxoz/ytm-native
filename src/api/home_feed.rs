@@ -299,6 +299,7 @@ impl TwoRow {
                 thumb: self.thumbnail_renderer.pick(ROW_THUMB),
                 track_nr: None,
                 video: watch.is_music_video(),
+                set_video_id: None,
             };
             return Some(Card {
                 kind: CardKind::Song,
@@ -380,6 +381,7 @@ impl ListItem {
             thumb: self.thumbnail.pick(ROW_THUMB),
             track_nr: None,
             video: watch.as_ref().is_some_and(Watch::is_music_video),
+            set_video_id: None,
         })
     }
 }

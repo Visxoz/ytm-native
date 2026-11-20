@@ -38,7 +38,7 @@ $crates = @(
             }
             $Matches[1]
         }
-        Hint    = 'Check whether rustypipe now reads editable playlist headers and mix headers without a song count, how it fetches visitor data, whether it takes in the cookies YouTube sets and notices signed-in requests answered signed out, and how it retries refusals, and update or drop the patch.'
+        Hint    = 'rustypipe changed. Check which of the patch''s fixes (playlist headers, privacy and setVideoId, library and subscription state, mix headers, visitor data, session cookies, signed-out answers, refusal retries) it now has, and update or drop the patch.'
     }
 )
 

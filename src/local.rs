@@ -618,6 +618,7 @@ fn song(path: &Path, found: Tags, cover: bool, seconds: Option<f64>) -> Option<S
         track_nr: found.track_nr,
         id,
         video: false,
+        set_video_id: None,
     };
     Some(Song {
         by: album_artist.unwrap_or_else(|| track.artist_names()),

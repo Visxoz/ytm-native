@@ -11,7 +11,7 @@ index 542a882..224a195 100644
  
  [dependencies.tracing]
 diff --git a/src/client/mod.rs b/src/client/mod.rs
-index 06386bc..991b095 100644
+index 06386bc..ddc654f 100644
 --- a/src/client/mod.rs
 +++ b/src/client/mod.rs
 @@ -32,7 +32,8 @@ mod channel_rss;
@@ -210,7 +210,7 @@ index 06386bc..991b095 100644
          let mut cache_clients = HashMap::new();
          for (c, lk) in &self.inner.cache.clients {
              let v = lk.read().await.clone();
-@@ -1663,6 +1797,62 @@ impl RustyPipe {
+@@ -1663,6 +1797,65 @@ impl RustyPipe {
          Ok(())
      }
  
@@ -251,12 +251,15 @@ index 06386bc..991b095 100644
 +        self.inner.signed_out.notified().await;
 +    }
 +
-+    /// Takes in the body of a successful answer to a signed-in request.
-+    fn check_signed_in(&self, body: &str) {
-+        if answered_signed_out(body) {
++    /// Takes in the body of a successful answer to a signed-in request,
++    /// returning whether it was answered signed in.
++    fn check_signed_in(&self, body: &str) -> bool {
++        let signed_out = answered_signed_out(body);
++        if signed_out {
 +            tracing::warn!("YouTube answered a signed-in request as signed out");
 +            self.inner.signed_out.notify_one();
 +        }
++        !signed_out
 +    }
 +
 +    fn take_response_cookies(&self, request: &Request, response: &Response) {
@@ -273,7 +276,16 @@ index 06386bc..991b095 100644
      /// Attempt to fetch the YouTube website with login cookies to check if the user is successfully logged in
      /// and the session is still valid.
      pub async fn user_auth_check_cookie(&self) -> Result<(), Error> {
-@@ -2370,10 +2560,14 @@ impl RustyPipeQuery {
+@@ -2345,7 +2538,7 @@ impl RustyPipeQuery {
+             .await;
+         let req_body = QBody { context, body };
+ 
+-        let ctx = MapRespCtx {
++        let mut ctx = MapRespCtx {
+             id,
+             lang: self.opts.lang,
+             utc_offset: UtcOffset::from_whole_seconds(i32::from(self.opts.utc_offset_minutes) * 60)
+@@ -2370,10 +2563,15 @@ impl RustyPipeQuery {
              .http
              .execute(request.try_clone().unwrap())
              .await?;
@@ -283,12 +295,13 @@ index 06386bc..991b095 100644
          let body = response.text().await?;
          tracing::debug!("fetched {} bytes from YT", body.len());
 +        if ctx.authenticated && ctype.is_web() && status.is_success() {
-+            self.client.check_signed_in(&body);
++            // Mapped as signed out, so no account state is read from it.
++            ctx.authenticated = self.client.check_signed_in(&body);
 +        }
  
          let res = if status.is_client_error() || status.is_server_error() {
              let error_msg = serde_json::from_str::<response::ErrorResponse>(&body)
-@@ -2427,15 +2621,23 @@ impl RustyPipeQuery {
+@@ -2427,15 +2625,23 @@ impl RustyPipeQuery {
          ctx_src: &MapRespOptions<'_>,
      ) -> Result<RequestResult<M>, Error> {
          let mut last_resp = None;
@@ -313,7 +326,7 @@ index 06386bc..991b095 100644
                          return Ok(resp);
                      }
                      e
-@@ -2620,13 +2822,33 @@ impl RustyPipeQuery {
+@@ -2620,13 +2826,33 @@ impl RustyPipeQuery {
          let context = self.get_context(ctype, true, &visitor_data).await;
          let req_body = QBody { context, body };
  
@@ -354,7 +367,7 @@ index 06386bc..991b095 100644
      }
  }
  
-@@ -2764,6 +2986,25 @@ fn detect_botguard_bin(program: OsString) -> Result<(OsString, String), Error> {
+@@ -2764,6 +2990,25 @@ fn detect_botguard_bin(program: OsString) -> Result<(OsString, String), Error> {
  mod tests {
      use super::*;
  
@@ -380,11 +393,97 @@ index 06386bc..991b095 100644
      use rstest::rstest;
  
      // 1.20240506.01.00-canary_control_1.20240508.01.01
+diff --git a/src/client/music_artist.rs b/src/client/music_artist.rs
+index 13cbeda..86f6e4a 100644
+--- a/src/client/music_artist.rs
++++ b/src/client/music_artist.rs
+@@ -301,6 +301,10 @@ fn map_artist_page(
+         })
+     });
+ 
++    let subscription = header
++        .subscription_button
++        .map(|btn| btn.subscribe_button_renderer);
++
+     let radio_id = header.start_radio_button.and_then(|b| {
+         if let NavigationEndpoint::Watch { watch_endpoint } = b.button_renderer.navigation_endpoint
+         {
+@@ -318,9 +322,9 @@ fn map_artist_page(
+                 header_image: header.thumbnail.into(),
+                 description: header.description,
+                 wikipedia_url,
+-                subscriber_count: header.subscription_button.and_then(|btn| {
++                subscriber_count: subscription.as_ref().and_then(|btn| {
+                     util::parse_large_numstr_or_warn(
+-                        &btn.subscribe_button_renderer.subscriber_count_text,
++                        &btn.subscriber_count_text,
+                         ctx.lang,
+                         &mut mapped.warnings,
+                     )
+@@ -332,6 +336,11 @@ fn map_artist_page(
+                 tracks_playlist_id,
+                 videos_playlist_id,
+                 radio_id,
++                subscribed: subscription
++                    .as_ref()
++                    .filter(|_| ctx.authenticated)
++                    .map(|btn| btn.subscribed),
++                subscribe_channel_id: subscription.and_then(|btn| btn.channel_id),
+             },
+             can_fetch_more,
+         ),
+@@ -539,4 +548,38 @@ mod tests {
+             _ => panic!("error: {e}"),
+         }
+     }
++
++    #[test]
++    fn map_artist_subscription() {
++        let id = "UC0C-w0YjGpqDXGB8IHb662A";
++        let artist = |subscribed: bool, authenticated: bool| {
++            let resp: response::MusicArtist = serde_json::from_value(serde_json::json!({
++                "contents": {"singleColumnBrowseResultsRenderer": {"tabs": [{"tabRenderer": {
++                    "content": {"sectionListRenderer": {"contents": []}}
++                }}]}},
++                "header": {"musicImmersiveHeaderRenderer": {
++                    "title": {"runs": [{"text": "Ed Sheeran"}]},
++                    "subscriptionButton": {"subscribeButtonRenderer": {
++                        "channelId": id,
++                        "subscribed": subscribed,
++                        "subscriberCountText": {"runs": [{"text": "55.3M"}]}
++                    }}
++                }}
++            }))
++            .unwrap();
++            let ctx = MapRespCtx {
++                authenticated,
++                ..MapRespCtx::test(id)
++            };
++            let map_res: MapResult<MusicArtist> = resp.map_response(&ctx).unwrap();
++            map_res.c
++        };
++        let signed_in = artist(true, true);
++        assert_eq!(signed_in.subscribed, Some(true));
++        assert_eq!(signed_in.subscribe_channel_id.as_deref(), Some(id));
++        assert_eq!(signed_in.subscriber_count, Some(55_300_000));
++        assert_eq!(artist(false, true).subscribed, Some(false));
++        // Signed out, YouTube says `false` whatever the account does
++        assert_eq!(artist(false, false).subscribed, None);
++    }
+ }
 diff --git a/src/client/music_playlist.rs b/src/client/music_playlist.rs
-index 64f3d7e..20cad37 100644
+index 64f3d7e..67d3954 100644
 --- a/src/client/music_playlist.rs
 +++ b/src/client/music_playlist.rs
-@@ -235,7 +235,7 @@ impl MapResponse<MusicPlaylist> for response::MusicPlaylist {
+@@ -18,6 +18,7 @@ use super::{
+     response::{
+         self,
+         music_item::{map_album_type, map_artist_id, map_artists, MusicListMapper},
++        music_playlist::HeaderButton,
+     },
+     ClientType, MapRespCtx, MapResponse, QBrowse, RustyPipeQuery,
+ };
+@@ -235,7 +236,7 @@ impl MapResponse<MusicPlaylist> for response::MusicPlaylist {
                      .collect::<Vec<_>>();
                  parts
                      .get(usize::from(parts.len() > 2))
@@ -393,7 +492,74 @@ index 64f3d7e..20cad37 100644
              })
          } else {
              Some(map_res.c.len() as u64)
-@@ -522,7 +522,7 @@ impl MapResponse<MusicAlbum> for response::MusicPlaylist {
+@@ -247,6 +248,12 @@ impl MapResponse<MusicPlaylist> for response::MusicPlaylist {
+             .next()
+             .map(|c| c.next_continuation_data.continuation);
+ 
++        let editable = header.as_ref().is_some_and(|h| h.editable);
++        let privacy = header.as_ref().and_then(|h| h.privacy);
++        let saved = header
++            .as_ref()
++            .and_then(|h| h.music_detail_header_renderer.saved());
++
+         let (from_ytm, channel, name, thumbnail, description) = match header {
+             Some(header) => {
+                 let h = header.music_detail_header_renderer;
+@@ -344,6 +351,9 @@ impl MapResponse<MusicPlaylist> for response::MusicPlaylist {
+                     ContinuationEndpoint::MusicBrowse,
+                     ctx.authenticated,
+                 ),
++                editable,
++                privacy,
++                saved,
+             },
+             warnings: map_res.warnings,
+         })
+@@ -399,6 +409,7 @@ impl MapResponse<MusicAlbum> for response::MusicPlaylist {
+         let header = header
+             .ok_or(ExtractionError::InvalidData(Cow::Borrowed("no header")))?
+             .music_detail_header_renderer;
++        let saved = header.saved();
+ 
+         let mut shelf = None;
+         let mut album_variants = None;
+@@ -492,25 +503,30 @@ impl MapResponse<MusicAlbum> for response::MusicPlaylist {
+             });
+         let (playlist_id, artist_id) = header
+             .menu
+-            .or_else(|| header.buttons.into_iter().next())
++            .map(|menu| menu.menu_renderer)
++            .or_else(|| {
++                header.buttons.into_iter().find_map(|btn| match btn {
++                    HeaderButton::MenuRenderer(menu) => Some(menu),
++                    HeaderButton::ToggleButtonRenderer(_) => None,
++                })
++            })
+             .map(|menu| {
+                 (
+                     playlist_id.or_else(|| {
+-                        menu.menu_renderer
+-                            .top_level_buttons
++                        menu.top_level_buttons
+                             .iter()
+                             .find_map(|btn| {
+                                 map_playlist_id(&btn.button_renderer.navigation_endpoint)
+                             })
+                             .or_else(|| {
+-                                menu.menu_renderer.items.iter().find_map(|itm| {
++                                menu.items.iter().find_map(|itm| {
+                                     map_playlist_id(
+                                         &itm.menu_navigation_item_renderer.navigation_endpoint,
+                                     )
+                                 })
+                             })
+                     }),
+-                    map_artist_id(menu.menu_renderer.items),
++                    map_artist_id(menu.items),
+                 )
+             })
+             .unwrap_or_default();
+@@ -522,7 +538,7 @@ impl MapResponse<MusicAlbum> for response::MusicPlaylist {
              .collect::<Vec<_>>();
          let track_count = second_subtitle_parts
              .get(usize::from(second_subtitle_parts.len() > 2))
@@ -402,11 +568,290 @@ index 64f3d7e..20cad37 100644
  
          let mut mapper = MusicListMapper::with_album(
              ctx.lang,
+@@ -561,6 +577,7 @@ impl MapResponse<MusicAlbum> for response::MusicPlaylist {
+                 track_count: track_count.unwrap_or(tracks_res.c.len() as u16),
+                 tracks: tracks_res.c,
+                 variants: variants_res.c,
++                saved,
+             },
+             warnings,
+         })
+@@ -568,7 +585,7 @@ impl MapResponse<MusicAlbum> for response::MusicPlaylist {
+ }
+ 
+ #[cfg(test)]
+-mod tests {
++pub(crate) mod tests {
+     use std::{fs::File, io::BufReader};
+ 
+     use path_macro::path;
+@@ -627,4 +644,136 @@ mod tests {
+         );
+         insta::assert_ron_snapshot!(format!("map_music_album_{name}"), map_res.c);
+     }
++
++    /// An entry of the signed-in user's own playlist, trimmed from a real response
++    pub(crate) fn own_playlist_item() -> serde_json::Value {
++        serde_json::json!({"musicResponsiveListItemRenderer": {
++            "flexColumns": [
++                {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{
++                    "text": "I Hate Everything (feat. Action Bronson)",
++                    "navigationEndpoint": {"watchEndpoint": {
++                        "videoId": "3_R4ulvg8OY",
++                        "playlistId": "PLaZPMsuQNCsWn0iVMtGbaUXO6z-EdZaZm"
++                    }}
++                }]}}},
++                {"musicResponsiveListItemFlexColumnRenderer": {"text": {"runs": [{
++                    "text": "The Alchemist",
++                    "navigationEndpoint": {"browseEndpoint": {
++                        "browseId": "UC2Eotb0QaPkaJI4Cw4oHZ6Q",
++                        "browseEndpointContextSupportedConfigs": {"browseEndpointContextMusicConfig": {
++                            "pageType": "MUSIC_PAGE_TYPE_ARTIST"
++                        }}
++                    }}
++                }]}}}
++            ],
++            "fixedColumns": [{"musicResponsiveListItemFixedColumnRenderer": {
++                "text": {"runs": [{"text": "1:23"}]}
++            }}],
++            "playlistItemData": {"playlistSetVideoId": "56B44F6D10557CC6", "videoId": "3_R4ulvg8OY"}
++        }})
++    }
++
++    fn two_columns(header: serde_json::Value, shelf: serde_json::Value) -> serde_json::Value {
++        serde_json::json!({"contents": {"twoColumnBrowseResultsRenderer": {
++            "tabs": [{"tabRenderer": {"content": {"sectionListRenderer": {"contents": [header]}}}}],
++            "secondaryContents": {"sectionListRenderer": {"contents": [shelf]}}
++        }}})
++    }
++
++    fn library_toggle(toggled: bool, default: &str, other: &str) -> serde_json::Value {
++        let like = |status| {
++            serde_json::json!({"likeEndpoint": {
++                "status": status,
++                "target": {"playlistId": "OLAK5uy_nMr9h2VlS-2PULNz3M3XVXQj_P3C2bqaY"}
++            }})
++        };
++        serde_json::json!({"toggleButtonRenderer": {
++            "isToggled": toggled,
++            "defaultServiceEndpoint": like(default),
++            "toggledServiceEndpoint": like(other)
++        }})
++    }
++
++    #[test]
++    fn map_own_playlist() {
++        let id = "PLaZPMsuQNCsWn0iVMtGbaUXO6z-EdZaZm";
++        let json = two_columns(
++            serde_json::json!({"musicEditablePlaylistDetailHeaderRenderer": {
++                "header": {"musicResponsiveHeaderRenderer": {
++                    "title": {"runs": [{"text": "03 Jan "}, {"text": "12:09"}]}
++                }},
++                "editHeader": {"musicPlaylistEditHeaderRenderer": {"privacy": "PRIVATE", "playlistId": id}},
++                "playlistId": id
++            }}),
++            serde_json::json!({"musicPlaylistShelfRenderer": {
++                "playlistId": id,
++                "contents": [own_playlist_item()]
++            }}),
++        );
++        let playlist: response::MusicPlaylist = serde_json::from_value(json).unwrap();
++        let map_res: MapResult<model::MusicPlaylist> =
++            playlist.map_response(&MapRespCtx::test(id)).unwrap();
++        let playlist = map_res.c;
++        assert_eq!(playlist.name, "03 Jan 12:09");
++        assert!(playlist.editable);
++        assert_eq!(playlist.privacy, Some(model::PlaylistPrivacy::Private));
++        assert_eq!(playlist.saved, None, "own playlists have no save button");
++        let track = &playlist.tracks.items[0];
++        assert_eq!(track.id, "3_R4ulvg8OY");
++        assert_eq!(track.set_video_id.as_deref(), Some("56B44F6D10557CC6"));
++    }
++
++    #[test]
++    fn read_library_state_from_header_buttons() {
++        let saved = |buttons: serde_json::Value| {
++            serde_json::from_value::<response::music_playlist::HeaderRenderer>(serde_json::json!({
++                "title": {"runs": [{"text": "Revival"}]},
++                "buttons": buttons
++            }))
++            .unwrap()
++            .saved()
++        };
++        let toggle =
++            |toggled, default, other| serde_json::json!([library_toggle(toggled, default, other)]);
++        assert_eq!(saved(toggle(false, "LIKE", "INDIFFERENT")), Some(false));
++        assert_eq!(saved(toggle(true, "LIKE", "INDIFFERENT")), Some(true));
++        assert_eq!(saved(toggle(false, "INDIFFERENT", "LIKE")), Some(true));
++        // Signed out, the button only asks to sign in
++        let signed_out = serde_json::json!([{"toggleButtonRenderer": {
++            "isToggled": false,
++            "defaultNavigationEndpoint": {"modalEndpoint": {"modal": {}}}
++        }}]);
++        assert_eq!(saved(signed_out), None);
++    }
++
++    #[test]
++    fn map_saved_album() {
++        let json = two_columns(
++            serde_json::json!({"musicResponsiveHeaderRenderer": {
++                "title": {"runs": [{"text": "Revival"}]},
++                "subtitle": {"runs": [{"text": "Album"}, {"text": " \u{2022} "}, {"text": "2017"}]},
++                "buttons": [
++                    library_toggle(true, "LIKE", "INDIFFERENT"),
++                    {"musicPlayButtonRenderer": {}},
++                    {"menuRenderer": {"items": [{"menuNavigationItemRenderer": {
++                        "text": {"runs": [{"text": "Shuffle play"}]},
++                        "navigationEndpoint": {"watchPlaylistEndpoint": {
++                            "playlistId": "OLAK5uy_nMr9h2VlS-2PULNz3M3XVXQj_P3C2bqaY"
++                        }}
++                    }}]}}
++                ]
++            }}),
++            serde_json::json!({"musicShelfRenderer": {"contents": []}}),
++        );
++        let album: response::MusicPlaylist = serde_json::from_value(json).unwrap();
++        let map_res: MapResult<model::MusicAlbum> = album
++            .map_response(&MapRespCtx::test("MPREb_bHfHGoy7vuv"))
++            .unwrap();
++        assert_eq!(map_res.c.saved, Some(true));
++        assert_eq!(
++            map_res.c.playlist_id.as_deref(),
++            Some("OLAK5uy_nMr9h2VlS-2PULNz3M3XVXQj_P3C2bqaY"),
++            "the menu is still found behind the save button"
++        );
++    }
+ }
+diff --git a/src/client/pagination.rs b/src/client/pagination.rs
+index f0f052e..b309b0d 100644
+--- a/src/client/pagination.rs
++++ b/src/client/pagination.rs
+@@ -738,4 +738,24 @@ mod tests {
+         );
+         insta::assert_ron_snapshot!(format!("map_{name}"), paginator);
+     }
++
++    #[test]
++    fn map_continuation_set_video_ids() {
++        let item = crate::client::music_playlist::tests::own_playlist_item();
++        let classic = serde_json::json!({"continuationContents": {
++            "musicPlaylistShelfContinuation": {"contents": [item]}
++        }});
++        let appended = serde_json::json!({"onResponseReceivedActions": [{
++            "appendContinuationItemsAction": {"continuationItems": [item]}
++        }]});
++        for json in [classic, appended] {
++            let items: response::MusicContinuation = serde_json::from_value(json).unwrap();
++            let map_res: MapResult<Paginator<MusicItem>> =
++                items.map_response(&MapRespCtx::test("")).unwrap();
++            let Some(MusicItem::Track(track)) = map_res.c.items.first() else {
++                panic!("no track in {:?}", map_res.c.items);
++            };
++            assert_eq!(track.set_video_id.as_deref(), Some("56B44F6D10557CC6"));
++        }
++    }
+ }
+diff --git a/src/client/response/music_artist.rs b/src/client/response/music_artist.rs
+index d510cf9..e0fb2f1 100644
+--- a/src/client/response/music_artist.rs
++++ b/src/client/response/music_artist.rs
+@@ -61,6 +61,10 @@ pub(crate) struct SubscriptionButton {
+ pub(crate) struct SubscriptionButtonRenderer {
+     #[serde_as(as = "Text")]
+     pub subscriber_count_text: String,
++    /// Sent signed out too, as `false`
++    #[serde(default)]
++    pub subscribed: bool,
++    pub channel_id: Option<String>,
+ }
+ 
+ #[derive(Debug, Deserialize)]
+diff --git a/src/client/response/music_item.rs b/src/client/response/music_item.rs
+index bc912c9..699f49f 100644
+--- a/src/client/response/music_item.rs
++++ b/src/client/response/music_item.rs
+@@ -292,6 +292,7 @@ pub(crate) struct MusicThumbnailRenderer {
+ #[serde(rename_all = "camelCase")]
+ pub(crate) struct PlaylistItemData {
+     pub video_id: String,
++    pub playlist_set_video_id: Option<String>,
+ }
+ 
+ #[serde_as]
+@@ -571,7 +572,7 @@ impl MusicListMapper {
+     }
+ 
+     /// Map a ListMusicItem (album/playlist item, search result)
+-    fn map_list_item(&mut self, item: ListMusicItem) -> Result<Option<MusicItemType>, String> {
++    fn map_list_item(&mut self, mut item: ListMusicItem) -> Result<Option<MusicItemType>, String> {
+         let mut columns = item.flex_columns.into_iter();
+         let c1 = columns.next();
+         let c2 = columns.next();
+@@ -587,6 +588,11 @@ impl MusicListMapper {
+             .thumbnails
+             .first();
+ 
++        let set_video_id = item
++            .playlist_item_data
++            .as_mut()
++            .and_then(|d| d.playlist_set_video_id.take());
++
+         let music_page = item
+             .navigation_endpoint
+             .and_then(NavigationEndpoint::music_page)
+@@ -797,6 +803,7 @@ impl MusicListMapper {
+                     track_type: vtype.into(),
+                     track_nr,
+                     by_va,
++                    set_video_id,
+                 }));
+                 Ok(Some(MusicItemType::Track))
+             }
+@@ -977,6 +984,7 @@ impl MusicListMapper {
+                         track_type: vtype.into(),
+                         track_nr: None,
+                         by_va,
++                        set_video_id: None,
+                     }));
+                     Ok(Some(MusicItemType::Track))
+                 }
+@@ -1141,6 +1149,7 @@ impl MusicListMapper {
+                             track_type: vtype.into(),
+                             track_nr: None,
+                             by_va,
++                            set_video_id: None,
+                         }));
+                     } else {
+                         let (artists, by_va) = map_artists(subtitle_p2);
+@@ -1178,6 +1187,7 @@ impl MusicListMapper {
+                             track_type: vtype.into(),
+                             track_nr: None,
+                             by_va,
++                            set_video_id: None,
+                         }));
+                     }
+                     Some(MusicItemType::Track)
+@@ -1435,6 +1445,7 @@ pub(crate) fn map_queue_item(item: QueueMusicItem, lang: Language) -> MapResult<
+             track_type: MusicVideoType::from_is_video(is_video).into(),
+             track_nr: None,
+             by_va,
++            set_video_id: None,
+         },
+         warnings,
+     }
 diff --git a/src/client/response/music_playlist.rs b/src/client/response/music_playlist.rs
-index 84202f0..4ad5c86 100644
+index 84202f0..1e760a9 100644
 --- a/src/client/response/music_playlist.rs
 +++ b/src/client/response/music_playlist.rs
-@@ -45,12 +45,46 @@ pub(crate) struct PlSectionList {
+@@ -1,6 +1,7 @@
+ use serde::Deserialize;
+ use serde_with::{serde_as, DefaultOnError, VecSkipError};
+ 
++use crate::model::PlaylistPrivacy;
+ use crate::serializer::text::{AttributedText, Text, TextComponents};
+ 
+ use super::{
+@@ -45,10 +46,73 @@ pub(crate) struct PlSectionList {
  }
  
  #[derive(Debug, Deserialize)]
@@ -415,8 +860,11 @@ index 84202f0..4ad5c86 100644
  pub(crate) struct Header {
 -    #[serde(alias = "musicResponsiveHeaderRenderer")]
      pub music_detail_header_renderer: HeaderRenderer,
- }
- 
++    /// The playlist belongs to the signed-in user
++    pub editable: bool,
++    pub privacy: Option<PlaylistPrivacy>,
++}
++
 +/// Playlists owned by the signed-in user wrap their header in an editable one
 +#[derive(Debug, Deserialize)]
 +#[serde(untagged)]
@@ -432,9 +880,27 @@ index 84202f0..4ad5c86 100644
 +    },
 +}
 +
++#[serde_as]
 +#[derive(Debug, Deserialize)]
++#[serde(rename_all = "camelCase")]
 +struct EditableHeader {
 +    header: Box<HeaderWrap>,
++    /// Read leniently, so that an odd one neither fails the page nor
++    /// hides that the playlist is editable
++    #[serde(default)]
++    #[serde_as(as = "DefaultOnError")]
++    edit_header: Option<EditHeader>,
++}
++
++#[derive(Debug, Deserialize)]
++#[serde(rename_all = "camelCase")]
++struct EditHeader {
++    music_playlist_edit_header_renderer: EditHeaderRenderer,
++}
++
++#[derive(Debug, Deserialize)]
++struct EditHeaderRenderer {
++    privacy: PlaylistPrivacy,
 +}
 +
 +impl From<HeaderWrap> for Header {
@@ -444,18 +910,24 @@ index 84202f0..4ad5c86 100644
 +                music_detail_header_renderer,
 +            } => Self {
 +                music_detail_header_renderer,
++                editable: false,
++                privacy: None,
 +            },
 +            HeaderWrap::Editable {
-+                music_editable_playlist_detail_header_renderer,
-+            } => (*music_editable_playlist_detail_header_renderer.header).into(),
++                music_editable_playlist_detail_header_renderer: editable,
++            } => Self {
++                editable: true,
++                privacy: editable
++                    .edit_header
++                    .map(|h| h.music_playlist_edit_header_renderer.privacy),
++                ..(*editable.header).into()
++            },
 +        }
 +    }
-+}
-+
+ }
+ 
  #[serde_as]
- #[derive(Debug, Deserialize)]
- #[serde(rename_all = "camelCase")]
-@@ -80,8 +114,10 @@ pub(crate) struct HeaderRenderer {
+@@ -80,8 +144,10 @@ pub(crate) struct HeaderRenderer {
      /// `"64 songs", " • ", "3 hours, 40 minutes"`
      ///
      /// `"1B views", " • ", "200 songs", " • ", "6+ hours"`
@@ -467,6 +939,65 @@ index 84202f0..4ad5c86 100644
      pub second_subtitle: Vec<String>,
      /// Channel (newer data model)
      #[serde(default)]
+@@ -92,7 +158,57 @@ pub(crate) struct HeaderRenderer {
+     pub menu: Option<HeaderMenu>,
+     #[serde(default)]
+     #[serde_as(as = "VecSkipError<_>")]
+-    pub buttons: Vec<HeaderMenu>,
++    pub buttons: Vec<HeaderButton>,
++}
++
++impl HeaderRenderer {
++    /// Whether the playlist or album is saved in the library, from the
++    /// button saving it, which only signed-in requests get
++    pub fn saved(&self) -> Option<bool> {
++        self.buttons.iter().find_map(|b| match b {
++            HeaderButton::ToggleButtonRenderer(t) => Some(t.saved()),
++            HeaderButton::MenuRenderer(_) => None,
++        })
++    }
++}
++
++#[derive(Debug, Deserialize)]
++#[serde(rename_all = "camelCase")]
++pub(crate) enum HeaderButton {
++    MenuRenderer(HeaderMenuRenderer),
++    ToggleButtonRenderer(LibraryToggle),
++}
++
++#[derive(Debug, Deserialize)]
++#[serde(rename_all = "camelCase")]
++pub(crate) struct LibraryToggle {
++    #[serde(default)]
++    is_toggled: bool,
++    default_service_endpoint: LikeEndpointWrap,
++    toggled_service_endpoint: LikeEndpointWrap,
++}
++
++impl LibraryToggle {
++    /// Saved if a click would remove the like that saved it
++    fn saved(&self) -> bool {
++        let click = if self.is_toggled {
++            &self.toggled_service_endpoint
++        } else {
++            &self.default_service_endpoint
++        };
++        click.like_endpoint.status == "INDIFFERENT"
++    }
++}
++
++#[derive(Debug, Deserialize)]
++#[serde(rename_all = "camelCase")]
++struct LikeEndpointWrap {
++    like_endpoint: LikeEndpoint,
++}
++
++#[derive(Debug, Deserialize)]
++struct LikeEndpoint {
++    status: String,
+ }
+ 
+ #[derive(Debug, Deserialize)]
 diff --git a/src/error.rs b/src/error.rs
 index 81cd7fa..7c47931 100644
 --- a/src/error.rs
@@ -498,6 +1029,73 @@ index 81cd7fa..7c47931 100644
  }
  
  impl ExtractionError {
+diff --git a/src/model/mod.rs b/src/model/mod.rs
+index 1829adc..8ed6d7a 100644
+--- a/src/model/mod.rs
++++ b/src/model/mod.rs
+@@ -1049,6 +1049,8 @@ pub struct TrackItem {
+     pub track_nr: Option<u16>,
+     /// Is the track by 'Various artists'?
+     pub by_va: bool,
++    /// ID of this entry of a playlist or album, which edits to the playlist take
++    pub set_video_id: Option<String>,
+ }
+ 
+ /// YouTube Music artist list item
+@@ -1208,6 +1210,29 @@ pub struct MusicPlaylist {
+     pub tracks: Paginator<TrackItem>,
+     /// Related playlists
+     pub related_playlists: Paginator<MusicPlaylistItem>,
++    /// True if the playlist belongs to the signed-in user, who can edit it
++    pub editable: bool,
++    /// Who can see the playlist, if it belongs to the signed-in user
++    pub privacy: Option<PlaylistPrivacy>,
++    /// Whether the playlist is saved in the signed-in user's library
++    ///
++    /// [`None`] if signed out or the playlist is the user's own.
++    pub saved: Option<bool>,
++}
++
++/// Who can see a playlist
++#[derive(Debug, Copy, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
++#[serde(rename_all = "snake_case")]
++pub enum PlaylistPrivacy {
++    /// Anyone can search for and view it
++    #[serde(alias = "PUBLIC")]
++    Public,
++    /// Anyone with the link can view it
++    #[serde(alias = "UNLISTED")]
++    Unlisted,
++    /// Only the owner can view it
++    #[serde(alias = "PRIVATE")]
++    Private,
+ }
+ 
+ /// YouTube Music album object
+@@ -1240,6 +1265,10 @@ pub struct MusicAlbum {
+     pub tracks: Vec<TrackItem>,
+     /// Album variants
+     pub variants: Vec<AlbumItem>,
++    /// Whether the album is saved in the signed-in user's library
++    ///
++    /// [`None`] if signed out.
++    pub saved: Option<bool>,
+ }
+ 
+ /// YouTube Music artist object
+@@ -1275,6 +1304,12 @@ pub struct MusicArtist {
+     pub videos_playlist_id: Option<String>,
+     /// ID of the artist radio
+     pub radio_id: Option<String>,
++    /// Whether the signed-in user is subscribed to the artist
++    ///
++    /// [`None`] if signed out.
++    pub subscribed: Option<bool>,
++    /// ID of the channel subscribing to the artist subscribes to
++    pub subscribe_channel_id: Option<String>,
+ }
+ 
+ /// Generic YouTube Music item
 diff --git a/src/util/visitor_data.rs b/src/util/visitor_data.rs
 index 8bc64c7..0d050eb 100644
 --- a/src/util/visitor_data.rs

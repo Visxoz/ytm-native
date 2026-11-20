@@ -2,9 +2,9 @@ use rustypipe::client::ClientType;
 use serde::Deserialize;
 use serde_json::{Value, json, value::RawValue};
 
-use super::{Api, Result, err};
+use super::{Api, PlaylistPrivacy, Result, Track, err};
 
-/// Video IDs YouTube takes in one playlist call.
+/// Songs or actions YouTube takes in one playlist call.
 const PER_REQUEST: usize = 100;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -41,6 +41,20 @@ pub struct PlaylistOption {
 
 fn all_video_ids(ids: &[String]) -> Result<()> {
     ids.iter().try_for_each(|id| super::video_id(id).map(drop))
+}
+
+/// `id`, should it be in the shape of a playlist's, channel's or playlist
+/// entry's, so nothing else ever goes into a request that edits the account.
+fn youtube_id(id: &str) -> Result<&str> {
+    let valid = (1..=64).contains(&id.len())
+        && id
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    if valid {
+        Ok(id)
+    } else {
+        Err("not a YouTube ID".into())
+    }
 }
 
 impl Api {
@@ -82,18 +96,15 @@ impl Api {
         parse_playlists(&json).ok_or_else(|| "YouTube did not list your playlists".into())
     }
 
-    /// Adds `video_ids` to the end of one of the account's playlists.
-    pub async fn add_to_playlist(&self, playlist_id: &str, video_ids: &[String]) -> Result<()> {
-        all_video_ids(video_ids)?;
-        for chunk in video_ids.chunks(PER_REQUEST) {
-            let actions: Vec<_> = chunk
-                .iter()
-                .map(|v| json!({ "action": "ACTION_ADD_VIDEO", "addedVideoId": v }))
-                .collect();
+    /// Applies `actions` to one of the account's playlists, `PER_REQUEST` at a
+    /// time.
+    async fn edit_playlist(&self, playlist_id: &str, actions: &[Value]) -> Result<()> {
+        let playlist_id = youtube_id(playlist_id)?;
+        for chunk in actions.chunks(PER_REQUEST) {
             let reply = self
                 .edit(
                     "browse/edit_playlist",
-                    &json!({ "playlistId": playlist_id, "actions": actions }),
+                    &json!({ "playlistId": playlist_id, "actions": chunk }),
                 )
                 .await?;
             // A refused edit, such as a full playlist, still answers 200.
@@ -102,6 +113,16 @@ impl Api {
             }
         }
         Ok(())
+    }
+
+    /// Adds `video_ids` to the end of one of the account's playlists.
+    pub async fn add_to_playlist(&self, playlist_id: &str, video_ids: &[String]) -> Result<()> {
+        all_video_ids(video_ids)?;
+        let actions: Vec<_> = video_ids
+            .iter()
+            .map(|v| json!({ "action": "ACTION_ADD_VIDEO", "addedVideoId": v }))
+            .collect();
+        self.edit_playlist(playlist_id, &actions).await
     }
 
     /// Makes a private playlist and returns its ID. The create call takes only
@@ -128,8 +149,119 @@ impl Api {
     }
 }
 
+#[expect(
+    dead_code,
+    reason = "the playlist and library UI built on them is to come"
+)]
+impl Api {
+    /// Removes `tracks`, as its page has them, from one of the account's
+    /// playlists.
+    pub async fn remove_from_playlist(&self, playlist_id: &str, tracks: &[Track]) -> Result<()> {
+        let actions = tracks
+            .iter()
+            .map(|t| {
+                let entry = t.set_video_id.as_deref().ok_or("not in your playlist")?;
+                Ok(json!({
+                    "action": "ACTION_REMOVE_VIDEO",
+                    "setVideoId": youtube_id(entry)?,
+                    "removedVideoId": super::video_id(&t.id)?,
+                }))
+            })
+            .collect::<Result<Vec<_>>>()?;
+        self.edit_playlist(playlist_id, &actions).await
+    }
+
+    /// Moves the entry `set_video_id` of one of the account's playlists to
+    /// before the entry `before`, or to the end.
+    pub async fn move_in_playlist(
+        &self,
+        playlist_id: &str,
+        set_video_id: &str,
+        before: Option<&str>,
+    ) -> Result<()> {
+        let mut action = json!({
+            "action": "ACTION_MOVE_VIDEO_BEFORE",
+            "setVideoId": youtube_id(set_video_id)?,
+        });
+        // Without a successor YouTube moves it last (ytmusicapi's edit_playlist).
+        if let Some(before) = before {
+            action["movedSetVideoIdSuccessor"] = youtube_id(before)?.into();
+        }
+        self.edit_playlist(playlist_id, &[action]).await
+    }
+
+    pub async fn rename_playlist(&self, playlist_id: &str, title: &str) -> Result<()> {
+        let title = title.trim();
+        if title.is_empty() {
+            return Err("a playlist needs a name".into());
+        }
+        let action = json!({ "action": "ACTION_SET_PLAYLIST_NAME", "playlistName": title });
+        self.edit_playlist(playlist_id, &[action]).await
+    }
+
+    pub async fn set_playlist_privacy(
+        &self,
+        playlist_id: &str,
+        privacy: PlaylistPrivacy,
+    ) -> Result<()> {
+        let privacy = match privacy {
+            PlaylistPrivacy::Public => "PUBLIC",
+            PlaylistPrivacy::Unlisted => "UNLISTED",
+            PlaylistPrivacy::Private => "PRIVATE",
+        };
+        let action = json!({ "action": "ACTION_SET_PLAYLIST_PRIVACY", "playlistPrivacy": privacy });
+        self.edit_playlist(playlist_id, &[action]).await
+    }
+
+    pub async fn delete_playlist(&self, playlist_id: &str) -> Result<()> {
+        let body = json!({ "playlistId": youtube_id(playlist_id)? });
+        performed(&self.edit("playlist/delete", &body).await?)
+    }
+
+    /// Saves an album or playlist to the library, by the playlist ID its
+    /// header carries, or removes it.
+    pub async fn save_to_library(&self, playlist_id: &str, saved: bool) -> Result<()> {
+        let endpoint = if saved {
+            "like/like"
+        } else {
+            "like/removelike"
+        };
+        let body = json!({ "target": { "playlistId": youtube_id(playlist_id)? } });
+        performed(&self.edit(endpoint, &body).await?)
+    }
+
+    /// Subscribes to an artist by the channel its header carries, or
+    /// unsubscribes.
+    pub async fn subscribe(&self, channel_id: &str, subscribed: bool) -> Result<()> {
+        let endpoint = if subscribed {
+            "subscription/subscribe"
+        } else {
+            "subscription/unsubscribe"
+        };
+        let body = json!({ "channelIds": [youtube_id(channel_id)?] });
+        performed(&self.edit(endpoint, &body).await?)
+    }
+}
+
 fn succeeded(reply: &str) -> bool {
     serde_json::from_str::<Value>(reply).is_ok_and(|v| v["status"] == "STATUS_SUCCEEDED")
+}
+
+/// For answers without a status: a change YouTube held back comes with a
+/// dialog instead (ytmusicapi's validate_write_response).
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "the playlist and library UI built on them is to come"
+    )
+)]
+fn performed(reply: &str) -> Result<()> {
+    let v: Value = serde_json::from_str(reply).map_err(err)?;
+    match v.pointer("/actions/0/showEngagementPanelEndpoint") {
+        Some(_) => Err("YouTube didn't make the change".into()),
+        None => Ok(()),
+    }
 }
 
 /// The like button's state in a `next` response.
@@ -205,6 +337,30 @@ mod tests {
         ));
         assert!(!succeeded(r#"{"status":"STATUS_FAILED"}"#));
         assert!(!succeeded("{}"));
+    }
+
+    #[test]
+    fn reads_whether_a_change_was_made() {
+        assert!(performed(r#"{"responseContext":{},"actions":[{"addToToastAction":{}}]}"#).is_ok());
+        assert!(performed(r#"{"responseContext":{}}"#).is_ok());
+        let held = r#"{"actions":[{"showEngagementPanelEndpoint":{"identifier":{"tag":"x"}}}]}"#;
+        assert!(performed(held).is_err());
+        assert!(performed("<html>").is_err());
+    }
+
+    #[test]
+    fn takes_only_youtube_ids() {
+        for id in [
+            "PLaZPMsuQNCsWn0iVMtGbaUXO6z-EdZaZm",
+            "UC0C-w0YjGpqDXGB8IHb662A",
+            "56B44F6D10557CC6",
+        ] {
+            assert_eq!(youtube_id(id), Ok(id));
+        }
+        let long = "a".repeat(65);
+        for id in ["", r"C:\Music\song.mp3", r#"PL1","x"#, "PL 1", &long] {
+            assert!(youtube_id(id).is_err(), "{id}");
+        }
     }
 
     #[test]

@@ -9,7 +9,8 @@ use super::{
     Result, Route, Section,
     convert::{
         CARD_THUMB, HEADER_THUMB, ROW_THUMB, album_card, album_type, artist_card, artist_refs,
-        card_section, genre_card, join_artists, pick_thumb, playlist_card, track_section, tracks,
+        card_section, genre_card, join_artists, pick_thumb, playlist_card, playlist_tracks,
+        track_section, tracks,
     },
     err,
     format::{compact, playlist_meta, songs, total_time},
@@ -356,7 +357,10 @@ impl Api {
     }
 
     pub(super) async fn album(&self, id: &str) -> Result<Page> {
-        let album = self.q().music_album(id).await.map_err(err)?;
+        // As the account sees it, for whether it is saved.
+        let album = self
+            .as_user(|q: RustyPipeQuery| async move { q.music_album(id).await })
+            .await?;
         let cover = pick_thumb(&album.cover, ROW_THUMB);
         let mut tracks = tracks(album.tracks);
         for t in &mut tracks {
@@ -383,7 +387,10 @@ impl Api {
             round: false,
             banner: false,
             shuffle_playlist: None,
-            radio_id: album.playlist_id.map(|p| format!("RDAMPL{p}")),
+            radio_id: album.playlist_id.as_ref().map(|p| format!("RDAMPL{p}")),
+            saved: album.saved,
+            save_id: album.playlist_id,
+            ..Default::default()
         };
         let mut sections = vec![Section::Tracks {
             title: String::new(),
@@ -406,7 +413,9 @@ impl Api {
     /// A playlist's first page of tracks; `complete` fetches the rest.
     async fn playlist(&self, id: &str) -> Result<Page> {
         let playlist = self.fetch_playlist(id, false).await?;
-        let tracks = tracks(playlist.tracks.items.clone());
+        // Only those the account made take edits, not Liked music or the mixes.
+        let own = playlist.editable && playlist.id.starts_with("PL");
+        let tracks = playlist_tracks(playlist.tracks.items.clone(), own);
         let more = (playlist.tracks.ctoken.is_some() && !tracks.is_empty()).then_some(
             More::Tracks(MoreTracks {
                 tracks: playlist.tracks,
@@ -423,6 +432,11 @@ impl Api {
             banner: false,
             shuffle_playlist: None,
             radio_id: Some(format!("RDAMPL{}", playlist.id)),
+            editable: own,
+            privacy: playlist.privacy.filter(|_| own),
+            saved: playlist.saved,
+            save_id: playlist.saved.map(|_| playlist.id.clone()),
+            ..Default::default()
         };
         let mut sections = Vec::new();
         sections.extend(track_section("", tracks, QueueMode::Section));
@@ -454,7 +468,8 @@ impl Api {
             Some(More::Tracks(MoreTracks { mut tracks, count })) => {
                 let shown = tracks.items.len();
                 whole = tracks.extend_limit(self.q(), PLAYLIST_LIMIT).await.is_ok();
-                let extra = super::convert::tracks(tracks.items.split_off(shown));
+                let own = page.header.as_ref().is_some_and(|h| h.editable);
+                let extra = playlist_tracks(tracks.items.split_off(shown), own);
                 if let Some(Section::Tracks { tracks, .. }) = page.sections.first_mut() {
                     tracks.extend(extra);
                 }
@@ -482,10 +497,11 @@ impl Api {
         // page's own albums stand in if the discography fails or adds nothing.
         let q = self.q();
         let (artist, discography) = tokio::join!(
-            q.music_artist(id, false),
+            // As the account sees it, for whether it is subscribed.
+            self.as_user(|q: RustyPipeQuery| async move { q.music_artist(id, false).await }),
             q.music_artist_albums(id, None, Some(AlbumOrder::Recency)),
         );
-        let mut artist = artist.map_err(err)?;
+        let mut artist = artist?;
         // An alias redirects to the artist's own ID, which the discography
         // must be asked by.
         let discography = if artist.id == id {
@@ -518,6 +534,9 @@ impl Api {
             banner: true,
             shuffle_playlist: artist.tracks_playlist_id,
             radio_id: artist.radio_id,
+            subscribed: artist.subscribed,
+            channel_id: artist.subscribe_channel_id,
+            ..Default::default()
         };
 
         let (singles, albums): (Vec<_>, Vec<_>) = artist

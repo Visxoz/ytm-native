@@ -1,3 +1,4 @@
+pub use rustypipe::model::PlaylistPrivacy;
 use rustypipe::model::{TrackItem, paginator::Paginator};
 
 use super::convert::{HEADER_THUMB, join_artists, resize_thumb};
@@ -21,6 +22,11 @@ pub struct Track {
     /// Premium formats.
     #[serde(default)]
     pub video: bool,
+    /// The entry's own ID in the account's playlist it came from, which
+    /// removing or moving it takes. Never saved, as it means nothing away
+    /// from that playlist's page.
+    #[serde(skip)]
+    pub set_video_id: Option<String>,
 }
 
 impl crate::queue::Spread for Track {
@@ -164,6 +170,19 @@ pub struct Header {
     /// Playlist whose tracks Shuffle loads when the page's are incomplete.
     pub shuffle_playlist: Option<String>,
     pub radio_id: Option<String>,
+    /// One of the account's own playlists, which it can edit.
+    pub editable: bool,
+    /// Who can see the account's own playlist.
+    pub privacy: Option<PlaylistPrivacy>,
+    /// Whether the album or playlist is in the library; unknown signed out
+    /// and on the account's own playlists.
+    pub saved: Option<bool>,
+    /// The playlist saving it targets, an album's being its audio playlist.
+    pub save_id: Option<String>,
+    /// Whether the account is subscribed to the artist; unknown signed out.
+    pub subscribed: Option<bool>,
+    /// The channel subscribing to the artist takes.
+    pub channel_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]

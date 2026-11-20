@@ -69,11 +69,24 @@ pub fn track(t: TrackItem) -> Track {
         track_nr: t.track_nr,
         id: t.id,
         title: t.name,
+        set_video_id: None,
     }
 }
 
 pub fn tracks(items: Vec<TrackItem>) -> Vec<Track> {
     items.into_iter().map(track).collect()
+}
+
+/// A playlist's tracks, with each entry's ID only in the account's own, which
+/// edits take.
+pub fn playlist_tracks(items: Vec<TrackItem>, own: bool) -> Vec<Track> {
+    items
+        .into_iter()
+        .map(|mut t| Track {
+            set_video_id: t.set_video_id.take().filter(|_| own),
+            ..track(t)
+        })
+        .collect()
 }
 
 pub fn album_type(t: AlbumType) -> &'static str {
@@ -196,5 +209,27 @@ mod tests {
         );
         let ytimg = "https://i.ytimg.com/vi/x/hqdefault.jpg";
         assert_eq!(resize_thumb(ytimg, 360), ytimg);
+    }
+
+    #[test]
+    fn keeps_entry_ids_only_from_own_playlists() {
+        let item: TrackItem = serde_json::from_value(serde_json::json!({
+            "id": "3_R4ulvg8OY", "name": "I Hate Everything", "duration": 83, "cover": [],
+            "artists": [], "artist_id": null, "album": null, "view_count": null,
+            "track_type": "track", "track_nr": null, "by_va": false,
+            "set_video_id": "56B44F6D10557CC6"
+        }))
+        .unwrap();
+        let own = playlist_tracks(vec![item.clone()], true);
+        assert_eq!(own[0].set_video_id.as_deref(), Some("56B44F6D10557CC6"));
+        let other = playlist_tracks(vec![item.clone()], false);
+        assert_eq!(other[0].set_video_id, None);
+        assert_eq!(track(item).set_video_id, None);
+        // Saved queues and history never carry it.
+        assert!(
+            !serde_json::to_string(&own[0])
+                .unwrap()
+                .contains("set_video_id")
+        );
     }
 }

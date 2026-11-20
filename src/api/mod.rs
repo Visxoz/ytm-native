@@ -117,24 +117,32 @@ impl Api {
         }
     }
 
+    /// `fetch` as the account sees it. Should the cookie have gone stale or
+    /// the signed-in request be refused, public pages still open signed out.
+    async fn as_user<T, F>(&self, fetch: impl Fn(RustyPipeQuery) -> F) -> Result<T>
+    where
+        F: Future<Output = std::result::Result<T, rustypipe::error::Error>>,
+    {
+        let q = self.user_q();
+        let signed_in = q.auth_enabled(ClientType::DesktopMusic);
+        match fetch(q).await {
+            Ok(v) => Ok(v),
+            Err(e) if signed_in => fetch(self.q()).await.map_err(|_| err(e)),
+            Err(e) => Err(err(e)),
+        }
+    }
+
     /// A playlist as its owner sees it: its first page, or up to
-    /// `PLAYLIST_LIMIT` tracks when `full`. Should the cookie have gone stale,
-    /// public playlists still open signed out.
+    /// `PLAYLIST_LIMIT` tracks when `full`.
     async fn fetch_playlist(&self, id: &str, full: bool) -> Result<MusicPlaylist> {
-        let fetch = |q: RustyPipeQuery| async move {
+        self.as_user(|q: RustyPipeQuery| async move {
             let mut playlist = q.music_playlist(id).await?;
             if full {
                 let _ = playlist.tracks.extend_limit(&q, PLAYLIST_LIMIT).await;
             }
-            Ok::<_, rustypipe::error::Error>(playlist)
-        };
-        let q = self.user_q();
-        let signed_in = q.auth_enabled(ClientType::DesktopMusic);
-        match fetch(q).await {
-            Ok(playlist) => Ok(playlist),
-            Err(e) if signed_in => fetch(self.q()).await.map_err(|_| err(e)),
-            Err(e) => Err(err(e)),
-        }
+            Ok(playlist)
+        })
+        .await
     }
 
     /// Tracks of an album or playlist, for playing a card directly.
