@@ -14,7 +14,7 @@ use std::{
     path::PathBuf,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, AtomicU32, Ordering},
+        atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering},
         mpsc::{self, Sender},
     },
     thread,
@@ -123,10 +123,48 @@ fn cancel(slot: &Mutex<Option<Arc<Download>>>, other: &Mutex<Option<Arc<Download
     }
 }
 
+/// The gain that brings a track to YouTube's reference loudness, before the
+/// level and the cap; a track with none measured is taken as at it.
 fn loudness_gain(loudness_db: Option<f32>) -> f32 {
-    loudness_db
-        .filter(|db| *db > 0.0)
-        .map_or(1.0, |db| 10f32.powf(-db / 20.0))
+    loudness_db.map_or(1.0, |db| 10f32.powf(-db / 20.0))
+}
+
+/// The most a quiet track is turned up, +3 dB, as its peaks are unknown and
+/// quiet tracks are often the dynamic ones; the limiter catches the rest.
+const MAX_BOOST: f32 = 1.412_537_5;
+
+/// How tracks are evened out: Normal to YouTube's reference loudness, Quiet
+/// 6 dB under it, as Spotify's Quiet sits under its Normal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Normalise {
+    Off,
+    Quiet,
+    Normal,
+}
+
+impl Normalise {
+    pub fn index(self) -> i32 {
+        self as i32
+    }
+
+    pub fn from_index(i: i32) -> Self {
+        match i {
+            0 => Normalise::Off,
+            1 => Normalise::Quiet,
+            _ => Normalise::Normal,
+        }
+    }
+
+    /// The gain played for a track whose `loudness_gain` is `gain`. The cap
+    /// comes after the level, so Quiet turns up as far as Normal does.
+    fn apply(self, gain: f32) -> f32 {
+        match self {
+            Normalise::Off => 1.0,
+            Normalise::Quiet => (gain * 0.5).min(MAX_BOOST),
+            Normalise::Normal => gain.min(MAX_BOOST),
+        }
+    }
 }
 
 struct Shared {
@@ -136,7 +174,8 @@ struct Shared {
     device_lost: AtomicBool,
     /// The volume and the loudness correction, as f32 bits.
     volume: AtomicU32,
-    normalise: AtomicBool,
+    /// A `Normalise`, as its index.
+    normalise: AtomicU8,
     loudness_gain: AtomicU32,
     /// The audible track's download.
     download: Mutex<Option<Arc<Download>>>,
@@ -162,11 +201,7 @@ impl Shared {
     }
 
     fn correction(&self, gain: f32) -> f32 {
-        if self.normalise.load(Ordering::Relaxed) {
-            gain
-        } else {
-            1.0
-        }
+        Normalise::from_index(self.normalise.load(Ordering::Relaxed).into()).apply(gain)
     }
 
     fn loudness(&self) -> f32 {
@@ -197,7 +232,7 @@ impl Player {
             paused: AtomicBool::new(false),
             device_lost: AtomicBool::new(false),
             volume: AtomicU32::new(1f32.to_bits()),
-            normalise: AtomicBool::new(true),
+            normalise: AtomicU8::new(Normalise::Normal as u8),
             loudness_gain: AtomicU32::new(1f32.to_bits()),
             download: Mutex::new(None),
             next_download: Mutex::new(None),
@@ -324,8 +359,10 @@ impl Player {
         }
     }
 
-    pub fn set_normalise(&self, normalise: bool) {
-        self.shared.normalise.store(normalise, Ordering::Relaxed);
+    pub fn set_normalise(&self, normalise: Normalise) {
+        self.shared
+            .normalise
+            .store(normalise as u8, Ordering::Relaxed);
     }
 
     pub fn position(&self) -> f64 {
@@ -382,12 +419,20 @@ mod tests {
 
     #[test]
     fn applies_the_next_tracks_loudness() {
-        assert_eq!(loudness_gain(None), 1.0);
-        assert_eq!(
-            loudness_gain(Some(-3.0)),
-            1.0,
-            "quiet tracks stay as they are"
-        );
-        assert!((loudness_gain(Some(6.0)) - 0.501).abs() < 0.001);
+        let near = |a: f32, b: f32| (a - b).abs() < 0.001;
+        let normal = |db| Normalise::Normal.apply(loudness_gain(db));
+        let quiet = |db| Normalise::Quiet.apply(loudness_gain(db));
+        assert_eq!(normal(None), 1.0, "unmeasured, taken as at the reference");
+        assert!(near(normal(Some(6.0)), 0.501), "loud tracks turned down");
+        assert!(near(normal(Some(-3.0)), 1.413), "quiet ones turned up");
+        assert_eq!(normal(Some(-20.0)), MAX_BOOST, "but only so far");
+        assert_eq!(quiet(None), 0.5);
+        assert!(near(quiet(Some(6.0)), 0.251), "6 dB under Normal");
+        assert!(near(quiet(Some(-9.0)), 1.409));
+        assert_eq!(quiet(Some(-20.0)), MAX_BOOST);
+        assert_eq!(Normalise::Off.apply(loudness_gain(Some(6.0))), 1.0);
+        for level in [Normalise::Off, Normalise::Quiet, Normalise::Normal] {
+            assert_eq!(Normalise::from_index(level.index()), level);
+        }
     }
 }

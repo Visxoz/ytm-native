@@ -118,9 +118,10 @@ impl App {
         on!(on_sign_in, |app, cookie| app.sign_in(cookie.to_string()));
         on!(on_sign_in_browser, |app| app.sign_in_with_google());
         on!(on_sign_out, |app| app.sign_out());
-        on!(on_set_normalise, |app, value| {
-            app.update_settings(|s| s.normalise = value);
-            app.player.set_normalise(value);
+        on!(on_set_normalise, |app, index| {
+            let level = crate::audio::Normalise::from_index(index);
+            app.update_settings(|s| s.normalise = level);
+            app.player.set_normalise(level);
         });
         on!(on_set_discord, |app, value| {
             app.update_settings(|s| s.discord = value);

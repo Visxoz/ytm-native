@@ -131,7 +131,7 @@ export component SettingsDialog inherits Dialog {
     in-out property <bool> sign-in-open;
     in property <int> quality;
     in property <string> premium-status;
-    in property <bool> normalise;
+    in property <int> normalise;
     in property <bool> crossfade;
     in property <[string]> output-devices;
     in property <int> output-device;
@@ -160,7 +160,7 @@ export component SettingsDialog inherits Dialog {
     /// The saved proxy without any password, or none.
     in property <string> proxy-address;
     callback set-quality(value: int);
-    callback set-normalise(value: bool);
+    callback set-normalise(value: int);
     callback set-crossfade(value: bool);
     callback set-output-device(index: int);
     callback list-output-devices();
@@ -241,11 +241,18 @@ export component SettingsDialog inherits Dialog {
             }
         }
 
-        ToggleRow {
+        SettingRow {
             label: "Normalise volume";
-            detail: "Plays every track at a similar loudness, as YouTube Music does.";
-            checked: root.normalise;
-            toggled(v) => { root.set-normalise(v); }
+            detail: root.normalise == 0 ? "Plays every track as it was mastered."
+                : root.normalise == 1 ? "Plays every track at a similar loudness, a little quieter than Normal."
+                : "Plays every track at a similar loudness, turning quiet ones up and loud ones down.";
+            PillGroup {
+                y: (parent.height - self.height) / 2;
+                height: self.preferred-height;
+                labels: ["Off", "Quiet", "Normal"];
+                current: root.normalise;
+                picked(i) => { root.set-normalise(i); }
+            }
         }
 
         ToggleRow {

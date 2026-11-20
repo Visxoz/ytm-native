@@ -29,6 +29,32 @@ pub(super) struct Output {
     /// The gain the last callback ended on, which the next ramps from, so a
     /// pause, resume, volume change or fresh start never steps and clicks.
     pub(super) gain: f32,
+    /// How far the limiter has the gain down from 1, at 0 while idle.
+    pub(super) limiting: f32,
+}
+
+/// How long the limiter takes to let go of a full reduction, in seconds;
+/// smaller ones go in proportion, so a 3 dB dip comes back in about 0.3 s.
+const RELEASE_SECS: f32 = 1.0;
+
+/// Keeps peaks within full scale: each frame's gain drops at once to what
+/// keeps its loudest channel at 1, then rises back linearly, so it lands
+/// exactly on idle and leaves samples already within full scale untouched.
+fn limit(samples: &mut [f32], limiting: &mut f32, rate: u32, channels: usize) {
+    let step = 1.0 / (RELEASE_SECS * rate.max(1) as f32);
+    for frame in samples.chunks_exact_mut(channels) {
+        let peak = frame.iter().fold(0f32, |m, s| m.max(s.abs()));
+        *limiting = (*limiting - step).max(0.0);
+        if peak * (1.0 - *limiting) > 1.0 {
+            *limiting = 1.0 - 1.0 / peak;
+        }
+        if *limiting > 0.0 {
+            for sample in frame {
+                // Clamped too, as `1 - (1 - 1 / peak)` can round past it.
+                *sample = (*sample * (1.0 - *limiting)).clamp(-1.0, 1.0);
+            }
+        }
+    }
 }
 
 impl Output {
@@ -44,8 +70,9 @@ impl Output {
         self.base_secs = base_secs;
         self.frames_played = 0;
         self.switch_at = None;
-        // What follows a seek or load fades in.
+        // What follows a seek or load fades in, from no limiting.
         self.gain = 0.0;
+        self.limiting = 0.0;
     }
 
     /// Counts `frames` as played. Returns the next track's loudness
@@ -92,6 +119,8 @@ pub(super) fn fill(shared: &Shared, data: &mut [f32], device_rate: u32) {
         *out = sample * if frame < split { gain } else { gain * next };
     }
     output.eq.process(&mut data[..n], device_rate, channels);
+    // Last, after the boost, the equaliser and a crossfade's sum.
+    limit(&mut data[..n], &mut output.limiting, device_rate, channels);
     data[n..].fill(0.0);
     let crossed = output.played(frames as u64);
     if let Some(loudness) = crossed {
@@ -145,7 +174,7 @@ mod tests {
     fn shared(loudness: f32) -> Shared {
         use std::sync::{
             Mutex,
-            atomic::{AtomicBool, AtomicU32},
+            atomic::{AtomicBool, AtomicU8, AtomicU32},
         };
         Shared {
             output: Mutex::new(Output {
@@ -156,7 +185,7 @@ mod tests {
             paused: AtomicBool::new(false),
             device_lost: AtomicBool::new(false),
             volume: AtomicU32::new(1f32.to_bits()),
-            normalise: AtomicBool::new(true),
+            normalise: AtomicU8::new(crate::audio::Normalise::Normal as u8),
             loudness_gain: AtomicU32::new(loudness.to_bits()),
             download: Mutex::new(None),
             next_download: Mutex::new(None),
@@ -179,6 +208,44 @@ mod tests {
         );
         fill(&shared, &mut data, 48_000);
         assert_eq!(data, [0.5; 12], "and on from there");
+    }
+
+    #[test]
+    fn a_boosted_track_crosses_into_a_cut_one() {
+        let shared = shared(1.25);
+        let mut out = shared.output.lock().unwrap();
+        out.samples = vec![0.25; 48].into();
+        out.switch_at = Some(3);
+        drop(out);
+        let mut data = [0.0; 12];
+        fill(&shared, &mut data, 48_000);
+        assert_eq!(data[..6], [0.3125; 6], "boosted");
+        assert_eq!(data[6..], [0.125; 6], "cut, as it starts");
+
+        let loud = self::shared(1.25);
+        fill(&loud, &mut data, 48_000);
+        assert_eq!(data, [1.0; 12], "full scale boosted, limited to it");
+    }
+
+    #[test]
+    fn the_limiter_holds_peaks_and_leaves_the_rest() {
+        let mut limiting = 0.0;
+        let quiet: Vec<f32> = (0..96).map(|i| (i as f32 * 0.3).sin() * 0.9).collect();
+        let mut samples = quiet.clone();
+        limit(&mut samples, &mut limiting, 48_000, 3);
+        assert_eq!(samples, quiet, "within full scale, untouched");
+
+        let mut loud: Vec<f32> = (0..9_600).map(|i| (i as f32 * 0.3).sin() * 4.0).collect();
+        limit(&mut loud, &mut limiting, 48_000, 2);
+        assert!(loud.iter().all(|s| s.abs() <= 1.0));
+        assert!(loud.iter().any(|s| s.abs() > 0.99), "reaching full scale");
+        assert!(limiting > 0.7, "holding it down");
+
+        // A second of quiet lets go entirely, back to leaving it alone.
+        let mut rest = vec![0.5; 96_000];
+        limit(&mut rest, &mut limiting, 48_000, 2);
+        assert_eq!(limiting, 0.0);
+        assert_eq!(rest[95_998..], [0.5, 0.5]);
     }
 
     #[test]

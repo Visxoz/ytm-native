@@ -128,7 +128,7 @@ export component AppWindow inherits Window {
     in property <string> sign-in-error;
     in-out property <bool> settings-open;
     in-out property <bool> sign-in-open;
-    in property <bool> normalise;
+    in property <int> normalise: 2;
     in property <bool> discord;
     in property <bool> autoplay;
     in property <bool> youtube-history;
@@ -217,7 +217,7 @@ export component AppWindow inherits Window {
     callback sign-in(cookie: string);
     callback sign-in-browser();
     callback sign-out();
-    callback set-normalise(value: bool);
+    callback set-normalise(value: int);
     callback set-discord(value: bool);
     callback set-check-updates(value: bool);
     callback install-update();

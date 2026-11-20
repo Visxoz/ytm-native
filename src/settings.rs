@@ -272,7 +272,8 @@ impl Accent {
 pub struct Settings {
     pub volume: f32,
     pub muted: bool,
-    pub normalise: bool,
+    #[serde(deserialize_with = "normalise_level")]
+    pub normalise: crate::audio::Normalise,
     pub discord: bool,
     pub autoplay: bool,
     /// Report songs played to the signed-in account's YouTube history.
@@ -316,6 +317,23 @@ pub struct Settings {
     pub account_photo: Option<String>,
 }
 
+/// Older versions kept `normalise` as on or off, which is Normal or Off.
+fn normalise_level<'de, D: serde::Deserializer<'de>>(
+    d: D,
+) -> Result<crate::audio::Normalise, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum Stored {
+        Old(bool),
+        Level(crate::audio::Normalise),
+    }
+    Ok(match Stored::deserialize(d)? {
+        Stored::Old(true) => crate::audio::Normalise::Normal,
+        Stored::Old(false) => crate::audio::Normalise::Off,
+        Stored::Level(level) => level,
+    })
+}
+
 /// An output device by cpal's ID, with its name for while it is unplugged.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct OutputDevice {
@@ -328,7 +346,7 @@ impl Default for Settings {
         Self {
             volume: 0.8,
             muted: false,
-            normalise: true,
+            normalise: crate::audio::Normalise::Normal,
             discord: true,
             autoplay: true,
             youtube_history: true,
@@ -802,9 +820,23 @@ mod tests {
     fn fills_missing_fields_with_defaults() {
         let settings: Settings = serde_json::from_str(r#"{"volume":0.5}"#).unwrap();
         assert_eq!(settings.volume, 0.5);
-        assert!(settings.normalise);
+        assert_eq!(settings.normalise, crate::audio::Normalise::Normal);
         assert!(!settings.crossfade, "off until chosen");
         assert_eq!(settings.quality, Quality::High);
+    }
+
+    #[test]
+    fn reads_normalise_from_older_versions() {
+        use crate::audio::Normalise;
+        let level = |json: &str| Settings::parse(json.as_bytes()).normalise;
+        assert_eq!(level(r#"{"normalise":false}"#), Normalise::Off);
+        assert_eq!(level(r#"{"normalise":true}"#), Normalise::Normal);
+        let quiet = Settings {
+            normalise: Normalise::Quiet,
+            ..Default::default()
+        };
+        let json = serde_json::to_string(&quiet).unwrap();
+        assert_eq!(level(&json), Normalise::Quiet, "and its own");
     }
 
     #[test]

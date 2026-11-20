@@ -566,7 +566,7 @@ impl App {
         ui.set_shuffle(settings.shuffle);
         ui.set_smart_shuffle(settings.smart_shuffle);
         ui.set_repeat_mode(settings.repeat);
-        ui.set_normalise(settings.normalise);
+        ui.set_normalise(settings.normalise.index());
         ui.set_discord(settings.discord);
         ui.set_autoplay(settings.autoplay);
         ui.set_youtube_history(settings.youtube_history);
