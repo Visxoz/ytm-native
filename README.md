@@ -36,7 +36,7 @@
 <td width="33%" valign="top">
 
 ### Sounds better
-256 kbps Opus with Premium, gapless playback, a 6-second crossfade, volume levelling and a six-band equaliser.
+256 kbps Opus with Premium, gapless playback, a crossfade of your chosen length, volume levelling, a ten-band equaliser, and crossfeed, mono and balance for headphones.
 
 </td>
 <td width="33%" valign="top">
