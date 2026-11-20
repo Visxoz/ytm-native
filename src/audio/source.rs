@@ -35,6 +35,8 @@ pub struct Source {
     /// Length YouTube reports up front, or 0 if it did not.
     pub size: u64,
     pub headers: Vec<(String, String)>,
+    /// Its first bytes, fetched ahead from the same URL, or none.
+    pub head: Vec<u8>,
 }
 
 /// Asks YouTube again for the stream, as googlevideo sometimes serves a URL's
@@ -76,11 +78,21 @@ impl Download {
         download
     }
 
-    pub fn start(source: Source, refresh: Refresh) -> Arc<Self> {
-        let download = Arc::new(Self {
+    pub fn start(mut source: Source, refresh: Refresh) -> Arc<Self> {
+        let mut download = Self {
             url: source.url.clone(),
             ..Self::sized(source.size)
-        });
+        };
+        // `run` carries on after the bytes held. Taken, as the source is kept
+        // for refreshes all song long.
+        let head = std::mem::take(&mut source.head);
+        download
+            .state
+            .get_mut()
+            .unwrap()
+            .data
+            .extend_from_slice(&head);
+        let download = Arc::new(download);
         let worker = Arc::clone(&download);
         thread::Builder::new()
             .name("stream-download".into())
@@ -273,7 +285,9 @@ impl Download {
             request = request.header(name, value);
         }
         if total > 0 {
-            let end = (offset + CHUNK).min(total) - 1;
+            // Ends on a megabyte, so starting after a prefetched head doesn't
+            // push the first range past where cut-off URLs start refusing.
+            let end = ((offset / CHUNK + 1) * CHUNK).min(total) - 1;
             request = request.header(reqwest::header::RANGE, format!("bytes={offset}-{end}"));
         }
         let mut response = request
@@ -481,6 +495,7 @@ mod tests {
             url: url.into(),
             size,
             headers: Vec::new(),
+            head: Vec::new(),
         }
     }
 

@@ -165,9 +165,14 @@ impl Playback {
     }
 
     /// Keeps the stream for `id`, dropping stale ones such as tracks skipped past.
+    /// Only the newest keeps its first bytes; an older one's warm-up still
+    /// running fills a cell nothing else holds.
     fn store_prefetched(&mut self, id: String, stream: ResolvedStream) {
         self.prefetched
             .retain(|_, (_, at)| at.elapsed() < playback::PREFETCH_FRESH);
+        for (old, _) in self.prefetched.values_mut() {
+            old.head = Default::default();
+        }
         self.prefetched.insert(id, (stream, Instant::now()));
     }
 }

@@ -273,6 +273,7 @@ fn source(stream: ResolvedStream) -> Source {
         url: stream.url,
         size: stream.size,
         headers: stream.headers,
+        head: stream.head.get().cloned().unwrap_or_default(),
     }
 }
 

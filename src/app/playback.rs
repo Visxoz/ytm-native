@@ -354,9 +354,9 @@ impl App {
         if stream.file.is_some() {
             return;
         }
-        let (url, headers) = (stream.url.clone(), stream.headers.clone());
+        let stream = stream.clone();
         self.rt
-            .spawn_blocking(move || crate::streams::warm(&url, &headers));
+            .spawn_blocking(move || crate::streams::warm(&stream));
     }
 
     /// Queues a radio when the last track starts, so playback carries on.
