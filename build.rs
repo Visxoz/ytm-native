@@ -66,6 +66,16 @@ fn main() {
     let mut res = winresource::WindowsResource::new();
     res.set_icon("icons/icon.ico")
         .set("FileDescription", "Lily")
-        .set("ProductName", "Lily");
+        .set("ProductName", "Lily")
+        // The segment heap hands freed memory back to Windows more readily.
+        .set_manifest(
+            r#"<assembly xmlns="urn:schemas-microsoft-com:asm.v1" manifestVersion="1.0">
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <heapType xmlns="http://schemas.microsoft.com/SMI/2020/WindowsSettings">SegmentHeap</heapType>
+    </windowsSettings>
+  </application>
+</assembly>"#,
+        );
     res.compile().expect("Windows resources compile");
 }
