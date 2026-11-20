@@ -59,6 +59,8 @@ pub struct Download {
     changed: Condvar,
     /// A file read in place, set before `done`.
     file: OnceLock<File>,
+    /// The URL it started from, which a replay asks for again; empty for a file.
+    url: String,
 }
 
 impl Download {
@@ -75,7 +77,10 @@ impl Download {
     }
 
     pub fn start(source: Source, refresh: Refresh) -> Arc<Self> {
-        let download = Arc::new(Self::sized(source.size));
+        let download = Arc::new(Self {
+            url: source.url.clone(),
+            ..Self::sized(source.size)
+        });
         let worker = Arc::clone(&download);
         thread::Builder::new()
             .name("stream-download".into())
@@ -137,6 +142,13 @@ impl Download {
         } else {
             state.data.len() as f32 / state.total as f32
         }
+    }
+
+    /// Whether all of `url` is held in memory, so it can play again from
+    /// there. A cancelled download is emptied, though `run` marks it done.
+    pub fn whole(&self, url: &str) -> bool {
+        let state = self.state.lock().unwrap();
+        self.url == url && state.done && !state.cancelled
     }
 
     /// Whether it gave up on a connection that stopped answering, rather
@@ -532,6 +544,24 @@ mod tests {
         assert_ne!(kind, io::ErrorKind::Interrupted, "Symphonia would retry");
         assert_ne!(kind, io::ErrorKind::UnexpectedEof, "not the stream's end");
         assert_eq!(download.state.lock().unwrap().data.capacity(), 0);
+    }
+
+    #[test]
+    fn plays_again_only_a_whole_download_of_the_same_url() {
+        let download = Arc::new(Download {
+            url: URL.into(),
+            ..Download::default()
+        });
+        download.state.lock().unwrap().data = vec![1, 2, 3];
+        assert!(!download.whole(URL), "still downloading");
+        download.state.lock().unwrap().done = true;
+        assert!(download.whole(URL));
+        assert!(
+            !download.whole(&URL.replace("n=a", "n=b")),
+            "another stream"
+        );
+        download.cancel();
+        assert!(!download.whole(URL), "cancelled, so emptied");
     }
 
     #[test]

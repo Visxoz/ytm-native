@@ -87,6 +87,9 @@ struct Playback {
     /// When the current track was asked for, to time the first sound.
     requested_at: Option<Instant>,
     current_premium: bool,
+    /// The current track's stream, when it was resolved and what for, so a
+    /// replay can take it from the player's memory (`App::held_stream`).
+    playing: Option<(String, ResolvedStream, Instant, resolve::Choice)>,
     /// A track whose Premium stream failed and plays the free one instead.
     force_free: Option<String>,
     /// Where a track is to start: restored from the last run, sought to

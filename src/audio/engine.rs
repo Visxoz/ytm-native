@@ -483,7 +483,13 @@ impl Engine {
         if output.advanced {
             return false;
         }
-        if let Some(switched) = std::mem::replace(&mut self.track, self.previous.take()) {
+        if let Some(switched) = std::mem::replace(&mut self.track, self.previous.take())
+            // A song queued to play again shares the restored one's download.
+            && !self
+                .track
+                .as_ref()
+                .is_some_and(|t| Arc::ptr_eq(&t.download, &switched.download))
+        {
             switched.download.cancel();
         }
         if let Some(at) = output.switch_at.take() {

@@ -63,10 +63,12 @@ impl App {
         let Some((next_id, crossfade)) = due else {
             return;
         };
+        // On repeat-one, the player's download plays again.
+        let held = self.held_stream(&next_id);
         let prefetched = {
             let playback = &mut self.state.borrow_mut().playback;
             playback.queue_tried = Some(next_id.clone());
-            playback.take_prefetched(&next_id)
+            held.or_else(|| playback.take_prefetched(&next_id))
         };
         // Kept with the stream, so one put back stays only as fresh as it was.
         let resolved_at = prefetched.as_ref().map_or_else(Instant::now, |(_, at)| *at);
@@ -94,7 +96,7 @@ impl App {
     /// The queued track became audible: move the queue on and show it,
     /// without loading anything.
     pub(super) fn advance_gapless(self: &Rc<Self>) {
-        let Some((id, stream, _)) = self.state.borrow_mut().playback.queued.take() else {
+        let Some((id, stream, resolved_at)) = self.state.borrow_mut().playback.queued.take() else {
             return;
         };
         let current = self.state.borrow_mut().queue.advance(false).cloned();
@@ -103,6 +105,7 @@ impl App {
             self.start_current();
             return;
         };
+        let choice = self.choice(&id);
         {
             let mut state = self.state.borrow_mut();
             let playback = &mut state.playback;
@@ -118,6 +121,7 @@ impl App {
         self.present(&track, 0.0);
         self.record_play();
         self.show_stream(&stream);
+        self.state.borrow_mut().playback.playing = Some((id, stream, resolved_at, choice));
         self.ui().set_np_loading(false);
         self.update_media_state();
         self.extend_with_radio_if_ending();

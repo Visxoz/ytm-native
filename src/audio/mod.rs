@@ -53,16 +53,6 @@ pub struct Opening {
     pub start_at: f64,
 }
 
-impl StreamSpec {
-    fn start(self) -> (Arc<Download>, Opening) {
-        let download = match self.input {
-            Input::Stream(source, refresh) => Download::start(source, refresh),
-            Input::File(path) => Download::open(path),
-        };
-        (download, self.opening)
-    }
-}
-
 /// The output devices plugged in, as cpal ID and name. Slow, and cpal sets up
 /// COM on the calling thread, so best called on one of its own.
 pub fn output_devices() -> Vec<(String, String)> {
@@ -119,10 +109,16 @@ enum Command {
 }
 
 /// Empties a download slot and cancels what it held, once the slot's lock
-/// is released.
-fn cancel(slot: &Mutex<Option<Arc<Download>>>) {
+/// is released, unless `other` holds it too, as a song queued to play again.
+fn cancel(slot: &Mutex<Option<Arc<Download>>>, other: &Mutex<Option<Arc<Download>>>) {
     let taken = slot.lock().unwrap().take();
-    if let Some(download) = taken {
+    if let Some(download) = taken
+        && !other
+            .lock()
+            .unwrap()
+            .as_ref()
+            .is_some_and(|d| Arc::ptr_eq(d, &download))
+    {
         download.cancel();
     }
 }
@@ -158,11 +154,11 @@ impl Shared {
     }
 
     fn cancel_current(&self) {
-        cancel(&self.download);
+        cancel(&self.download, &self.next_download);
     }
 
     fn cancel_next(&self) {
-        cancel(&self.next_download);
+        cancel(&self.next_download, &self.download);
     }
 
     fn correction(&self, gain: f32) -> f32 {
@@ -220,11 +216,19 @@ impl Player {
     /// Loads a track in place of the current one. A pause is left as it is,
     /// so one made while the stream was being found holds.
     pub fn load(&self, spec: StreamSpec) {
-        // Cancel first so a decoder blocked on the old download wakes up.
-        self.shared.cancel_current();
+        let (download, opening) = self.start(spec);
+        // Cancelled before the engine hears, so a decoder blocked on the old
+        // download wakes up, unless the old one is playing again.
+        let old = self
+            .shared
+            .download
+            .lock()
+            .unwrap()
+            .replace(Arc::clone(&download));
         self.shared.cancel_next();
-        let (download, opening) = spec.start();
-        *self.shared.download.lock().unwrap() = Some(Arc::clone(&download));
+        if let Some(old) = old.filter(|old| !Arc::ptr_eq(old, &download)) {
+            old.cancel();
+        }
         let _ = self.tx.send(Command::Load(opening, download));
     }
 
@@ -233,11 +237,33 @@ impl Player {
     /// download starts now.
     pub fn queue_next(&self, spec: StreamSpec, crossfade_secs: f64) {
         self.shared.cancel_next();
-        let (download, opening) = spec.start();
+        let (download, opening) = self.start(spec);
         *self.shared.next_download.lock().unwrap() = Some(Arc::clone(&download));
         let _ = self
             .tx
             .send(Command::Queue(opening, download, crossfade_secs));
+    }
+
+    /// Starts the spec's download, or takes the current one should it hold
+    /// all of the same stream, so a replay neither asks nor downloads again.
+    fn start(&self, spec: StreamSpec) -> (Arc<Download>, Opening) {
+        let download = match spec.input {
+            Input::Stream(source, refresh) => self
+                .held(&source.url)
+                .unwrap_or_else(|| Download::start(source, refresh)),
+            Input::File(path) => Download::open(path),
+        };
+        (download, spec.opening)
+    }
+
+    fn held(&self, url: &str) -> Option<Arc<Download>> {
+        let current = self.shared.download.lock().unwrap();
+        current.as_ref().filter(|d| d.whole(url)).cloned()
+    }
+
+    /// Whether the current download holds all of `url`, to play it again.
+    pub fn holds(&self, url: &str) -> bool {
+        self.held(url).is_some()
     }
 
     pub fn clear_next(&self) {
@@ -247,6 +273,11 @@ impl Player {
 
     pub fn stop(&self) {
         self.shared.cancel_current();
+        self.halt();
+    }
+
+    /// Stops the sound but keeps the current download, for a replay to load.
+    pub fn halt(&self) {
         self.shared.cancel_next();
         let _ = self.tx.send(Command::Stop);
     }
@@ -331,6 +362,22 @@ mod tests {
         std::fs::remove_file(&path).unwrap();
         assert_eq!((decoder.rate, decoder.channels), (8000, 1));
         assert_eq!(samples.len(), 8000, "a second of it");
+    }
+
+    #[test]
+    fn cancels_a_download_only_once_neither_slot_holds_it() {
+        use std::io::Read;
+        let missing = std::env::temp_dir()
+            .join("lily-no-such-folder")
+            .join("a.flac");
+        let download = Download::open(missing);
+        let slot = || Mutex::new(Some(Arc::clone(&download)));
+        let (current, next) = (slot(), slot());
+        let error = || download.reader().read(&mut [0; 4]).unwrap_err().to_string();
+        cancel(&next, &current);
+        assert!(error().contains("couldn't open"), "{}", error());
+        cancel(&current, &next);
+        assert_eq!(error(), "download cancelled");
     }
 
     #[test]

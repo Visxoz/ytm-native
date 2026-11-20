@@ -63,7 +63,13 @@ impl App {
             }
             playback.generation
         };
-        self.player.stop();
+        // A replay keeps the download it plays again; the load replaces it.
+        let held = self.held_stream(&track.id);
+        if held.is_some() {
+            self.player.halt();
+        } else {
+            self.player.stop();
+        }
         self.player.set_paused(false);
 
         let resume = match &self.state.borrow().playback.resume {
@@ -76,7 +82,9 @@ impl App {
         ui.set_np_quality(SharedString::new());
         ui.set_np_premium(false);
 
-        let prefetched = self.state.borrow_mut().playback.take_prefetched(&track.id);
+        let prefetched =
+            held.or_else(|| self.state.borrow_mut().playback.take_prefetched(&track.id));
+        let resolved_at = prefetched.as_ref().map_or_else(Instant::now, |(_, at)| *at);
         let resolve = self.resolve_future(track.id.clone(), prefetched.map(|(stream, _)| stream));
         self.spawn(resolve, move |app, result| {
             if app.state.borrow().playback.generation != generation {
@@ -84,7 +92,7 @@ impl App {
             }
             let reopening = app.state.borrow().playback.reopening(&track.id);
             match result {
-                Ok(stream) => app.load_stream(&track.id, stream),
+                Ok(stream) => app.load_stream(&track.id, stream, resolved_at),
                 // Still offline.
                 Err(e) if reopening => app.connection_lost(&e),
                 Err(e) => app.playback_failed(&track.title, &e),
@@ -92,10 +100,14 @@ impl App {
         });
     }
 
-    fn load_stream(self: &Rc<Self>, id: &str, stream: ResolvedStream) {
+    fn load_stream(self: &Rc<Self>, id: &str, stream: ResolvedStream, resolved_at: Instant) {
         self.show_stream(&stream);
         let start_at = self.resume_position();
-        self.player.load(self.stream_spec(id, stream, start_at));
+        self.player
+            .load(self.stream_spec(id, stream.clone(), start_at));
+        let choice = self.choice(id);
+        self.state.borrow_mut().playback.playing =
+            Some((id.to_owned(), stream, resolved_at, choice));
     }
 
     /// Opens the song again where it stopped, a few times while the
@@ -161,6 +173,8 @@ impl App {
             let State {
                 queue, playback, ..
             } = &mut *state;
+            // One that would not play is never played again from memory.
+            playback.playing = None;
             match queue.current().map(|t| t.id.clone()) {
                 Some(id)
                     if playback.current_premium && playback.force_free.as_ref() != Some(&id) =>
@@ -301,13 +315,14 @@ impl App {
                 return;
             };
             // A video whose song version is known has that resolving in its
-            // place, unless it is playing, as on repeat, and stays. One still
-            // being looked up resolves too, for a quick skip.
+            // place. One still being looked up resolves too, for a quick skip.
+            // The one playing, as on repeat-one, plays again from its download.
             let replaced = matches!(
                 state.song_versions.get(&next.id),
                 Some(SongVersion::Known(Some(_)))
-            ) && state.queue.current().is_none_or(|t| t.id != next.id);
+            );
             if replaced
+                || state.queue.current().is_some_and(|t| t.id == next.id)
                 || state.playback.has_prefetched(&next.id)
                 || state.playback.prefetching.contains(&next.id)
             {
