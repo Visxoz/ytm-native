@@ -3,6 +3,7 @@ import { Api, CardItem } from "../types.slint";
 import { Art } from "../widgets/art.slint";
 import { Icon, PillButton } from "../widgets/buttons.slint";
 import { ListView } from "../widgets/list.slint";
+import { MenuEntry, PopupMenu } from "../widgets/menu.slint";
 
 export component NavRow inherits Rectangle {
     in property <string> icon;
@@ -47,6 +48,21 @@ export component LibraryRow inherits Rectangle {
     border-radius: 6px;
     background: touch.has-hover ? Theme.hover : transparent;
     animate background { duration: Theme.fast; }
+
+    /// Where the menu was asked for, in window coordinates.
+    property <Point> menu-at;
+
+    menu := PopupMenu {
+        x: root.menu-at.x - root.absolute-position.x;
+        y: root.menu-at.y - root.absolute-position.y;
+        MenuEntry {
+            text: root.item.pinned ? "Unpin" : "Pin to top";
+            icon: Icons.pin;
+            active: root.item.pinned;
+            activated => { Api.card-action(root.item.pinned ? "unpin" : "pin", root.item.kind, root.item.id); }
+        }
+    }
+
     Art {
         x: root.wide ? 8px : (parent.width - self.width) / 2;
         width: 48px;
@@ -68,16 +84,31 @@ export component LibraryRow inherits Rectangle {
             overflow: elide;
         }
 
-        Text {
-            text: root.item.subtitle;
-            font-size: 13px;
-            color: Theme.text-secondary;
-            overflow: elide;
+        HorizontalLayout {
+            spacing: 4px;
+            if root.item.pinned: Icon {
+                y: (parent.height - self.height) / 2;
+                path: Icons.pin;
+                size: 14px;
+                color: Theme.accent;
+            }
+            Text {
+                text: root.item.subtitle;
+                font-size: 13px;
+                color: Theme.text-secondary;
+                overflow: elide;
+            }
         }
     }
     touch := TouchArea {
         mouse-cursor: pointer;
         clicked => { Api.navigate(root.item.kind, root.item.id); }
+        pointer-event(ev) => {
+            if ev.button == PointerEventButton.right && ev.kind == PointerEventKind.up {
+                root.menu-at = { x: self.absolute-position.x + self.mouse-x, y: self.absolute-position.y + self.mouse-y };
+                menu.show();
+            }
+        }
     }
 }
 

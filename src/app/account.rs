@@ -166,7 +166,7 @@ impl App {
             async move { api.library_playlists().await },
             move |app, result| match result {
                 Ok(cards) if app.state.borrow().account == account => {
-                    app.show_library(&cards);
+                    app.show_library(cards.clone());
                     app.spawn(async move { settings::save_library(&cards) }, |_, ()| {});
                 }
                 Ok(_) => {}
@@ -175,14 +175,37 @@ impl App {
         );
     }
 
-    /// The sidebar's playlists, as saved by the last run or freshly loaded.
-    pub(super) fn show_library(self: &Rc<Self>, cards: &[Card]) {
-        let items: Vec<CardItem> = cards.iter().map(|c| card_item(c, images::ROW)).collect();
+    /// The sidebar's playlists, as saved by the last run or freshly loaded,
+    /// in YouTube's order.
+    pub(super) fn show_library(self: &Rc<Self>, cards: Vec<Card>) {
+        self.state.borrow_mut().library = cards;
+        self.list_library();
+    }
+
+    /// Lists the playlists kept, the pinned ones first.
+    pub(super) fn list_library(self: &Rc<Self>) {
+        let (items, art): (Vec<CardItem>, Vec<_>) = {
+            let state = self.state.borrow();
+            let pinned = &state.settings.pinned;
+            pinned_first(&state.library, pinned)
+                .into_iter()
+                .map(|card| {
+                    let item = CardItem {
+                        pinned: pinned.contains(&card.id),
+                        ..card_item(card, images::ROW)
+                    };
+                    // Art the cache already held is in the item.
+                    let art =
+                        (item.art.size().width == 0).then(|| (card.thumb.clone(), item.id.clone()));
+                    (item, art)
+                })
+                .unzip()
+        };
         self.library.set_vec(items);
-        for (i, card) in cards.iter().enumerate() {
+        for (i, art) in art.into_iter().enumerate() {
+            let Some((thumb, id)) = art else { continue };
             // The saved list is replaced by the fresh one while its art loads.
-            let id = SharedString::from(card.id.as_str());
-            self.load_image(card.thumb.clone(), images::ROW, move |app, image| {
+            self.load_image(thumb, images::ROW, move |app, image| {
                 if let Some(mut item) = app.library.row_data(i)
                     && item.id == id
                 {
@@ -274,6 +297,7 @@ impl App {
             state.signed_in = false;
             state.account += 1;
             state.page_cache.clear();
+            state.library.clear();
         }
         settings::remove_account_data();
         self.library.set_vec(Vec::new());
@@ -337,5 +361,45 @@ impl App {
             app.toast("Signed out");
             app.show_fresh(Route::Home);
         });
+    }
+}
+
+/// `cards` with the `pinned` ones first, in the order they were pinned, then
+/// the rest in theirs. A pinned ID not among them is passed over.
+fn pinned_first<'a>(cards: &'a [Card], pinned: &[String]) -> Vec<&'a Card> {
+    let mut sorted: Vec<&Card> = cards.iter().collect();
+    sorted.sort_by_cached_key(|card| {
+        pinned
+            .iter()
+            .position(|id| *id == card.id)
+            .unwrap_or(usize::MAX)
+    });
+    sorted
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::CardKind;
+
+    #[test]
+    fn pinned_playlists_lead_in_the_order_pinned() {
+        let cards: Vec<Card> = ["a", "b", "c", "d"]
+            .map(|id| Card {
+                kind: CardKind::Playlist,
+                id: id.to_owned(),
+                title: String::new(),
+                subtitle: String::new(),
+                thumb: None,
+                color: None,
+                track: None,
+            })
+            .into();
+        let pinned = ["d", "gone", "b"].map(String::from);
+        let order: Vec<&str> = pinned_first(&cards, &pinned)
+            .iter()
+            .map(|c| c.id.as_str())
+            .collect();
+        assert_eq!(order, ["d", "b", "a", "c"]);
     }
 }

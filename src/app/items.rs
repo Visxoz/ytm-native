@@ -54,5 +54,6 @@ pub(super) fn card_item(card: &Card, edge: u32) -> CardItem {
         art: images::cached_or_empty(card.thumb.as_deref(), edge),
         round: card.kind == CardKind::Artist,
         tint,
+        ..Default::default()
     }
 }

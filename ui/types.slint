@@ -21,6 +21,8 @@ export struct CardItem {
     art: image,
     round: bool,
     tint: color,
+    /// Pinned to the top of the sidebar.
+    pinned: bool,
 }
 
 export enum RowKind { greeting, header, title, columns, track, carousel, grid, chips, top }

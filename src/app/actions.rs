@@ -188,11 +188,20 @@ impl App {
         }
     }
 
-    /// An action on a song, album, playlist or artist by its kind and ID,
-    /// from a card's menu or the player bar's.
+    /// A menu action on a song, album, playlist or artist, by its kind and ID.
     pub(super) fn card_action(self: &Rc<Self>, action: &str, kind: &str, id: &str) {
-        if action == "copy-link" {
-            self.copy_link(api::link(kind, id));
+        match action {
+            "copy-link" => self.copy_link(api::link(kind, id)),
+            "pin" | "unpin" => {
+                self.update_settings(|s| {
+                    s.pinned.retain(|p| p != id);
+                    if action == "pin" {
+                        s.pinned.push(id.to_owned());
+                    }
+                });
+                self.list_library();
+            }
+            _ => {}
         }
     }
 

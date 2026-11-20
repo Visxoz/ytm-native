@@ -327,6 +327,8 @@ pub struct Settings {
     pub output_device: Option<OutputDevice>,
     /// The signed-in account's picture, shown at once on the next start.
     pub account_photo: Option<String>,
+    /// Playlist IDs pinned to the top of the sidebar, first pinned first.
+    pub pinned: Vec<String>,
 }
 
 /// Older versions kept `normalise` as on or off, which is Normal or Off.
@@ -419,6 +421,7 @@ impl Default for Settings {
             local_folders: Vec::new(),
             output_device: None,
             account_photo: None,
+            pinned: Vec::new(),
         }
     }
 }

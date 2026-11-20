@@ -40,7 +40,7 @@ use tokio::runtime::Handle;
 
 use crate::{
     AccentChoice, Api as ApiGlobal, AppWindow, CardItem, MiniPlayer, QueueItem, RowItem, Theme,
-    api::{self, Api, Page, Route, Track},
+    api::{self, Api, Card, Page, Route, Track},
     audio::{Player, PlayerEvent, eq},
     downloads::Downloads,
     google_sign_in::GoogleSignIn,
@@ -216,6 +216,8 @@ struct State {
     /// Songs waiting to download; the first is downloading while `downloading`.
     download_queue: VecDeque<Track>,
     downloading: bool,
+    /// The sidebar's playlists in YouTube's order; `list_library` puts the pinned first.
+    library: Vec<Card>,
 }
 
 impl State {
@@ -375,6 +377,7 @@ impl App {
                 downloads: Downloads::load(),
                 download_queue: VecDeque::new(),
                 downloading: false,
+                library: Vec::new(),
             }),
             rows: Rc::new(VecModel::default()),
             library: Rc::new(VecModel::default()),
@@ -812,7 +815,7 @@ impl App {
         self.watch_sign_in();
         if signed_in {
             // Last run's playlists and picture show while fresh ones load.
-            self.show_library(&settings::load_library());
+            self.show_library(settings::load_library());
             let photo = self.state.borrow().settings.account_photo.clone();
             if let Some(url) = photo {
                 self.show_account_photo(url);
