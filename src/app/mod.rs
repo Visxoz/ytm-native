@@ -18,6 +18,7 @@ mod resolve;
 mod scrobble;
 mod session;
 mod smart_shuffle;
+mod soak;
 mod song_version;
 mod updates;
 mod window;

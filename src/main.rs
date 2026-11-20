@@ -302,6 +302,7 @@ fn main() {
 
     let start_app = Rc::clone(&app);
     slint::Timer::single_shot(Duration::ZERO, move || start_app.start());
+    let _soak = app.soak();
 
     // The native window appears some time after the event loop starts.
     let media_app = Rc::clone(&app);

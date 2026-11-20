@@ -489,7 +489,7 @@ impl App {
 
     /// Whether nothing is loaded for the track shown, as after a restart or
     /// once the queue has played out.
-    fn stopped(&self) -> bool {
+    pub(super) fn stopped(&self) -> bool {
         !self.state.borrow().playback.started && !self.ui().get_np_loading()
     }
 
