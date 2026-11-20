@@ -11,6 +11,7 @@ use slint::{SharedString, Timer};
 use super::{
     App, SongVersion, State,
     resolve::{PREMIUM_NO, PREMIUM_YES, premium_dry_run},
+    session::Flush,
 };
 use crate::{
     images,
@@ -459,6 +460,13 @@ impl App {
         self.show_playing(false);
         ui.set_np_loading(false);
         self.report_playback();
+        // Play carries on a song stopped on a dropped connection as the same play.
+        let reopening = {
+            let state = self.state.borrow();
+            let current = state.queue.current();
+            current.is_some_and(|t| state.playback.reopening(&t.id))
+        };
+        self.report_watchtime(if reopening { Flush::Now } else { Flush::Last });
     }
 
     pub(super) fn toggle_play(self: &Rc<Self>) {
@@ -483,6 +491,9 @@ impl App {
         self.player.set_paused(paused);
         self.show_playing(!paused);
         self.report_playback();
+        if paused {
+            self.report_watchtime(Flush::Now);
+        }
     }
 
     pub(super) fn seek_to(self: &Rc<Self>, secs: f64) {

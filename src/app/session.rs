@@ -6,7 +6,10 @@ use std::{
 use slint::TimerMode;
 
 use super::{App, State, TICK};
-use crate::{api::Page, settings};
+use crate::{
+    api::{Page, Watched, Watchtime},
+    settings,
+};
 
 /// How long after the last change the session and history are written.
 /// Skipping through songs then costs one write, after the sound starts.
@@ -24,6 +27,44 @@ pub(super) struct Listening {
     /// The position at the last tick, and when that was, so only time
     /// played through counts, not stalls or seeks.
     last_tick: Option<(f64, Instant)>,
+    /// Set while the play is reported to YouTube.
+    watch: Option<Watch>,
+}
+
+/// A play's watch-time pings.
+pub(super) struct Watch {
+    /// Signing in or out since stops them.
+    account: u64,
+    /// Also tells this play from a replay of the same song.
+    started: Instant,
+    /// Where they go, once the play's report is answered.
+    ping: Option<Watchtime>,
+    sent: usize,
+    /// Since `started`.
+    next_at: Duration,
+    /// Stretches heard since the last ping, in song seconds.
+    segments: Vec<(f64, f64)>,
+    /// The end of the last stretch heard.
+    position: f64,
+}
+
+#[derive(PartialEq)]
+pub(super) enum Flush {
+    /// On the web player's schedule.
+    Due,
+    /// On pausing.
+    Now,
+    /// The play ended.
+    Last,
+}
+
+/// Adds a stretch played through, joining the last one it carries on from.
+fn add_stretch(segments: &mut Vec<(f64, f64)>, from: f64, to: f64) {
+    match segments.last_mut() {
+        // `from` is the last tick's position, the very float that ended it.
+        Some(last) if last.1 == from => last.1 = to,
+        _ => segments.push((from, to)),
+    }
 }
 
 /// What a tick adds to the time heard: forward movement no greater than the
@@ -49,26 +90,48 @@ fn play_counts(heard: Duration, length: Duration) -> bool {
 impl App {
     /// Run as the track's sound starts: the one place a play is recorded.
     pub(super) fn record_play(self: &Rc<Self>) {
-        {
+        // Gapless, repeat and restarting start a play without stopping.
+        self.report_watchtime(Flush::Last);
+        let reported = {
             let mut state = self.state.borrow_mut();
             let State {
                 history,
                 queue,
                 playback,
+                signed_in,
+                settings,
+                account,
                 ..
             } = &mut *state;
             let Some(track) = queue.current() else {
                 return;
             };
             history.record(track);
+            // As YouTube Music does, so the account's recommendations and
+            // Listen again follow what plays here too.
+            let reported = *signed_in && settings.youtube_history && !track.is_local();
+            let watch = reported.then(|| Watch {
+                account: *account,
+                started: Instant::now(),
+                ping: None,
+                sent: 0,
+                next_at: Duration::ZERO,
+                segments: Vec::new(),
+                position: 0.0,
+            });
+            let reported = watch.as_ref().map(|w| (track.id.clone(), w.started));
             playback.listening = Listening {
                 unheard: Some(track.id.clone()),
+                watch,
                 ..Listening::default()
             };
-        }
+            reported
+        };
         self.persist_soon();
         self.scrobble_started();
-        self.report_play();
+        if let Some((id, started)) = reported {
+            self.report_play(id, started);
+        }
     }
 
     /// Counts what was heard since the last tick, letting the play into
@@ -87,7 +150,12 @@ impl App {
             let now = Instant::now();
             if let Some((last, at)) = listening.last_tick.replace((position, now)) {
                 let speed = f64::from(settings.speed);
-                listening.heard += played_through(position - last, now - at, speed);
+                let moved = played_through(position - last, now - at, speed);
+                listening.heard += moved;
+                if let Some(watch) = listening.watch.as_mut().filter(|_| !moved.is_zero()) {
+                    add_stretch(&mut watch.segments, last, position);
+                    watch.position = position;
+                }
             }
             let heard = listening.heard;
             if let Some(id) = listening.unheard.take_if(|_| play_counts(heard, length)) {
@@ -96,27 +164,92 @@ impl App {
             (heard, length)
         };
         self.scrobble_heard(heard, length);
+        self.report_watchtime(Flush::Due);
     }
 
-    /// As YouTube Music does, so the account's recommendations and Listen
-    /// again follow what plays here too.
-    fn report_play(self: &Rc<Self>) {
-        let id = {
-            let state = self.state.borrow();
-            if !(state.signed_in && state.settings.youtube_history) {
-                return;
-            }
-            let Some(track) = state.queue.current().filter(|t| !t.is_local()) else {
+    fn report_play(self: &Rc<Self>, id: String, started: Instant) {
+        let api = self.api.clone();
+        self.spawn(
+            async move { api.report_play(&id).await },
+            move |app, result| {
+                let listening = &mut app.state.borrow_mut().playback.listening;
+                let Some(watch) = listening.watch.as_mut().filter(|w| w.started == started) else {
+                    return;
+                };
+                match result {
+                    Ok(Some(ping)) => {
+                        watch.next_at = ping.due(0, Duration::ZERO);
+                        watch.ping = Some(ping);
+                    }
+                    Ok(None) => listening.watch = None,
+                    Err(e) => {
+                        log::warn!("could not add a play to the YouTube history: {e}");
+                        listening.watch = None;
+                    }
+                }
+            },
+        );
+    }
+
+    /// Tells YouTube how much of the play was heard since the last ping, as
+    /// the web player does. shortcut: quitting mid-song loses what was heard
+    /// since the last ping, as the runtime stops with the window; flush from
+    /// `persist` should that matter.
+    pub(super) fn report_watchtime(self: &Rc<Self>, flush: Flush) {
+        let paused = self.player.is_paused();
+        let sending = {
+            let mut state = self.state.borrow_mut();
+            let reporting = state.signed_in && state.settings.youtube_history;
+            let account = state.account;
+            let listening = &mut state.playback.listening;
+            let Some(watch) = listening.watch.as_mut() else {
                 return;
             };
-            track.id.clone()
+            // An old play's URL never goes out with another account's cookie.
+            if !reporting || watch.account != account {
+                listening.watch = None;
+                return;
+            }
+            let elapsed = watch.started.elapsed();
+            let last = flush == Flush::Last;
+            let heard = !watch.segments.is_empty();
+            let due = match flush {
+                Flush::Due => heard && elapsed >= watch.next_at,
+                Flush::Now => heard,
+                Flush::Last => true,
+            };
+            let url = match &watch.ping {
+                Some(ping) if due => {
+                    let watched = Watched {
+                        segments: std::mem::take(&mut watch.segments),
+                        position: watch.position,
+                        elapsed,
+                        paused,
+                        last,
+                    };
+                    watch.sent += 1;
+                    watch.next_at = ping.due(watch.sent, elapsed);
+                    Some(ping.url(&watched))
+                }
+                _ => None,
+            };
+            if last {
+                listening.watch = None;
+            }
+            url
+        };
+        let Some(url) = sending else {
+            return;
         };
         let api = self.api.clone();
-        self.spawn(async move { api.report_play(&id).await }, |_, result| {
-            if let Err(e) = result {
-                log::warn!("could not add a play to the YouTube history: {e}");
-            }
-        });
+        self.spawn(
+            async move { api.report_watchtime(url).await },
+            |_, result| {
+                if let Err(e) = result {
+                    log::debug!("could not report the watch time: {e}");
+                }
+            },
+        );
     }
 
     pub(super) fn history_page(&self) -> Option<Page> {
@@ -271,5 +404,15 @@ mod tests {
         assert!(play_counts(secs(10), secs(20)), "half a short song");
         assert!(!play_counts(secs(0), Duration::ZERO), "an unknown length");
         assert!(play_counts(secs(30), Duration::ZERO));
+    }
+
+    #[test]
+    fn joins_stretches_played_on_and_splits_them_at_a_seek() {
+        let mut segments = Vec::new();
+        add_stretch(&mut segments, 0.0, 0.25);
+        add_stretch(&mut segments, 0.25, 0.5);
+        assert_eq!(segments, [(0.0, 0.5)], "played on");
+        add_stretch(&mut segments, 60.0, 60.25);
+        assert_eq!(segments, [(0.0, 0.5), (60.0, 60.25)], "after a seek");
     }
 }
