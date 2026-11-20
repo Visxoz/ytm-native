@@ -192,10 +192,12 @@ export component SettingsDialog inherits Dialog {
     }
 
     title: "Settings";
+    // Wide enough for the six tabs on one line.
+    dialog-width: 580px;
     open: root.settings-open;
     close => { root.settings-open = false; }
     PillGroup {
-        labels: ["Playback", "Library", "Appearance", "Account", "About"];
+        labels: ["Playback", "Sound", "Library", "Appearance", "Account", "About"];
         current: root.tab;
         picked(i) => { root.tab = i; }
     }
@@ -216,6 +218,34 @@ export component SettingsDialog inherits Dialog {
         }
 
         SettingRow {
+            label: "Speed";
+            detail: "Faster or slower, the pitch moving with it as on a record.";
+            ChoiceButton {
+                text: root.speed >= 0 ? root.speeds[root.speed] : "Custom";
+                choices: root.speeds;
+                current: root.speed;
+                menu-width: 120px;
+                picked(i) => { root.set-speed(i); }
+            }
+        }
+
+        ToggleRow {
+            label: "Crossfade";
+            detail: "Fades each track into the next. Tracks of an album played in order still run straight on.";
+            checked: root.crossfade;
+            toggled(v) => { root.set-crossfade(v); }
+        }
+
+        ToggleRow {
+            label: "Autoplay";
+            detail: "Keeps playing similar music when the queue ends.";
+            checked: root.autoplay;
+            toggled(v) => { root.set-autoplay(v); }
+        }
+    }
+
+    if root.tab == 1: Tab {
+        SettingRow {
             label: "Output device";
             detail: root.output-detail;
             ChoiceButton {
@@ -226,18 +256,6 @@ export component SettingsDialog inherits Dialog {
                 // Listed again, as a device may have been plugged in since.
                 opening => { root.list-output-devices(); }
                 picked(i) => { root.set-output-device(i); }
-            }
-        }
-
-        SettingRow {
-            label: "Speed";
-            detail: "Faster or slower, the pitch moving with it as on a record.";
-            ChoiceButton {
-                text: root.speed >= 0 ? root.speeds[root.speed] : "Custom";
-                choices: root.speeds;
-                current: root.speed;
-                menu-width: 120px;
-                picked(i) => { root.set-speed(i); }
             }
         }
 
@@ -255,13 +273,6 @@ export component SettingsDialog inherits Dialog {
             }
         }
 
-        ToggleRow {
-            label: "Crossfade";
-            detail: "Fades each track into the next. Tracks of an album played in order still run straight on.";
-            checked: root.crossfade;
-            toggled(v) => { root.set-crossfade(v); }
-        }
-
         SettingRow {
             label: "Equaliser";
             detail: !root.equaliser ? "Off" : root.eq-preset >= 0 ? root.eq-presets[root.eq-preset] : "Custom";
@@ -275,16 +286,9 @@ export component SettingsDialog inherits Dialog {
                 }
             }
         }
-
-        ToggleRow {
-            label: "Autoplay";
-            detail: "Keeps playing similar music when the queue ends.";
-            checked: root.autoplay;
-            toggled(v) => { root.set-autoplay(v); }
-        }
     }
 
-    if root.tab == 1: Tab {
+    if root.tab == 2: Tab {
         SettingRow {
             label: "Local files";
             detail: root.local-folders.length == 0
@@ -323,7 +327,7 @@ export component SettingsDialog inherits Dialog {
         }
     }
 
-    if root.tab == 2: Tab {
+    if root.tab == 3: Tab {
         SettingRow {
             label: "Theme";
             PillGroup {
@@ -359,7 +363,7 @@ export component SettingsDialog inherits Dialog {
         }
     }
 
-    if root.tab == 3: Tab {
+    if root.tab == 4: Tab {
         SettingRow {
             label: Api.signed-in ? "Signed in" : "Not signed in";
             detail: Api.signed-in ? "Your library and history come from your YouTube account." : "Sign in to see your library and history.";
@@ -420,7 +424,7 @@ export component SettingsDialog inherits Dialog {
         }
     }
 
-    if root.tab == 4: Tab {
+    if root.tab == 5: Tab {
         SettingRow {
             label: "Proxy";
             detail: root.proxy-error != "" ? root.proxy-error : root.proxy-detail;
