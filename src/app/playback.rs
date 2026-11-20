@@ -63,7 +63,8 @@ impl App {
             }
             playback.generation
         };
-        // A replay keeps the download it plays again; the load replaces it.
+        // A whole download played again is kept; any other is cancelled now,
+        // so a decoder blocked on it wakes.
         let held = self.held_stream(&track.id);
         if held.is_some() {
             self.player.halt();
@@ -105,9 +106,7 @@ impl App {
         let start_at = self.resume_position();
         self.player
             .load(self.stream_spec(id, stream.clone(), start_at));
-        let choice = self.choice(id);
-        self.state.borrow_mut().playback.playing =
-            Some((id.to_owned(), stream, resolved_at, choice));
+        self.state.borrow_mut().playback.playing = Some((id.to_owned(), stream, resolved_at));
     }
 
     /// Opens the song again where it stopped, a few times while the

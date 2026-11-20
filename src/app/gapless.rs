@@ -105,7 +105,6 @@ impl App {
             self.start_current();
             return;
         };
-        let choice = self.choice(&id);
         {
             let mut state = self.state.borrow_mut();
             let playback = &mut state.playback;
@@ -121,7 +120,7 @@ impl App {
         self.present(&track, 0.0);
         self.record_play();
         self.show_stream(&stream);
-        self.state.borrow_mut().playback.playing = Some((id, stream, resolved_at, choice));
+        self.state.borrow_mut().playback.playing = Some((id, stream, resolved_at));
         self.ui().set_np_loading(false);
         self.update_media_state();
         self.extend_with_radio_if_ending();

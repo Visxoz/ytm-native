@@ -59,7 +59,7 @@ pub struct Download {
     changed: Condvar,
     /// A file read in place, set before `done`.
     file: OnceLock<File>,
-    /// The URL it started from, which a replay asks for again; empty for a file.
+    /// The URL it started from, which a replay is matched on; empty for a file.
     url: String,
 }
 
@@ -148,7 +148,7 @@ impl Download {
     /// there. A cancelled download is emptied, though `run` marks it done.
     pub fn whole(&self, url: &str) -> bool {
         let state = self.state.lock().unwrap();
-        self.url == url && state.done && !state.cancelled
+        !self.url.is_empty() && self.url == url && state.done && !state.cancelled
     }
 
     /// Whether it gave up on a connection that stopped answering, rather

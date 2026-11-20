@@ -465,39 +465,28 @@ impl Resolver {
     }
 }
 
-/// What decides the stream a song resolves to: whether Premium is asked for
-/// first, and the bitrate cap.
-pub(super) type Choice = (bool, Option<u64>);
-
 impl App {
-    pub(super) fn choice(&self, video_id: &str) -> Choice {
+    fn resolver(&self, video_id: String) -> Resolver {
         let state = self.state.borrow();
         let want_premium = state.signed_in
             && state.settings.quality == Quality::High
-            && state.playback.force_free.as_deref() != Some(video_id);
-        (want_premium, state.settings.quality.max_kbps())
-    }
-
-    fn resolver(&self, video_id: String) -> Resolver {
-        let (want_premium, max_kbps) = self.choice(&video_id);
+            && state.playback.force_free.as_deref() != Some(video_id.as_str());
         Resolver {
             api: self.api.clone(),
             premium: Arc::clone(&self.premium),
-            reopening: self.state.borrow().playback.reopening(&video_id),
+            reopening: state.playback.reopening(&video_id),
             video_id,
             want_premium,
-            max_kbps,
+            max_kbps: state.settings.quality.max_kbps(),
         }
     }
 
     /// The playing song's stream and when it was resolved, while the player
-    /// holds all of it and `video_id` would resolve the same way, so a replay
-    /// plays from memory (its URL may have expired).
+    /// holds all of it, so a replay plays from memory (its URL may have expired).
     pub(super) fn held_stream(&self, video_id: &str) -> Option<(ResolvedStream, Instant)> {
         let state = self.state.borrow();
-        let (id, stream, at, choice) = state.playback.playing.as_ref()?;
-        (id == video_id && *choice == self.choice(video_id) && self.player.holds(&stream.url))
-            .then(|| (stream.clone(), *at))
+        let (id, stream, at) = state.playback.playing.as_ref()?;
+        (id == video_id && self.player.holds(&stream.url)).then(|| (stream.clone(), *at))
     }
 
     /// A downloaded or local file plays from there, online or not, ahead

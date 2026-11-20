@@ -31,8 +31,11 @@ pub const AVATAR: u32 = 26;
 /// Decoded artwork kept for reuse, in bytes. Images still on screen stay
 /// alive regardless, as Slint holds its own reference.
 const CACHE_BUDGET: usize = 32 * 1024 * 1024;
-/// Covers and wide banners (and, at high DPI, headers and cards), dropped
-/// once unused for `LARGE_UNUSED_FOR` even under the budget.
+/// What eviction frees down to, so a full cache sorts once per few hundred
+/// thumbnails rather than on every one.
+const CACHE_LOW_WATER: usize = CACHE_BUDGET / 8 * 7;
+/// Covers, very wide banners, and headers from 225% scale (cards from 300%):
+/// dropped once unused for `LARGE_UNUSED_FOR`, even under the budget.
 const LARGE: usize = 1024 * 1024;
 const LARGE_UNUSED_FOR: Duration = Duration::from_secs(5 * 60);
 /// Thumbnails are a few KB each and share HTTP/2 connections, so a page's
@@ -86,15 +89,21 @@ impl Cache {
         if let Some(old) = self.images.insert(key, entry) {
             self.bytes -= old.bytes;
         }
-        // Checked on insert, which a new song's art usually brings, so a cover
-        // opened once doesn't pin megabytes for a days-long session.
+        // On insert, which each new song's art brings, so a cover opened once
+        // doesn't pin megabytes for days.
         self.evict(|e| e.bytes >= LARGE && now.duration_since(e.used) > LARGE_UNUSED_FOR);
-        // Searched only when evicting, so a hit (per row on scroll) stays one write.
-        while self.bytes > CACHE_BUDGET {
-            let Some(oldest) = self.images.values().map(|e| e.used).min() else {
-                break;
-            };
-            self.evict(|e| e.used == oldest);
+        // Sorted only when over budget, so a hit (per row on scroll) stays one write.
+        if self.bytes > CACHE_BUDGET {
+            let mut ages: Vec<_> = self.images.values().map(|e| (e.used, e.bytes)).collect();
+            ages.sort_unstable_by_key(|&(used, _)| used);
+            let mut excess = self.bytes - CACHE_LOW_WATER;
+            let cutoff = ages.into_iter().find_map(|(used, bytes)| {
+                excess = excess.saturating_sub(bytes);
+                (excess == 0).then_some(used)
+            });
+            if let Some(cutoff) = cutoff {
+                self.evict(|e| e.used <= cutoff);
+            }
         }
     }
 
@@ -144,22 +153,12 @@ pub fn cached_or_empty(url: Option<&str>, edge: u32) -> Image {
 
 /// A colour from the artwork for backgrounds behind it, once loaded.
 pub fn accent(url: &str, edge: u32) -> Option<Color> {
-    let key = key(url, edge);
-    CACHE.with(|c| {
-        let mut cache = c.borrow_mut();
-        cache.used(&key, Instant::now());
-        cache.accents.get(&key).copied()
-    })
+    CACHE.with(|c| c.borrow().accents.get(&key(url, edge)).copied())
 }
 
 /// The player artwork's colours where they sit in it, once loaded.
 pub fn backdrop(url: &str) -> Option<Image> {
-    let key = key(url, PLAYER);
-    CACHE.with(|c| {
-        let mut cache = c.borrow_mut();
-        cache.used(&key, Instant::now());
-        cache.backdrops.get(&key).cloned()
-    })
+    CACHE.with(|c| c.borrow().backdrops.get(&key(url, PLAYER)).cloned())
 }
 
 fn key(url: &str, edge: u32) -> String {
@@ -654,8 +653,13 @@ mod tests {
         cache.insert("8".into(), blank(1024), at(9));
         assert!(cache.images.contains_key("0"), "used most recently but one");
         assert!(!cache.images.contains_key("1"), "the least recently used");
+        assert!(
+            !cache.images.contains_key("2"),
+            "down to the low-water mark"
+        );
+        assert!(cache.images.contains_key("3"));
         assert!(!cache.accents.contains_key("1") && !cache.backdrops.contains_key("1"));
-        assert_eq!(cache.bytes, CACHE_BUDGET);
+        assert_eq!(cache.bytes, CACHE_LOW_WATER);
     }
 
     #[test]

@@ -131,11 +131,12 @@ impl App {
         on!(on_set_quality, |app, index| {
             let quality = Quality::from_index(index);
             app.update_settings(|s| s.set_quality(quality));
-            // Streams resolved ahead at the old quality are dropped; the
+            // Streams resolved at the old quality are dropped, though the
             // playing song carries on as it is.
             {
                 let playback = &mut app.state.borrow_mut().playback;
                 playback.prefetched.clear();
+                playback.playing = None;
                 playback.forget_queued();
             }
             app.player.clear_next();

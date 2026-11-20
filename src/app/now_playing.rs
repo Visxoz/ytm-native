@@ -141,7 +141,7 @@ impl App {
             return;
         };
         if !ui.get_full_player() {
-            // Shown until now, so counted as used: reopening finds it cached.
+            // Closing counts as a use, so reopening soon finds it cached.
             if let Some(url) = &url {
                 images::cached(url, images::COVER);
             }
