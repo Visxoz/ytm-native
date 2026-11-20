@@ -230,6 +230,7 @@ fn main() {
         .enable_all()
         .build()
         .expect("Tokio runtime starts");
+    runtime.spawn_blocking(images::prune_disk);
 
     let api = match api::Api::new() {
         Ok(api) => api,
