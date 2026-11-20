@@ -776,6 +776,12 @@ impl App {
         // signed-in answer that comes back signed out has the cookie checked.
         self.watch_sign_in();
         if signed_in {
+            // Last run's playlists and picture show while fresh ones load.
+            self.show_library(&settings::load_library());
+            let photo = self.state.borrow().settings.account_photo.clone();
+            if let Some(url) = photo {
+                self.show_account_photo(url);
+            }
             self.load_library();
             if let Some(id) = self.playing_id() {
                 self.load_rating(id);

@@ -4,7 +4,10 @@ use slint::{ComponentHandle, Image, Model, SharedString, Timer, TimerMode};
 
 use super::{App, items::card_item};
 use crate::{
-    Api as ApiGlobal, CardItem, api::Route, google_sign_in::GoogleSignIn, images, settings,
+    Api as ApiGlobal, CardItem,
+    api::{Card, Route},
+    google_sign_in::GoogleSignIn,
+    images, settings,
 };
 
 /// The least time between cookie checks, after one that didn't find the
@@ -36,13 +39,14 @@ impl App {
                             state.page_cache.clear();
                         }
                         // It may be another account's.
-                        settings::remove_home();
+                        settings::remove_account_data();
                         app.load_library();
                         app.load_account_photo();
                         app.premium.reset();
                         app.update_settings(|s| {
                             s.premium_account = false;
                             s.no_premium = false;
+                            s.account_photo = None;
                         });
                         app.warm_premium();
                         ui.global::<ApiGlobal>().set_signed_in(true);
@@ -156,25 +160,37 @@ impl App {
 
     pub(super) fn load_library(self: &Rc<Self>) {
         let api = self.api.clone();
+        // Signing in or out meanwhile makes the playlists another account's.
+        let account = self.state.borrow().account;
         self.spawn(
             async move { api.library_playlists().await },
-            |app, result| match result {
-                Ok(cards) => {
-                    let items: Vec<CardItem> =
-                        cards.iter().map(|c| card_item(c, images::ROW)).collect();
-                    app.library.set_vec(items);
-                    for (i, url) in cards.into_iter().map(|c| c.thumb).enumerate() {
-                        app.load_image(url, images::ROW, move |app, image| {
-                            if let Some(mut item) = app.library.row_data(i) {
-                                item.art = image;
-                                app.library.set_row_data(i, item);
-                            }
-                        });
-                    }
+            move |app, result| match result {
+                Ok(cards) if app.state.borrow().account == account => {
+                    app.show_library(&cards);
+                    app.spawn(async move { settings::save_library(&cards) }, |_, ()| {});
                 }
+                Ok(_) => {}
                 Err(e) => log::warn!("{e}"),
             },
         );
+    }
+
+    /// The sidebar's playlists, as saved by the last run or freshly loaded.
+    pub(super) fn show_library(self: &Rc<Self>, cards: &[Card]) {
+        let items: Vec<CardItem> = cards.iter().map(|c| card_item(c, images::ROW)).collect();
+        self.library.set_vec(items);
+        for (i, card) in cards.iter().enumerate() {
+            // The saved list is replaced by the fresh one while its art loads.
+            let id = SharedString::from(card.id.as_str());
+            self.load_image(card.thumb.clone(), images::ROW, move |app, image| {
+                if let Some(mut item) = app.library.row_data(i)
+                    && item.id == id
+                {
+                    item.art = image;
+                    app.library.set_row_data(i, item);
+                }
+            });
+        }
     }
 
     /// Waits for YouTube to answer a signed-in request as signed out, then
@@ -259,7 +275,7 @@ impl App {
             state.account += 1;
             state.page_cache.clear();
         }
-        settings::remove_home();
+        settings::remove_account_data();
         self.library.set_vec(Vec::new());
         let ui = self.ui();
         ui.global::<ApiGlobal>().set_signed_in(false);
@@ -268,6 +284,7 @@ impl App {
         self.update_settings(|s| {
             s.premium_account = false;
             s.no_premium = false;
+            s.account_photo = None;
         });
     }
 
@@ -279,16 +296,27 @@ impl App {
             async move { api.account_photo().await },
             move |app, result| match result {
                 Ok(Some(url)) if app.state.borrow().account == account => {
-                    app.load_image(Some(url), images::AVATAR, move |app, image| {
-                        if app.state.borrow().account == account {
-                            app.ui().set_account_photo(image);
-                        }
-                    });
+                    // Kept for the next start, written only as it changes.
+                    if app.state.borrow().settings.account_photo.as_ref() != Some(&url) {
+                        app.update_settings(|s| s.account_photo = Some(url.clone()));
+                    }
+                    app.show_account_photo(url);
                 }
                 Ok(_) => {}
                 Err(e) => log::warn!("could not load the account's picture: {e}"),
             },
         );
+    }
+
+    pub(super) fn show_account_photo(self: &Rc<Self>, url: String) {
+        // Only while it is still the account's latest picture; signing in or
+        // out clears it, and the saved one may load after a fresh one.
+        let shown = url.clone();
+        self.load_image(Some(url), images::AVATAR, move |app, image| {
+            if app.state.borrow().settings.account_photo.as_ref() == Some(&shown) {
+                app.ui().set_account_photo(image);
+            }
+        });
     }
 
     /// Keeps the session from going stale or being revoked.

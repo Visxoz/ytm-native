@@ -312,6 +312,8 @@ pub struct Settings {
     pub local_folders: Vec<PathBuf>,
     /// The output device chosen, or `None` to follow Windows' default.
     pub output_device: Option<OutputDevice>,
+    /// The signed-in account's picture, shown at once on the next start.
+    pub account_photo: Option<String>,
 }
 
 /// An output device by cpal's ID, with its name for while it is unplugged.
@@ -351,6 +353,7 @@ impl Default for Settings {
             mini_position: None,
             local_folders: Vec::new(),
             output_device: None,
+            account_photo: None,
         }
     }
 }
@@ -476,11 +479,25 @@ pub fn save_home(sections: &[crate::api::Section]) {
     save_json(&home_path(), &sections, "the home feed");
 }
 
-/// Drops the saved feed and visitor ID, which belong to the account signed in
-/// when they were saved.
-pub fn remove_home() {
+/// Drops the saved feed, sidebar and visitor ID, which belong to the account
+/// signed in when they were saved.
+pub fn remove_account_data() {
     let _ = std::fs::remove_file(home_path());
+    let _ = std::fs::remove_file(library_path());
     let _ = std::fs::remove_file(visitor_path());
+}
+
+fn library_path() -> PathBuf {
+    data_dir().join("library.json")
+}
+
+/// The sidebar's playlists as they last loaded, shown at once on the next start.
+pub fn load_library() -> Vec<crate::api::Card> {
+    read_json(&library_path()).unwrap_or_default()
+}
+
+pub fn save_library(cards: &[crate::api::Card]) {
+    save_json(&library_path(), &cards, "the sidebar's playlists");
 }
 
 /// Each run saves a fresh visitor ID, so only a copy left closed this long
