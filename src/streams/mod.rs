@@ -605,7 +605,7 @@ mod tests {
                     Err(e) => failures.push(format!("{}: {e}", client.name)),
                 }
             }
-            match premium::load_player().await {
+            match premium::load_current().await {
                 Ok(player) => eprintln!("player {}: trims and solves", player.id),
                 Err(e) => failures.push(format!("player: {e}")),
             }

@@ -65,10 +65,19 @@ async fn text(url: &str) -> Result<String, String> {
         .map_err(|e| e.to_string())
 }
 
-/// The cut-down current player, from the cache unless YouTube updated it.
-pub async fn load_player() -> Result<Player, String> {
+/// YouTube's current player version.
+pub async fn current_version() -> Result<String, String> {
     let iframe = text(IFRAME_API).await?;
-    let id = player_id(&iframe).ok_or("could not find the player version")?;
+    player_id(&iframe).ok_or_else(|| "could not find the player version".into())
+}
+
+/// The cut-down current player.
+pub async fn load_current() -> Result<Player, String> {
+    load_player(current_version().await?).await
+}
+
+/// The cut-down player version `id`, from the cache when it holds that one.
+pub async fn load_player(id: String) -> Result<Player, String> {
     if let Some(cached) = std::fs::read(cache_path())
         .ok()
         .and_then(|bytes| serde_json::from_slice::<Player>(&bytes).ok())

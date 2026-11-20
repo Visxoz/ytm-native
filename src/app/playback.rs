@@ -181,6 +181,7 @@ impl App {
             }
         };
         if let Some((id, carry_on)) = retry_free {
+            self.premium.suspect_player();
             premium::diag(format!(
                 "{id}: Premium stream failed to play ({error}); retrying the free stream"
             ));

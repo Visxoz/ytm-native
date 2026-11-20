@@ -6,7 +6,7 @@ use std::{
     rc::Rc,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicU8, Ordering},
+        atomic::{AtomicBool, AtomicU8, Ordering},
     },
     time::{Duration, Instant},
 };
@@ -29,15 +29,23 @@ const NOT_PREMIUM_AFTER: u8 = 3;
 /// The same for an account known to have Premium: only a long run of
 /// uploads reaches it, and a lapsed subscription soon does.
 const LAPSED_AFTER: u8 = 20;
-/// Cool-off after the player fails to prepare or Premium keeps failing, and
-/// between background checks of an account taken as without Premium.
+/// Cool-off after the player fails to prepare or Premium keeps failing,
+/// between background checks of an account taken as without Premium, and
+/// before a failing Premium stream has the player checked again.
 const PREMIUM_BACKOFF: Duration = Duration::from_secs(10 * 60);
 const PREMIUM_MAX_ERRORS: u8 = 3;
+/// How often the held player is checked against YouTube's current one.
+const PLAYER_RECHECK: Duration = Duration::from_secs(60 * 60);
 
 /// Premium audio state shared with background tasks.
 pub(super) struct PremiumShared {
-    /// The cut-down player script, loaded once per session.
+    /// The cut-down player script, swapped when YouTube moves to a new one.
     player: tokio::sync::Mutex<Option<Arc<premium::Player>>>,
+    /// When the held player was loaded or last checked.
+    player_checked: Mutex<Instant>,
+    /// A Premium stream failed since the last check, which an outdated
+    /// player can cause.
+    player_suspect: AtomicBool,
     status: AtomicU8,
     /// Songs in a row that offered no Premium formats.
     misses: AtomicU8,
@@ -63,6 +71,8 @@ impl PremiumShared {
         };
         Self {
             player: tokio::sync::Mutex::new(None),
+            player_checked: Mutex::new(Instant::now()),
+            player_suspect: AtomicBool::new(false),
             status: AtomicU8::new(status),
             misses: AtomicU8::new(0),
             errors: AtomicU8::new(0),
@@ -130,7 +140,29 @@ impl PremiumShared {
         }
     }
 
+    /// Whether the held player is due a check against YouTube's current
+    /// one, hourly or sooner after a Premium failure, claiming it so only
+    /// one runs.
+    fn take_player_check(&self, now: Instant) -> bool {
+        let mut checked = self.player_checked.lock().unwrap();
+        let age = now.saturating_duration_since(*checked);
+        if age < PLAYER_RECHECK
+            && !(age >= PREMIUM_BACKOFF && self.player_suspect.load(Ordering::Relaxed))
+        {
+            return false;
+        }
+        *checked = now;
+        self.player_suspect.store(false, Ordering::Relaxed);
+        true
+    }
+
+    /// A Premium stream failed, so check the player sooner.
+    pub(super) fn suspect_player(&self) {
+        self.player_suspect.store(true, Ordering::Relaxed);
+    }
+
     fn record_error(&self) {
+        self.suspect_player();
         if self.errors.fetch_add(1, Ordering::Relaxed) + 1 >= PREMIUM_MAX_ERRORS {
             self.errors.store(0, Ordering::Relaxed);
             *self.paused_until.lock().unwrap() = Some(Instant::now() + PREMIUM_BACKOFF);
@@ -144,9 +176,19 @@ pub(super) fn premium_dry_run() -> bool {
     std::env::var_os("YTM_PREMIUM_DRYRUN").is_some()
 }
 
-async fn premium_player(shared: &PremiumShared) -> Result<Arc<premium::Player>, String> {
+/// The held player, checked behind the song when due, as songs a running
+/// session solves with an old one start failing once YouTube moves on.
+async fn premium_player(shared: &Arc<PremiumShared>) -> Result<Arc<premium::Player>, String> {
     let mut slot = shared.player.lock().await;
     if let Some(player) = slot.as_ref() {
+        if shared.take_player_check(Instant::now()) {
+            let (shared, held) = (Arc::clone(shared), Arc::clone(player));
+            tokio::spawn(async move {
+                if let Err(e) = recheck_player(&shared, &held).await {
+                    premium::diag(format!("could not check the player: {e}"));
+                }
+            });
+        }
         return Ok(Arc::clone(player));
     }
     if shared
@@ -157,10 +199,11 @@ async fn premium_player(shared: &PremiumShared) -> Result<Arc<premium::Player>, 
     {
         return Err("waiting before preparing the player again".into());
     }
-    match premium::load_player().await {
+    match premium::load_current().await {
         Ok(player) => {
             let player = Arc::new(player);
             *slot = Some(Arc::clone(&player));
+            *shared.player_checked.lock().unwrap() = Instant::now();
             Ok(player)
         }
         Err(e) => {
@@ -170,11 +213,23 @@ async fn premium_player(shared: &PremiumShared) -> Result<Arc<premium::Player>, 
     }
 }
 
+/// Swaps in YouTube's current player should it have moved on from `held`.
+/// Songs already resolving keep the one they took.
+async fn recheck_player(shared: &PremiumShared, held: &premium::Player) -> Result<(), String> {
+    let id = premium::current_version().await?;
+    if id != held.id {
+        let player = premium::load_player(id).await?;
+        premium::diag(format!("player {} replaces {}", player.id, held.id));
+        *shared.player.lock().await = Some(Arc::new(player));
+    }
+    Ok(())
+}
+
 /// The web client's stream for `video_id` through the Premium path's
 /// solver, preparing the player first: a Premium one, or with `any_format`
 /// the best there is.
 async fn solved_stream(
-    shared: &PremiumShared,
+    shared: &Arc<PremiumShared>,
     video_id: &str,
     cookie: &str,
     visitor: &str,
@@ -200,7 +255,7 @@ async fn solved_stream(
 /// The best stream the web client has, through the Premium path's solver,
 /// for when no client hands out plain URLs.
 async fn web_fallback(
-    shared: &PremiumShared,
+    shared: &Arc<PremiumShared>,
     video_id: &str,
     cookie: &str,
     visitor: &str,
@@ -345,8 +400,8 @@ impl Resolver {
 
     /// A fresh URL for the same file. A free stream, web-client ones too, is
     /// asked of the plain-URL clients in format `itag`, so one googlevideo
-    /// refuses still plays. Counts nothing towards the Premium state, as the
-    /// song already counted.
+    /// refuses still plays. Counts nothing towards the Premium counters, as
+    /// the song already counted, but has the player checked sooner.
     async fn refresh(&self, was_premium: bool, itag: u32) -> Result<ResolvedStream, String> {
         let video_id = self.video_id.as_str();
         premium::diag(format!(
@@ -356,6 +411,7 @@ impl Resolver {
         if !was_premium {
             return self.free(&visitor, Some(itag)).await;
         }
+        self.premium.suspect_player();
         let cookie = self.api.cookie().ok_or("signed out")?;
         solved_stream(&self.premium, video_id, &cookie, &visitor, false, None).await
     }
@@ -570,6 +626,35 @@ mod tests {
         assert!(!shared.skipped());
         shared.record_miss();
         assert_eq!(shared.status(), PREMIUM_YES);
+    }
+
+    #[test]
+    fn checks_the_player_hourly_or_sooner_after_a_failure() {
+        // Times run forward from the load, as an `Instant` before boot panics.
+        let shared = PremiumShared::new(true, false);
+        let loaded = *shared.player_checked.lock().unwrap();
+        assert!(!shared.take_player_check(loaded), "just loaded");
+        shared.suspect_player();
+        assert!(
+            !shared.take_player_check(loaded),
+            "a failure waits out the floor"
+        );
+
+        let first = loaded + PREMIUM_BACKOFF;
+        assert!(
+            shared.take_player_check(first),
+            "a failure brings it forward"
+        );
+        assert!(!shared.take_player_check(first), "only one check at a time");
+
+        assert!(
+            !shared.take_player_check(first + PREMIUM_BACKOFF),
+            "the check cleared the failure"
+        );
+        assert!(
+            shared.take_player_check(first + PLAYER_RECHECK),
+            "due hourly regardless"
+        );
     }
 
     #[test]

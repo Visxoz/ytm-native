@@ -16,7 +16,7 @@ use sha1::{Digest, Sha1};
 
 use crate::streams::{self, ResolvedStream};
 
-pub use player::{Player, load_player};
+pub use player::{Player, current_version, load_current, load_player};
 
 pub(crate) const WEB_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 \
     (KHTML, like Gecko) Chrome/138.0.0.0 Safari/537.36";
