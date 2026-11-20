@@ -326,6 +326,9 @@ impl App {
         player.set_volume(if settings.muted { 0.0 } else { settings.volume });
         player.set_normalise(settings.normalise);
         player.set_equaliser(settings.equaliser());
+        player.set_crossfeed(settings.crossfeed);
+        player.set_mono(settings.mono);
+        player.set_balance(settings.balance);
         player.set_speed(settings.speed);
         player.set_output_device(settings.output_device.as_ref().map(|d| d.id.clone()));
 
@@ -592,6 +595,9 @@ impl App {
         for (band, &db) in settings.equaliser_gains.iter().enumerate() {
             self.eq_gains.set_row_data(band, db);
         }
+        ui.set_crossfeed(settings.crossfeed);
+        ui.set_mono(settings.mono);
+        ui.set_balance(settings.balance);
         ui.set_accent_choice(settings.accent.index());
     }
 
@@ -668,13 +674,19 @@ impl App {
         self.apply_settings_to_ui(&self.ui());
     }
 
-    fn change_equaliser(&self, save: bool, change: impl FnOnce(&mut Settings)) {
+    /// Changes settings shown at once, saving only once `save`, as a slider
+    /// sends every move of a drag.
+    fn change_settings(&self, save: bool, change: impl FnOnce(&mut Settings)) {
         if save {
             self.update_settings(change);
         } else {
             change(&mut self.state.borrow_mut().settings);
             self.apply_settings_to_ui(&self.ui());
         }
+    }
+
+    fn change_equaliser(&self, save: bool, change: impl FnOnce(&mut Settings)) {
+        self.change_settings(save, change);
         self.player
             .set_equaliser(self.state.borrow().settings.equaliser());
     }

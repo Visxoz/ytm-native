@@ -2,7 +2,7 @@
 
 use std::{collections::VecDeque, sync::atomic::Ordering};
 
-use super::{Shared, eq::Equaliser};
+use super::{Shared, eq::Equaliser, stereo::Stereo};
 
 /// State shared with the device callback.
 #[derive(Default)]
@@ -26,6 +26,7 @@ pub(super) struct Output {
     /// Set by the device callback once the queued track is audible.
     pub(super) advanced: bool,
     pub(super) eq: Equaliser,
+    pub(super) stereo: Stereo,
     /// The gain the last callback ended on, which the next ramps from, so a
     /// pause, resume, volume change or fresh start never steps and clicks.
     pub(super) gain: f32,
@@ -73,6 +74,7 @@ impl Output {
         // What follows a seek or load fades in, from no limiting.
         self.gain = 0.0;
         self.limiting = 0.0;
+        self.stereo.reset();
     }
 
     /// Counts `frames` as played. Returns the next track's loudness
@@ -119,6 +121,7 @@ pub(super) fn fill(shared: &Shared, data: &mut [f32], device_rate: u32) {
         *out = sample * if frame < split { gain } else { gain * next };
     }
     output.eq.process(&mut data[..n], device_rate, channels);
+    output.stereo.process(&mut data[..n], device_rate, channels);
     // Last, after the boost, the equaliser and a crossfade's sum.
     limit(&mut data[..n], &mut output.limiting, device_rate, channels);
     data[n..].fill(0.0);

@@ -305,6 +305,10 @@ pub struct Settings {
     /// Each band's gain in dB, kept while the equaliser is off.
     #[serde(deserialize_with = "equaliser_gains")]
     pub equaliser_gains: crate::audio::eq::Gains,
+    pub crossfeed: bool,
+    pub mono: bool,
+    /// From -1, the left side alone, to 1, the right.
+    pub balance: f32,
     pub look: Look,
     pub accent: Accent,
     pub window: Option<WindowGeometry>,
@@ -395,6 +399,9 @@ impl Default for Settings {
             check_updates: true,
             equaliser: false,
             equaliser_gains: Default::default(),
+            crossfeed: false,
+            mono: false,
+            balance: 0.0,
             look: Look::Black,
             accent: Accent::Lily,
             window: None,
@@ -419,6 +426,7 @@ impl Settings {
         settings.speed = settings
             .speed
             .clamp(crate::audio::MIN_SPEED, crate::audio::MAX_SPEED);
+        settings.balance = settings.balance.clamp(-1.0, 1.0);
         settings
     }
 

@@ -3,6 +3,7 @@ import { AccentChoice, Api } from "../types.slint";
 import { IconButton, PillButton, PillGroup } from "../widgets/buttons.slint";
 import { ListView } from "../widgets/list.slint";
 import { MenuEntry, PopupMenu } from "../widgets/menu.slint";
+import { Slider } from "../widgets/slider.slint";
 import { Toggle } from "../widgets/toggle.slint";
 import { Dialog, SettingRow, ToggleRow } from "dialog.slint";
 
@@ -141,6 +142,12 @@ export component SettingsDialog inherits Dialog {
     in property <bool> equaliser;
     in property <[string]> eq-presets;
     in property <int> eq-preset;
+    in property <bool> crossfeed;
+    in property <bool> mono;
+    in property <float> balance;
+    callback set-crossfeed(value: bool);
+    callback set-mono(value: bool);
+    callback set-balance(value: float, done: bool);
     in property <bool> autoplay;
     in property <bool> youtube-history;
     in property <bool> rating-buttons;
@@ -284,6 +291,35 @@ export component SettingsDialog inherits Dialog {
                     root.settings-open = false;
                     root.eq-open = true;
                 }
+            }
+        }
+
+        ToggleRow {
+            label: "Crossfeed";
+            detail: "For headphones: blends a little of each side into the other, as speakers do.";
+            checked: root.crossfeed;
+            toggled(v) => { root.set-crossfeed(v); }
+        }
+
+        ToggleRow {
+            label: "Mono";
+            detail: "Both sides in each ear, for listening with one earbud.";
+            checked: root.mono;
+            toggled(v) => { root.set-mono(v); }
+        }
+
+        SettingRow {
+            label: "Balance";
+            detail: root.balance == 0 ? "Centre" : (root.balance < 0 ? "Left " : "Right ") + round(abs(root.balance) * 100) + "%";
+            Slider {
+                y: (parent.height - self.height) / 2;
+                width: 160px;
+                value: (root.balance + 1) / 2;
+                accessible-role: slider;
+                accessible-label: "Balance";
+                accessible-value: parent.detail;
+                changed(v) => { root.set-balance(v, false); }
+                seek(v) => { root.set-balance(v, true); }
             }
         }
     }

@@ -179,6 +179,24 @@ impl App {
                 });
             }
         });
+        on!(on_set_crossfeed, |app, on| {
+            app.update_settings(|s| s.crossfeed = on);
+            app.player.set_crossfeed(on);
+        });
+        on!(on_set_mono, |app, on| {
+            app.update_settings(|s| s.mono = on);
+            app.player.set_mono(on);
+        });
+        on!(on_set_balance, |app, value, done| {
+            // Whole percents, snapping to centre near the middle; saved once
+            // the slider is let go.
+            let balance = ((value * 2.0 - 1.0) * 100.0).round() / 100.0;
+            let balance = if balance.abs() < 0.05 { 0.0 } else { balance };
+            if done || app.state.borrow().settings.balance != balance {
+                app.player.set_balance(balance);
+                app.change_settings(done, |s| s.balance = balance);
+            }
+        });
         on!(on_set_look, |app, index| {
             app.update_settings(|s| s.look = Look::from_index(index));
             app.apply_theme(&app.ui());

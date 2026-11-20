@@ -9,6 +9,7 @@ pub mod eq;
 mod opus;
 mod output;
 mod source;
+mod stereo;
 
 use std::{
     path::PathBuf,
@@ -342,6 +343,21 @@ impl Player {
     /// Shapes the sound with each band's gain, or plays it as it is.
     pub fn set_equaliser(&self, gains: Option<eq::Gains>) {
         self.shared.output.lock().unwrap().eq.set(gains);
+    }
+
+    /// For headphones: each side's lows fed a little into the other, as
+    /// from speakers.
+    pub fn set_crossfeed(&self, on: bool) {
+        self.shared.output.lock().unwrap().stereo.crossfeed = on;
+    }
+
+    pub fn set_mono(&self, on: bool) {
+        self.shared.output.lock().unwrap().stereo.mono = on;
+    }
+
+    /// From -1, the left side alone, to 1, the right.
+    pub fn set_balance(&self, balance: f32) {
+        self.shared.output.lock().unwrap().stereo.balance = balance.clamp(-1.0, 1.0);
     }
 
     /// Plays through the device with this cpal ID, or the default.

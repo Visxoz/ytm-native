@@ -161,6 +161,9 @@ export component AppWindow inherits Window {
     /// The preset the gains match, or -1.
     in property <int> eq-preset;
     in property <float> eq-max-db;
+    in property <bool> crossfeed;
+    in property <bool> mono;
+    in property <float> balance;
     in-out property <bool> picker-open;
     in property <bool> picker-loading;
     in property <[PlaylistChoice]> playlist-choices;
@@ -244,6 +247,10 @@ export component AppWindow inherits Window {
     callback set-eq-preset(index: int);
     /// A band's slider, from 0 to 1, moved; `done` once it is let go.
     callback set-eq-band(band: int, value: float, done: bool);
+    callback set-crossfeed(on: bool);
+    callback set-mono(on: bool);
+    /// The balance slider, from 0 to 1, moved; `done` once it is let go.
+    callback set-balance(value: float, done: bool);
     // Delivered from background threads through the event loop.
     callback player-event(kind: string, message: string);
     callback media-action(action: string, value: float);
@@ -565,6 +572,12 @@ export component AppWindow inherits Window {
             equaliser: root.equaliser;
             eq-presets: root.eq-presets;
             eq-preset: root.eq-preset;
+            crossfeed: root.crossfeed;
+            mono: root.mono;
+            balance: root.balance;
+            set-crossfeed(v) => { root.set-crossfeed(v); }
+            set-mono(v) => { root.set-mono(v); }
+            set-balance(v, done) => { root.set-balance(v, done); }
             autoplay: root.autoplay;
             discord: root.discord;
             update-status: root.update-status;
