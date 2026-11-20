@@ -380,8 +380,30 @@ index 06386bc..991b095 100644
      use rstest::rstest;
  
      // 1.20240506.01.00-canary_control_1.20240508.01.01
+diff --git a/src/client/music_playlist.rs b/src/client/music_playlist.rs
+index 64f3d7e..20cad37 100644
+--- a/src/client/music_playlist.rs
++++ b/src/client/music_playlist.rs
+@@ -235,7 +235,7 @@ impl MapResponse<MusicPlaylist> for response::MusicPlaylist {
+                     .collect::<Vec<_>>();
+                 parts
+                     .get(usize::from(parts.len() > 2))
+-                    .and_then(|txt| util::parse_numeric::<u64>(&txt[0]).ok())
++                    .and_then(|txt| util::parse_numeric::<u64>(txt.first()?).ok())
+             })
+         } else {
+             Some(map_res.c.len() as u64)
+@@ -522,7 +522,7 @@ impl MapResponse<MusicAlbum> for response::MusicPlaylist {
+             .collect::<Vec<_>>();
+         let track_count = second_subtitle_parts
+             .get(usize::from(second_subtitle_parts.len() > 2))
+-            .and_then(|txt| util::parse_numeric::<u16>(&txt[0]).ok());
++            .and_then(|txt| util::parse_numeric::<u16>(txt.first()?).ok());
+ 
+         let mut mapper = MusicListMapper::with_album(
+             ctx.lang,
 diff --git a/src/client/response/music_playlist.rs b/src/client/response/music_playlist.rs
-index 84202f0..63f2fdb 100644
+index 84202f0..4ad5c86 100644
 --- a/src/client/response/music_playlist.rs
 +++ b/src/client/response/music_playlist.rs
 @@ -45,12 +45,46 @@ pub(crate) struct PlSectionList {
@@ -433,6 +455,18 @@ index 84202f0..63f2fdb 100644
  #[serde_as]
  #[derive(Debug, Deserialize)]
  #[serde(rename_all = "camelCase")]
+@@ -80,8 +114,10 @@ pub(crate) struct HeaderRenderer {
+     /// `"64 songs", " • ", "3 hours, 40 minutes"`
+     ///
+     /// `"1B views", " • ", "200 songs", " • ", "6+ hours"`
++    ///
++    /// Empty (`{}`) on the account's mixes (My Mix, My Supermix).
+     #[serde(default)]
+-    #[serde_as(as = "Text")]
++    #[serde_as(as = "DefaultOnError<Text>")]
+     pub second_subtitle: Vec<String>,
+     /// Channel (newer data model)
+     #[serde(default)]
 diff --git a/src/error.rs b/src/error.rs
 index 81cd7fa..7c47931 100644
 --- a/src/error.rs
