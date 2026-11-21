@@ -5,7 +5,7 @@ use std::rc::Rc;
 use slint::Model;
 
 use super::{App, State, now_playing::queue_item};
-use crate::api;
+use crate::api::{self, Card, CardKind, Route};
 
 /// The rows picked with Ctrl- and Shift-click are flagged on the rows
 /// themselves; this is how many, and where a Shift-click selects from.
@@ -246,10 +246,12 @@ impl App {
     }
 
     pub(super) fn save_queue_as_playlist(self: &Rc<Self>) {
-        let (ids, queued): (Vec<String>, bool) = {
+        let (ids, queued, thumb): (Vec<String>, bool, Option<String>) = {
             let state = self.state.borrow();
-            let ids = state.queue.items().filter(|t| !t.is_local());
-            (ids.map(|t| t.id.clone()).collect(), !state.queue.is_empty())
+            let tracks: Vec<_> = state.queue.items().filter(|t| !t.is_local()).collect();
+            let thumb = tracks.iter().find_map(|t| t.thumb.clone());
+            let ids = tracks.iter().map(|t| t.id.clone()).collect();
+            (ids, !state.queue.is_empty(), thumb)
         };
         if ids.is_empty() {
             if queued {
@@ -265,12 +267,36 @@ impl App {
         ));
         let api = self.api.clone();
         let name = title.clone();
+        let count = ids.len() as u64;
+        let account = self.state.borrow().account;
         self.spawn(
             async move { api.create_playlist(&name, &ids).await },
             move |app, result| match result {
-                Ok(_) => {
+                Ok(id) => {
                     app.toast(format!("Saved as \u{201c}{title}\u{201d}"));
-                    app.load_library();
+                    // Signed in or out meanwhile, it is the last account's.
+                    if app.state.borrow().account != account {
+                        return;
+                    }
+                    // YouTube's list of playlists takes a while to hold one just
+                    // made, so it joins the sidebar here rather than by a reload.
+                    app.state.borrow_mut().page_cache.remove(&Route::Library);
+                    let card = Card {
+                        kind: CardKind::Playlist,
+                        id,
+                        title,
+                        subtitle: format!("Playlist \u{2022} {}", api::songs(count)),
+                        thumb,
+                        color: None,
+                        track: None,
+                    };
+                    app.edit_library(move |cards| {
+                        if !cards.iter().any(|c| c.id == card.id) {
+                            // First among the account's own, after Liked music.
+                            let at = cards.iter().position(|c| c.id.starts_with("PL"));
+                            cards.insert(at.unwrap_or(cards.len()), card);
+                        }
+                    });
                 }
                 Err(e) => app.toast(format!("Couldn't save the playlist: {e}")),
             },
