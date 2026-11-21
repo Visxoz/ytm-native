@@ -48,6 +48,9 @@ slint::include_modules!();
 /// The main window's class, by which a second launch finds it; its title
 /// alone would match an Explorer window on a folder named Lily.
 const WINDOW_CLASS: &str = "Lily";
+/// How long the window stays minimised before the artwork cache shrinks to
+/// what a hidden window needs; going to the tray shrinks it at once.
+const TRIM_ARTWORK_AFTER: Duration = Duration::from_secs(60);
 
 fn restore_geometry(ui: &AppWindow, geometry: Option<WindowGeometry>) {
     let Some(g) = geometry else { return };
@@ -338,6 +341,10 @@ fn main() {
     let restore_timer = slint::Timer::default();
     let weak = ui.as_weak();
     let was_minimized = std::cell::Cell::new(false);
+    // When the window last minimised, and whether the artwork cache was cut
+    // down for it since.
+    let minimized_at = std::cell::Cell::new(std::time::Instant::now());
+    let trimmed = std::cell::Cell::new(false);
     restore_timer.start(
         slint::TimerMode::Repeated,
         Duration::from_millis(100),
@@ -348,13 +355,23 @@ fn main() {
             ui.global::<Api>().set_minimised(minimized);
             if !minimized {
                 watch_app.cancel_hide();
+                if trimmed.replace(false) {
+                    images::set_hidden(false);
+                }
             } else if !was {
+                minimized_at.set(std::time::Instant::now());
                 // The patched renderer drops its GPU surface on this frame. Asked
                 // of winit, as Slint drops its own requests while one is pending.
                 ui.window()
                     .with_winit_window(|window| window.request_redraw());
             } else if watch_app.take_hide_pending() {
                 let _ = ui.hide();
+                trimmed.set(true);
+                images::set_hidden(true);
+            } else if !trimmed.get() && minimized_at.get().elapsed() >= TRIM_ARTWORK_AFTER {
+                // Not at once, so a quick look elsewhere doesn't cost Back its art.
+                trimmed.set(true);
+                images::set_hidden(true);
             }
             if was && !minimized {
                 // Again after the restore animation, which can swallow frames.

@@ -277,6 +277,7 @@ impl App {
                 .collect()
         };
         self.queue_model.set_vec(items);
+        self.queue_art.reset();
         self.forget_selection();
     }
 
@@ -324,7 +325,8 @@ impl App {
         let id = item.id;
         self.load_row_image(
             Some(url),
-            |app| &app.queue_asks,
+            index,
+            |app| &app.queue_art,
             move |app| {
                 app.queue_model
                     .row_data(index)
@@ -334,6 +336,16 @@ impl App {
                 if let Some(mut item) = app.queue_model.row_data(index) {
                     item.art = image;
                     app.queue_model.set_row_data(index, item);
+                }
+            },
+            |app, row| {
+                if let Some(mut item) = app
+                    .queue_model
+                    .row_data(row)
+                    .filter(|item| item.art.size().width > 0)
+                {
+                    item.art = Image::default();
+                    app.queue_model.set_row_data(row, item);
                 }
             },
         );

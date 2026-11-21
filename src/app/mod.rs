@@ -61,6 +61,52 @@ const TICK: Duration = Duration::from_millis(250);
 /// A row's artwork still waiting once this many more rows have asked is for
 /// one scrolled past, as a screen shows far fewer.
 const RECENT_ASKS: u64 = 64;
+/// Row thumbnails a list's model keeps. Past it, the oldest given away from
+/// the rows on screen are let go, as a long list scrolled through would
+/// otherwise hold every one it showed, beyond the artwork cache's budget.
+const KEEP_ROW_ART: usize = 160;
+
+/// A list's rows asking for their artwork.
+#[derive(Default)]
+struct RowArt {
+    /// How many have asked, so a download left waiting by a fast scroll is skipped.
+    asks: Cell<u64>,
+    /// The last to ask, which is on screen.
+    last: Cell<usize>,
+    /// Rows given art, oldest first.
+    kept: RefCell<VecDeque<usize>>,
+}
+
+impl RowArt {
+    /// Forgets the rows given art, as their model was rebuilt.
+    fn reset(&self) {
+        self.kept.borrow_mut().clear();
+    }
+
+    /// Notes `row` given art, and returns the rows whose art to let go.
+    fn keep(&self, row: usize) -> Vec<usize> {
+        let mut kept = self.kept.borrow_mut();
+        kept.push_back(row);
+        overflow(&mut kept, self.last.get())
+    }
+}
+
+/// Takes the oldest of `kept` past `KEEP_ROW_ART`, skipping those within
+/// `RECENT_ASKS` rows of `last`, which may be on screen and keep theirs.
+fn overflow(kept: &mut VecDeque<usize>, last: usize) -> Vec<usize> {
+    let mut released = Vec::new();
+    let mut near = 0;
+    while kept.len() > KEEP_ROW_ART && near < kept.len() {
+        let Some(row) = kept.pop_front() else { break };
+        if row.abs_diff(last) <= RECENT_ASKS as usize {
+            kept.push_back(row);
+            near += 1;
+        } else {
+            released.push(row);
+        }
+    }
+    released
+}
 /// In the order Settings lists them.
 const SPEEDS: [f32; 6] = [0.8, 0.9, 1.0, 1.1, 1.2, 1.3];
 /// Equaliser animation step; a few frames a second keeps repaints cheap.
@@ -264,9 +310,9 @@ pub struct App {
     /// Queue revision the queue model shows.
     queue_shown: Cell<Option<u64>>,
     selection: Cell<queue_panel::Selection>,
-    /// How many page and queue rows have asked for their artwork.
-    row_asks: Cell<u64>,
-    queue_asks: Cell<u64>,
+    /// The page's and the queue's row artwork.
+    row_art: RowArt,
+    queue_art: RowArt,
     tick: Timer,
     eq_timer: Timer,
     /// Lights up the next lyric line as it starts, between ticks.
@@ -406,8 +452,8 @@ impl App {
             eq_gains: Rc::new(VecModel::from(vec![0.0; eq::BANDS.len()])),
             queue_shown: Cell::new(None),
             selection: Cell::new(queue_panel::Selection::default()),
-            row_asks: Cell::new(0),
-            queue_asks: Cell::new(0),
+            row_art: RowArt::default(),
+            queue_art: RowArt::default(),
             tick: Timer::default(),
             eq_timer: Timer::default(),
             lyric_timer: Timer::default(),
@@ -547,26 +593,33 @@ impl App {
         Timer::single_shot(Duration::ZERO, move || load(&app, row as usize));
     }
 
-    /// A list row's artwork, asked for by the row once on screen, put in by
+    /// A list row's artwork, asked for by `row` once on screen, put in by
     /// `apply` while the row still `wants` it. Skipped should `RECENT_ASKS`
-    /// more rows of the list (`asks`) ask before its download's turn comes.
+    /// more rows of the `list` ask before its download's turn comes. Rows
+    /// past `KEEP_ROW_ART` lose theirs to `release`, to ask again if shown.
     fn load_row_image(
         self: &Rc<Self>,
         url: Option<String>,
-        asks: fn(&Self) -> &Cell<u64>,
+        row: usize,
+        list: fn(&Self) -> &RowArt,
         wants: impl Fn(&Rc<Self>) -> bool + Clone + 'static,
         apply: impl FnOnce(&Rc<Self>, Image) + 'static,
+        release: fn(&Rc<Self>, usize),
     ) {
-        let ask = asks(self).get() + 1;
-        asks(self).set(ask);
+        let ask = list(self).asks.get() + 1;
+        list(self).asks.set(ask);
+        list(self).last.set(row);
         let still = wants.clone();
         self.load_image_while(
             url,
             images::ROW,
-            move |app| asks(app).get() - ask < RECENT_ASKS && still(app),
+            move |app| list(app).asks.get() - ask < RECENT_ASKS && still(app),
             move |app, image| {
                 if wants(app) {
                     apply(app, image);
+                    for old in list(app).keep(row) {
+                        release(app, old);
+                    }
                 }
             },
         );
@@ -982,6 +1035,23 @@ fn outcome<T: Outcome>(joined: Result<T, tokio::task::JoinError>) -> Option<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lets_go_of_old_row_art_away_from_the_screen() {
+        let near = RECENT_ASKS as usize;
+        // Rows 0.. given art in order, the screen now at the last of them.
+        let mut kept: VecDeque<usize> = (0..=KEEP_ROW_ART).collect();
+        assert_eq!(overflow(&mut kept, KEEP_ROW_ART), [0]);
+        assert_eq!(kept.len(), KEEP_ROW_ART);
+        // Scrolled back to the top: the oldest are near it, so the newest go.
+        kept.push_back(1_000);
+        let released = overflow(&mut kept, 1);
+        assert_eq!(released, [near + 2], "the first one far from the screen");
+        assert!(kept.contains(&1) && kept.contains(&1_000));
+        // Every row near the screen: none go, and the loop ends.
+        let mut all_near: VecDeque<usize> = (0..=KEEP_ROW_ART).map(|_| 5).collect();
+        assert!(overflow(&mut all_near, 5).is_empty());
+    }
 
     #[test]
     fn a_panicking_request_fails_as_a_failed_one_would() {

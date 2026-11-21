@@ -31,9 +31,9 @@ pub const AVATAR: u32 = 26;
 /// Decoded artwork kept for reuse, in bytes. Images still on screen stay
 /// alive regardless, as Slint holds its own reference.
 const CACHE_BUDGET: usize = 32 * 1024 * 1024;
-/// What eviction frees down to, so a full cache sorts once per few hundred
-/// thumbnails rather than on every one.
-const CACHE_LOW_WATER: usize = CACHE_BUDGET / 8 * 7;
+/// The budget while the window is hidden, when nothing draws artwork: the
+/// latest few songs' player art, which plays on in the tray brings.
+const HIDDEN_BUDGET: usize = 2 * 1024 * 1024;
 /// Covers, very wide banners, and headers from 225% scale (cards from 300%):
 /// dropped once unused for `LARGE_UNUSED_FOR`, even under the budget.
 const LARGE: usize = 1024 * 1024;
@@ -55,12 +55,36 @@ pub fn set_scale(scale: f32) {
     SCALE.with(|s| s.set(scale.clamp(1.0, 4.0)));
 }
 
-#[derive(Default)]
+/// Shrinks the cache to `HIDDEN_BUDGET` while the window is hidden, and lets
+/// it grow again once shown. Images on the shown page and in the queue stay,
+/// as their models hold them, so only what Back or a rebuild would reuse goes,
+/// to be read from disk again.
+pub fn set_hidden(hidden: bool) {
+    CACHE.with(|c| {
+        let mut cache = c.borrow_mut();
+        cache.budget = if hidden { HIDDEN_BUDGET } else { CACHE_BUDGET };
+        cache.shrink();
+    });
+}
+
 struct Cache {
     images: HashMap<String, Cached>,
     accents: HashMap<String, Color>,
     backdrops: HashMap<String, Image>,
     bytes: usize,
+    budget: usize,
+}
+
+impl Default for Cache {
+    fn default() -> Self {
+        Self {
+            images: HashMap::new(),
+            accents: HashMap::new(),
+            backdrops: HashMap::new(),
+            bytes: 0,
+            budget: CACHE_BUDGET,
+        }
+    }
 }
 
 struct Cached {
@@ -92,18 +116,25 @@ impl Cache {
         // On insert, which each new song's art brings, so a cover opened once
         // doesn't pin megabytes for days.
         self.evict(|e| e.bytes >= LARGE && now.duration_since(e.used) > LARGE_UNUSED_FOR);
-        // Sorted only when over budget, so a hit (per row on scroll) stays one write.
-        if self.bytes > CACHE_BUDGET {
-            let mut ages: Vec<_> = self.images.values().map(|e| (e.used, e.bytes)).collect();
-            ages.sort_unstable_by_key(|&(used, _)| used);
-            let mut excess = self.bytes - CACHE_LOW_WATER;
-            let cutoff = ages.into_iter().find_map(|(used, bytes)| {
-                excess = excess.saturating_sub(bytes);
-                (excess == 0).then_some(used)
-            });
-            if let Some(cutoff) = cutoff {
-                self.evict(|e| e.used <= cutoff);
-            }
+        self.shrink();
+    }
+
+    /// Drops the least recently used images once over budget, down to 7/8 of
+    /// it, so a full cache sorts once per few hundred thumbnails rather than on
+    /// every one. Sorted only when over, so a hit (per row on scroll) stays one write.
+    fn shrink(&mut self) {
+        if self.bytes <= self.budget {
+            return;
+        }
+        let mut ages: Vec<_> = self.images.values().map(|e| (e.used, e.bytes)).collect();
+        ages.sort_unstable_by_key(|&(used, _)| used);
+        let mut excess = self.bytes - self.budget / 8 * 7;
+        let cutoff = ages.into_iter().find_map(|(used, bytes)| {
+            excess = excess.saturating_sub(bytes);
+            (excess == 0).then_some(used)
+        });
+        if let Some(cutoff) = cutoff {
+            self.evict(|e| e.used <= cutoff);
         }
     }
 
@@ -114,6 +145,7 @@ impl Cache {
             accents,
             backdrops,
             bytes,
+            ..
         } = self;
         images.retain(|key, e| {
             if !stale(e) {
@@ -248,9 +280,14 @@ async fn fetch(
     let file = crate::downloads::cover(&url)
         .or_else(|| crate::local::owns(url.as_ref()).then(|| url.clone().into()));
     if let Some(file) = file {
+        // A file's own picture decodes at full size before scaling, tens of
+        // MB for a large one, so only a couple at once.
+        static FILES: OnceLock<Arc<Semaphore>> = OnceLock::new();
+        let files = FILES.get_or_init(|| Arc::new(Semaphore::new(2)));
+        let decoding = Arc::clone(files).acquire_owned().await.ok();
         return rt
             .spawn_blocking(move || {
-                let _permit = permit;
+                let _permits = (permit, decoding);
                 decode(&crate::local::artwork(&file)?, pixels, edge)
             })
             .await
@@ -659,7 +696,26 @@ mod tests {
         );
         assert!(cache.images.contains_key("3"));
         assert!(!cache.accents.contains_key("1") && !cache.backdrops.contains_key("1"));
-        assert_eq!(cache.bytes, CACHE_LOW_WATER);
+        assert_eq!(cache.bytes, CACHE_BUDGET / 8 * 7);
+    }
+
+    #[test]
+    fn keeps_little_while_hidden() {
+        let mut cache = Cache::default();
+        let start = Instant::now();
+        // 1 MB each, at 512 by 512.
+        for i in 0..8 {
+            cache.insert(i.to_string(), blank(512), start + Duration::from_secs(i));
+        }
+        cache.budget = HIDDEN_BUDGET;
+        cache.shrink();
+        let kept: Vec<_> = (0..8)
+            .filter(|i| cache.images.contains_key(&i.to_string()))
+            .collect();
+        assert_eq!(kept, [7], "the latest, within 7/8 of 2 MB");
+        cache.budget = CACHE_BUDGET;
+        cache.insert("8".into(), blank(512), start + Duration::from_secs(8));
+        assert_eq!(cache.images.len(), 2, "grows again once shown");
     }
 
     #[test]

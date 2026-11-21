@@ -1,6 +1,6 @@
 use std::rc::Rc;
 
-use slint::{Model, ModelRc, VecModel};
+use slint::{Image, Model, ModelRc, VecModel};
 
 use super::{
     App,
@@ -200,6 +200,7 @@ impl App {
         // Any other page gets a new one, as Slint's ListView keeps where the old
         // rows were scrolled through a reset and can open it part-way down.
         let in_place = restore.is_some() && self.rows_route.borrow().as_ref() == Some(&route);
+        self.row_art.reset();
         if in_place {
             self.rows().set_vec(rows);
         } else {
@@ -286,7 +287,8 @@ impl App {
         let id = item.track.id;
         self.load_row_image(
             url,
-            |app| &app.row_asks,
+            row,
+            |app| &app.row_art,
             move |app| {
                 on_page(app)
                     && app
@@ -297,6 +299,16 @@ impl App {
             move |app, image| {
                 if let Some(mut item) = app.rows().row_data(row) {
                     item.track.art = image;
+                    app.rows().set_row_data(row, item);
+                }
+            },
+            |app, row| {
+                if let Some(mut item) = app
+                    .rows()
+                    .row_data(row)
+                    .filter(|r| r.kind == RowKind::Track && r.track.art.size().width > 0)
+                {
+                    item.track.art = Image::default();
                     app.rows().set_row_data(row, item);
                 }
             },
