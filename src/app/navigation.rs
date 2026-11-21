@@ -31,6 +31,8 @@ impl App {
                 };
                 state.back.push(current);
                 state.forward.clear();
+                // A new page opens at the top, whatever Back left unshown.
+                state.restore_scroll = None;
             }
             state.route = route.clone();
             state.page_generation += 1;
@@ -66,6 +68,8 @@ impl App {
         }
 
         if route == Route::Library && !signed_in {
+            // No page takes it, so it would scroll the next one.
+            self.state.borrow_mut().restore_scroll = None;
             ui.set_page_loading(false);
             ui.set_page_error("Sign in to see your playlists, albums and artists.".into());
             ui.set_sign_in_open(true);
@@ -150,6 +154,7 @@ impl App {
             }
             Err(e) => {
                 log::warn!("page failed: {e}");
+                self.state.borrow_mut().restore_scroll = None;
                 ui.set_page_error(e.into());
             }
         }

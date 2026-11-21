@@ -182,8 +182,8 @@ impl App {
         }
         let header = state.page.header_tracks();
         let all = !header.is_empty() && header.iter().all(|t| state.downloads.contains(&t.id));
-        for i in 0..self.rows.row_count() {
-            let Some(mut row) = self.rows.row_data(i) else {
+        for i in 0..self.rows().row_count() {
+            let Some(mut row) = self.rows().row_data(i) else {
                 continue;
             };
             let changed = match row.kind {
@@ -195,7 +195,7 @@ impl App {
                 _ => false,
             };
             if changed {
-                self.rows.set_row_data(i, row);
+                self.rows().set_row_data(i, row);
             }
         }
     }

@@ -196,14 +196,14 @@ impl App {
         drop(state);
         if shown
             && let Some(i) = self.find_row(RowKind::Header)
-            && let Some(mut row) = self.rows.row_data(i)
+            && let Some(mut row) = self.rows().row_data(i)
         {
             if subscribe {
                 row.subscribed = on;
             } else {
                 row.saved = on;
             }
-            self.rows.set_row_data(i, row);
+            self.rows().set_row_data(i, row);
         }
     }
 

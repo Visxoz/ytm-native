@@ -195,30 +195,30 @@ impl App {
     fn renumber(&self, first: usize, songs: RangeInclusive<usize>) {
         for index in songs {
             let r = first + index;
-            let Some(mut row) = self.rows.row_data(r).filter(|r| r.kind == RowKind::Track) else {
+            let Some(mut row) = self.rows().row_data(r).filter(|r| r.kind == RowKind::Track) else {
                 break;
             };
             if row.index != index as i32 {
                 row.index = index as i32;
                 row.track.number = s((index + 1).to_string());
-                self.rows.set_row_data(r, row);
+                self.rows().set_row_data(r, row);
             }
         }
     }
 
     fn take_row(&self, at: usize) {
         if let Some(first) = self.first_song_row()
-            && first + at < self.rows.row_count()
+            && first + at < self.rows().row_count()
         {
-            self.rows.remove(first + at);
+            self.rows().remove(first + at);
             self.renumber(first, at..=usize::MAX);
         }
     }
 
     fn put_row(&self, at: usize, row: RowItem) {
         if let Some(first) = self.first_song_row() {
-            self.rows
-                .insert((first + at).min(self.rows.row_count()), row);
+            self.rows()
+                .insert((first + at).min(self.rows().row_count()), row);
             self.renumber(first, at..=usize::MAX);
         }
     }
@@ -227,18 +227,18 @@ impl App {
         let Some(first) = self.first_song_row() else {
             return;
         };
-        let Some(row) = self.rows.row_data(first + from) else {
+        let Some(row) = self.rows().row_data(first + from) else {
             return;
         };
-        self.rows.remove(first + from);
-        self.rows
-            .insert((first + to).min(self.rows.row_count()), row);
+        self.rows().remove(first + from);
+        self.rows()
+            .insert((first + to).min(self.rows().row_count()), row);
         self.renumber(first, from.min(to)..=from.max(to));
     }
 
-    /// Shows a rename or deletion in the sidebar at once, as YouTube's list
-    /// can take a moment to.
-    fn edit_library(self: &Rc<Self>, edit: impl FnOnce(&mut Vec<Card>)) {
+    /// Shows a playlist made, renamed or deleted in the sidebar at once, as
+    /// YouTube's list can take a moment to.
+    pub(super) fn edit_library(self: &Rc<Self>, edit: impl FnOnce(&mut Vec<Card>)) {
         let cards = {
             let mut state = self.state.borrow_mut();
             // A load already asked for may predate the edit.

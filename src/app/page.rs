@@ -43,6 +43,9 @@ pub(super) fn track_list_page(label: &str, title: &str, tracks: Vec<Track>) -> O
     })
 }
 
+/// Long enough for a frame or two to lay out a page's first rows.
+const RESEEK_AFTER: std::time::Duration = std::time::Duration::from_millis(60);
+
 type CardArt = (Rc<VecModel<CardItem>>, Vec<Option<String>>, u32);
 
 /// Whether the page shown is still the one loaded as `generation`, so art
@@ -192,9 +195,32 @@ impl App {
         self.state.borrow_mut().page = page;
         self.offer_edits();
         let Built { rows, card_art } = built;
-        self.rows.set_vec(rows);
-        let scroll = self.state.borrow_mut().restore_scroll.take().unwrap_or(0.0);
-        ui.set_page_scroll(scroll);
+        let restore = self.state.borrow_mut().restore_scroll.take();
+        // Shown again in place, as a refresh does, the rows keep their model.
+        // Any other page gets a new one, as Slint's ListView keeps where the old
+        // rows were scrolled through a reset and can open it part-way down.
+        let in_place = restore.is_some() && self.rows_route.borrow().as_ref() == Some(&route);
+        if in_place {
+            self.rows().set_vec(rows);
+        } else {
+            let model = Rc::new(VecModel::from(rows));
+            *self.rows.borrow_mut() = Rc::clone(&model);
+            ui.set_rows(ModelRc::from(model));
+        }
+        ui.set_page_scroll(restore.unwrap_or(0.0));
+        *self.rows_route.borrow_mut() = Some(route.clone());
+        // A new model's first layout measures only its first row, the header,
+        // and seeks by it; once real rows are measured, the same seek lands.
+        if let Some(scroll) = restore.filter(|&s| !in_place && s != 0.0) {
+            let weak = Rc::downgrade(self);
+            slint::Timer::single_shot(RESEEK_AFTER, move || {
+                if let Some(app) = weak.upgrade()
+                    && app.state.borrow().page_generation == generation
+                {
+                    app.ui().set_page_scroll(scroll);
+                }
+            });
+        }
 
         let accent_url = header_thumb.clone();
         self.load_image(header_thumb, header_edge, move |app, image| {
@@ -208,9 +234,9 @@ impl App {
                 app.ui().set_accent(color);
             }
             if let Some(index) = app.find_row(RowKind::Header) {
-                let mut row = app.rows.row_data(index).unwrap_or_default();
+                let mut row = app.rows().row_data(index).unwrap_or_default();
                 row.art = image;
-                app.rows.set_row_data(index, row);
+                app.rows().set_row_data(index, row);
             }
         });
         self.load_card_art(card_art, generation);
@@ -220,7 +246,8 @@ impl App {
     }
 
     pub(super) fn find_row(&self, kind: RowKind) -> Option<usize> {
-        (0..self.rows.row_count()).find(|&i| self.rows.row_data(i).is_some_and(|r| r.kind == kind))
+        (0..self.rows().row_count())
+            .find(|&i| self.rows().row_data(i).is_some_and(|r| r.kind == kind))
     }
 
     fn load_card_art(self: &Rc<Self>, card_art: Vec<CardArt>, generation: u64) {
@@ -239,7 +266,11 @@ impl App {
 
     /// Loads the artwork of track row `row`, asked for by the row once on screen.
     pub(super) fn load_row_art(self: &Rc<Self>, row: usize) {
-        let Some(item) = self.rows.row_data(row).filter(|r| r.kind == RowKind::Track) else {
+        let Some(item) = self
+            .rows()
+            .row_data(row)
+            .filter(|r| r.kind == RowKind::Track)
+        else {
             return;
         };
         let (url, on_page) = {
@@ -259,14 +290,14 @@ impl App {
             move |app| {
                 on_page(app)
                     && app
-                        .rows
+                        .rows()
                         .row_data(row)
                         .is_some_and(|r| r.track.id == id && r.track.art.size().width == 0)
             },
             move |app, image| {
-                if let Some(mut item) = app.rows.row_data(row) {
+                if let Some(mut item) = app.rows().row_data(row) {
                     item.track.art = image;
-                    app.rows.set_row_data(row, item);
+                    app.rows().set_row_data(row, item);
                 }
             },
         );
@@ -360,8 +391,8 @@ impl App {
         }) = page.sections.first()
             && tracks.len() > shown_tracks
             && shown_sections > 0
-            && let Some(last_row) = (0..self.rows.row_count()).rev().find(|&i| {
-                self.rows
+            && let Some(last_row) = (0..self.rows().row_count()).rev().find(|&i| {
+                self.rows()
                     .row_data(i)
                     .is_some_and(|r| r.kind == RowKind::Track && r.section == 0)
             })
@@ -369,7 +400,7 @@ impl App {
             for (index, track) in tracks.iter().enumerate().skip(shown_tracks) {
                 let row_index = last_row + 1 + index - shown_tracks;
                 let downloaded = self.state.borrow().downloads.contains(&track.id);
-                self.rows
+                self.rows()
                     .insert(row_index, track_row(track, index, *numbered, 0, downloaded));
             }
         }
@@ -382,7 +413,7 @@ impl App {
             }
             drop(state);
             let Built { rows, card_art } = built;
-            self.rows.extend(rows);
+            self.rows().extend(rows);
             self.load_card_art(card_art, generation);
         }
 
@@ -402,14 +433,14 @@ impl App {
         };
         self.ui().set_page_title(s(&header.title));
         if let Some(i) = self.find_row(RowKind::Header)
-            && let Some(mut row) = self.rows.row_data(i)
+            && let Some(mut row) = self.rows().row_data(i)
         {
             let tracks = state.page.header_tracks();
             row.title = s(&header.title);
             row.meta = s(&header.meta);
             row.downloaded =
                 !tracks.is_empty() && tracks.iter().all(|t| state.downloads.contains(&t.id));
-            self.rows.set_row_data(i, row);
+            self.rows().set_row_data(i, row);
         }
     }
 }

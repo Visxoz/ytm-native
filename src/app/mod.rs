@@ -254,7 +254,10 @@ pub struct App {
     presence: PresenceHandle,
     media: RefCell<Option<Controls>>,
     state: RefCell<State>,
-    rows: Rc<VecModel<RowItem>>,
+    /// The page's rows, replaced for each new page (`App::show_page`).
+    rows: RefCell<Rc<VecModel<RowItem>>>,
+    /// The page `rows` were built for.
+    rows_route: RefCell<Option<Route>>,
     library: Rc<VecModel<CardItem>>,
     queue_model: Rc<VecModel<QueueItem>>,
     eq_gains: Rc<VecModel<f32>>,
@@ -396,7 +399,8 @@ impl App {
                 library_revision: 0,
                 library_generation: 0,
             }),
-            rows: Rc::new(VecModel::default()),
+            rows: RefCell::default(),
+            rows_route: RefCell::default(),
             library: Rc::new(VecModel::default()),
             queue_model: Rc::new(VecModel::default()),
             eq_gains: Rc::new(VecModel::from(vec![0.0; eq::BANDS.len()])),
@@ -441,7 +445,7 @@ impl App {
         ui.set_update_status(
             updates::up_to_date_status(app.state.borrow().settings.check_updates).into(),
         );
-        ui.set_rows(ModelRc::from(Rc::clone(&app.rows)));
+        ui.set_rows(ModelRc::from(app.rows()));
         ui.set_library(ModelRc::from(Rc::clone(&app.library)));
         ui.set_queue(ModelRc::from(Rc::clone(&app.queue_model)));
         ui.set_eq_gains(ModelRc::from(Rc::clone(&app.eq_gains)));
@@ -483,6 +487,11 @@ impl App {
 
     fn ui(&self) -> AppWindow {
         self.ui.upgrade().expect("window outlives the app")
+    }
+
+    /// A handle rather than a borrow, so editing it can't overlap a swap.
+    fn rows(&self) -> Rc<VecModel<RowItem>> {
+        Rc::clone(&self.rows.borrow())
     }
 
     /// Runs `work` on Tokio and `done` with its result on the UI thread.

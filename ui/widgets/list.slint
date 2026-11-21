@@ -26,10 +26,12 @@ export component ListView {
     // The offset this component last wrote, to tell it apart from one set
     // from outside.
     property <length> written;
+    // The furthest the list goes, on the pixel grid.
+    property <length> end-y: -floor(root.max-scroll / 1phx) * 1phx;
 
     changed glide-t => {
         if root.gliding {
-            root.written = round(root.glide-y / 1phx) * 1phx;
+            root.written = max(root.end-y, round(root.glide-y / 1phx) * 1phx);
             root.content-y = root.written;
             if root.glide-t >= 1 {
                 root.gliding = false;
@@ -47,6 +49,20 @@ export component ListView {
                 root.glide-to += root.content-y - root.written;
             }
             root.written = root.content-y;
+        }
+    }
+    // Slint measures rows only as it makes them, so the end can move up past
+    // where the list rests after a long jump; it would show blank space below
+    // the last row until the next scroll. Only past the end, so no chase.
+    changed max-scroll => {
+        if root.content-y < root.end-y {
+            root.written = root.end-y;
+            root.content-y = root.written;
+            // A glide heading past the end has arrived; carried on, it would
+            // ease back up from where it started.
+            if root.gliding && root.glide-to <= root.written {
+                root.gliding = false;
+            }
         }
     }
 
