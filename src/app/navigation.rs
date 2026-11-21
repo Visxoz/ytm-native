@@ -3,11 +3,11 @@ use std::{
     time::{Duration, Instant},
 };
 
-use slint::{ModelRc, SharedString, TimerMode, VecModel};
+use slint::{ComponentHandle, ModelRc, SharedString, TimerMode, VecModel};
 
 use super::{App, HistoryEntry, s};
 use crate::{
-    AppWindow,
+    Api as ApiGlobal, AppWindow,
     api::{self, Page, Route},
     settings,
 };
@@ -57,6 +57,8 @@ impl App {
             .into(),
         );
         ui.set_page_loading(true);
+        // Until the page loads and says whether it is one.
+        ui.global::<ApiGlobal>().set_own_playlist(false);
         ui.set_page_error(SharedString::new());
         match &route {
             Route::Search(query) => ui.set_search_text(query.into()),
@@ -171,6 +173,7 @@ impl App {
         let revision = self.state.borrow().library_revision;
         let api = self.api.clone();
         let asked = route.clone();
+        let edits = self.state.borrow().page_edits.get(&route).copied();
         self.spawn(
             async move {
                 let mut page = api.page(&asked, signed_in).await?;
@@ -200,6 +203,9 @@ impl App {
                     let Some((cached, at)) = state.page_cache.get(&route) else {
                         return;
                     };
+                    if state.page_edits.get(&route).copied() != edits {
+                        return;
+                    }
                     // Saved or subscribed to since it was asked, it may predate that.
                     if state.library_revision != revision {
                         super::page::keep_library_state(&mut page, Some(cached));
@@ -382,7 +388,7 @@ impl App {
         self.navigate(entry.route, false);
     }
 
-    fn update_nav(&self, ui: &AppWindow) {
+    pub(super) fn update_nav(&self, ui: &AppWindow) {
         let state = self.state.borrow();
         ui.set_nav_current(state.route.nav_name().into());
         ui.set_can_back(!state.back.is_empty());

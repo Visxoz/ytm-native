@@ -13,6 +13,7 @@ mod now_playing;
 mod offline;
 mod page;
 mod playback;
+mod playlist_edit;
 mod queue_panel;
 mod resolve;
 mod scrobble;
@@ -189,6 +190,9 @@ struct State {
     forward: Vec<HistoryEntry>,
     page: Page,
     page_generation: u64,
+    /// Bumped by each edit to a playlist's page, by its route, so a refresh
+    /// fetched from before one doesn't put back what it changed.
+    page_edits: HashMap<Route, u64>,
     restore_scroll: Option<f32>,
     queue: Queue<Track>,
     /// Bumped as the queue is replaced or cleared, so tracks fetched for one
@@ -366,6 +370,7 @@ impl App {
                 page: Page::default(),
                 account: 0,
                 page_generation: 0,
+                page_edits: HashMap::new(),
                 restore_scroll: None,
                 queue,
                 queue_generation: 0,

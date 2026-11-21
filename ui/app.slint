@@ -1,4 +1,5 @@
 import { EqualiserDialog } from "dialogs/equaliser.slint";
+import { DeleteDialog, RenameDialog } from "dialogs/playlist-edit.slint";
 import { PlaylistPicker } from "dialogs/playlist-picker.slint";
 import { SettingsDialog } from "dialogs/settings.slint";
 import { SignInDialog } from "dialogs/sign-in.slint";
@@ -171,6 +172,12 @@ export component AppWindow inherits Window {
     in-out property <bool> picker-open;
     in property <bool> picker-loading;
     in property <[PlaylistChoice]> playlist-choices;
+    /// The account's own playlist the rename or delete dialog is for, and
+    /// its name as it was when that opened.
+    in property <string> edit-playlist;
+    in property <string> edit-title;
+    in-out property <bool> rename-open;
+    in-out property <bool> delete-open;
     // A newer version to install, or empty, and the Updates row's text.
     in property <string> update-version;
     in property <string> update-status;
@@ -233,6 +240,8 @@ export component AppWindow inherits Window {
     /// answering why the address won't do, or nothing.
     callback set-proxy(address: string) -> string;
     callback pick-playlist(index: int);
+    callback rename-playlist(id: string, name: string);
+    callback delete-playlist(id: string);
     callback set-autoplay(value: bool);
     callback set-youtube-history(value: bool);
     callback set-rating-buttons(value: bool);
@@ -270,6 +279,13 @@ export component AppWindow inherits Window {
         }
     }
 
+    // The rename dialog's text box had it.
+    changed rename-open => {
+        if !root.rename-open {
+            keys.focus();
+        }
+    }
+
     changed full-player => {
         root.queue-drawer = false;
         root.full-player-changed();
@@ -297,7 +313,7 @@ export component AppWindow inherits Window {
     init => { Palette.color-scheme = root.light ? ColorScheme.light : ColorScheme.dark; }
     changed light => { Palette.color-scheme = root.light ? ColorScheme.light : ColorScheme.dark; }
 
-    property <bool> dialog-open: root.settings-open || root.sign-in-open || root.picker-open || root.eq-open;
+    property <bool> dialog-open: root.settings-open || root.sign-in-open || root.picker-open || root.eq-open || root.rename-open || root.delete-open;
 
     function toggle-sidebar() {
         root.sidebar-collapsed = !root.sidebar-collapsed;
@@ -309,6 +325,9 @@ export component AppWindow inherits Window {
     }
     sign-in-linger := Linger {
         open: root.sign-in-open;
+    }
+    rename-linger := Linger {
+        open: root.rename-open;
     }
 
     public function focus-search() {
@@ -341,6 +360,8 @@ export component AppWindow inherits Window {
                 root.sign-in-open = false;
                 root.picker-open = false;
                 root.eq-open = false;
+                root.rename-open = false;
+                root.delete-open = false;
                 return accept;
             }
             if ev.text == Key.Escape && root.queue-selected > 0 && root.queue-shown {
@@ -645,6 +666,18 @@ export component AppWindow inherits Window {
             picker-loading: root.picker-loading;
             playlist-choices: root.playlist-choices;
             pick-playlist(index) => { root.pick-playlist(index); }
+        }
+
+        if rename-linger.shown: RenameDialog {
+            rename-open <=> root.rename-open;
+            name: root.edit-title;
+            rename(name) => { root.rename-playlist(root.edit-playlist, name); }
+        }
+
+        DeleteDialog {
+            delete-open <=> root.delete-open;
+            name: root.edit-title;
+            confirm => { root.delete-playlist(root.edit-playlist); }
         }
 
         if sign-in-linger.shown: SignInDialog {

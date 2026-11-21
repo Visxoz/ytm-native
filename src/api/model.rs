@@ -170,6 +170,8 @@ pub struct Header {
     /// Playlist whose tracks Shuffle loads when the page's are incomplete.
     pub shuffle_playlist: Option<String>,
     pub radio_id: Option<String>,
+    /// A playlist's song count, counting those not loaded.
+    pub count: Option<u64>,
     /// One of the account's own playlists, which it can edit.
     pub editable: bool,
     /// Who can see the account's own playlist.

@@ -25,6 +25,23 @@ export component Link inherits Text {
     }
 }
 
+/// A song of the account's own playlist being dragged, kept here so the drag
+/// outlives its row once scrolled away. The pointer is in window coordinates.
+export global PageDrag {
+    in-out property <int> from: -1;
+    in-out property <string> song;
+    in-out property <length> pointer-x;
+    in-out property <length> pointer;
+    in-out property <int> target;
+
+    public function drop() {
+        if root.from >= 0 {
+            Api.move-track(root.from, root.target, root.song);
+            root.from = -1;
+        }
+    }
+}
+
 export component TrackRow inherits Rectangle {
     in property <TrackItem> track;
     in property <bool> numbered;
@@ -32,12 +49,37 @@ export component TrackRow inherits Rectangle {
     in property <int> section;
     in property <int> index;
     property <bool> playing: root.track.id != "" && Api.playing-id == root.track.id;
-    property <bool> hot: touch.has-hover || more.has-hover;
+    // Nothing is hot while a song is dragged over the others.
+    property <bool> hot: (touch.has-hover || more.has-hover) && PageDrag.from < 0;
+    property <bool> dragged: Api.own-playlist && PageDrag.from == root.index && PageDrag.song == root.track.id;
+    // The first song takes the pointer above it and the last below it.
+    property <bool> under: Api.own-playlist && PageDrag.from >= 0 && root.section == 0
+        && (root.index == 0 || PageDrag.pointer >= root.absolute-position.y)
+        && (root.index == Api.own-songs - 1 || PageDrag.pointer < root.absolute-position.y + root.height);
+    init => {
+        if root.under {
+            PageDrag.target = root.index;
+        }
+    }
+    changed under => {
+        if root.under {
+            PageDrag.target = root.index;
+        }
+    }
+    property <bool> dragging;
+    // Ended elsewhere, as by leaving the page.
+    property <bool> drag-live: PageDrag.from >= 0;
+    changed drag-live => {
+        if !self.drag-live {
+            root.dragging = false;
+        }
+    }
+    property <length> pressed-y;
     /// YouTube's own actions, which a local file has none of.
     property <bool> youtube: Api.signed-in && !root.track.local;
     height: 56px;
     border-radius: 6px;
-    background: root.hot ? Theme.hover : transparent;
+    background: root.dragged ? Theme.highlight : root.hot ? Theme.hover : transparent;
     animate background { duration: Theme.fast; }
 
     /// Where the menu was asked for, in window coordinates.
@@ -105,6 +147,12 @@ export component TrackRow inherits Rectangle {
             activated => { Api.save-to-playlist(root.track.id); }
         }
 
+        if Api.own-playlist && root.section == 0: MenuEntry {
+            text: "Remove from playlist";
+            icon: Icons.close;
+            activated => { Api.track-action("remove-from-playlist", root.section, root.index); }
+        }
+
         MenuDivider { }
 
         MenuEntry {
@@ -128,12 +176,46 @@ export component TrackRow inherits Rectangle {
         }
     }
 
+    // A drag past a few pixels, on the account's own playlist, moves the song.
     touch := TouchArea {
-        mouse-cursor: pointer;
-        clicked => { Api.play-track(root.section, root.index); }
+        mouse-cursor: root.dragging ? MouseCursor.grabbing : MouseCursor.pointer;
+        // Called before the release's pointer-event, so `dragging` still holds.
+        clicked => {
+            if !root.dragging {
+                Api.play-track(root.section, root.index);
+            }
+        }
         pointer-event(ev) => {
-            if ev.button == PointerEventButton.right && ev.kind == PointerEventKind.up {
+            if ev.button == PointerEventButton.right && ev.kind == PointerEventKind.up && !root.dragging {
                 root.open-menu(self.absolute-position.x + self.mouse-x, self.absolute-position.y + self.mouse-y);
+            }
+            // Cancel comes with no button as the grab is lost, as does another
+            // button's release, which ends the grab too.
+            if root.dragging && (ev.kind == PointerEventKind.cancel
+                || (ev.kind == PointerEventKind.up && ev.button != PointerEventButton.left)) {
+                root.dragging = false;
+                PageDrag.from = -1;
+            }
+            if ev.button != PointerEventButton.left {
+                return;
+            }
+            if ev.kind == PointerEventKind.down {
+                root.pressed-y = self.mouse-y;
+            } else if ev.kind == PointerEventKind.up && root.dragging {
+                root.dragging = false;
+                PageDrag.drop();
+            }
+        }
+        moved => {
+            if !root.dragging && self.pressed && Api.own-playlist && root.section == 0 && abs(self.mouse-y - root.pressed-y) > 6px {
+                root.dragging = true;
+                PageDrag.target = root.index;
+                PageDrag.song = root.track.id;
+                PageDrag.from = root.index;
+            }
+            if root.dragging {
+                PageDrag.pointer-x = self.absolute-position.x + self.mouse-x;
+                PageDrag.pointer = self.absolute-position.y + self.mouse-y;
             }
         }
     }
@@ -245,6 +327,13 @@ export component TrackRow inherits Rectangle {
             vertical-alignment: center;
             font-size: 14px;
         }
+    }
+
+    // Where the dragged song will land.
+    if Api.own-playlist && PageDrag.from >= 0 && PageDrag.target == root.index && PageDrag.target != PageDrag.from: Rectangle {
+        y: PageDrag.target > PageDrag.from ? root.height - 1px : -1px;
+        height: 2px;
+        background: Theme.accent;
     }
 }
 

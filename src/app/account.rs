@@ -311,6 +311,7 @@ impl App {
         self.library.set_vec(Vec::new());
         let ui = self.ui();
         ui.global::<ApiGlobal>().set_signed_in(false);
+        self.offer_edits();
         ui.set_account_photo(Image::default());
         self.premium.reset();
         self.update_settings(|s| {

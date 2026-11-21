@@ -1,0 +1,88 @@
+import { LineEdit } from "std-widgets.slint";
+import { Theme } from "../theme.slint";
+import { PillButton } from "../widgets/buttons.slint";
+import { Dialog } from "dialog.slint";
+
+/// Renames one of the account's own playlists, starting from the name as it is.
+export component RenameDialog inherits Dialog {
+    in-out property <bool> rename-open;
+    in property <string> name;
+    callback rename(name: string);
+
+    function save() {
+        root.rename-open = false;
+        root.rename(field.text);
+    }
+
+    title: "Rename playlist";
+    dialog-width: 420px;
+    open: root.rename-open;
+    close => { root.rename-open = false; }
+    init => {
+        field.focus();
+        field.select-all();
+    }
+    // Opened again while still fading out, the dialog is kept, not made afresh.
+    changed rename-open => {
+        if root.rename-open {
+            field.text = root.name;
+            field.focus();
+            field.select-all();
+        }
+    }
+    field := LineEdit {
+        text: root.name;
+        accepted => { root.save(); }
+    }
+
+    HorizontalLayout {
+        alignment: end;
+        spacing: 12px;
+        PillButton {
+            text: "Cancel";
+            clicked => { root.rename-open = false; }
+        }
+
+        PillButton {
+            text: "Save";
+            primary: true;
+            clicked => { root.save(); }
+        }
+    }
+}
+
+/// Asks before deleting one of the account's own playlists.
+export component DeleteDialog inherits Dialog {
+    in-out property <bool> delete-open;
+    in property <string> name;
+    callback confirm();
+
+    title: "Delete playlist";
+    dialog-width: 420px;
+    open: root.delete-open;
+    close => { root.delete-open = false; }
+    Text {
+        text: "Delete “" + root.name + "”? This can't be undone.";
+        wrap: word-wrap;
+        font-size: 14px;
+        color: Theme.text-secondary;
+    }
+
+    HorizontalLayout {
+        alignment: end;
+        spacing: 12px;
+        PillButton {
+            text: "Cancel";
+            clicked => { root.delete-open = false; }
+        }
+
+        PillButton {
+            text: "Delete";
+            primary: true;
+            clicked => {
+                root.delete-open = false;
+                root.confirm();
+            }
+        }
+    }
+}

@@ -190,6 +190,7 @@ impl App {
 
         let more = page.more.is_some();
         self.state.borrow_mut().page = page;
+        self.offer_edits();
         let Built { rows, card_art } = built;
         self.rows.set_vec(rows);
         let scroll = self.state.borrow_mut().restore_scroll.take().unwrap_or(0.0);
@@ -273,9 +274,10 @@ impl App {
 
     /// Fetches one step of `Page.more`; the next follows once it is on screen.
     fn complete_page(self: &Rc<Self>, route: Route, generation: u64) {
-        let (page, account) = {
+        let (page, account, edits) = {
             let state = self.state.borrow();
-            (state.page.clone(), state.account)
+            let edits = state.page_edits.get(&route).copied();
+            (state.page.clone(), state.account, edits)
         };
         let shown = page.sections.len();
         let api = self.api.clone();
@@ -303,9 +305,13 @@ impl App {
                 } else if !whole {
                     // Cut short, it would play and show as whole; the next visit asks again.
                     app.state.borrow_mut().page_cache.remove(&route);
-                } else if let Some((cached, _)) = app.state.borrow_mut().page_cache.get_mut(&route)
-                {
-                    *cached = page.clone();
+                } else {
+                    // Edited since it was asked, the cached copy is newer.
+                    let mut state = app.state.borrow_mut();
+                    let edited = state.page_edits.get(&route).copied() != edits;
+                    if !edited && let Some((cached, _)) = state.page_cache.get_mut(&route) {
+                        *cached = page.clone();
+                    }
                 }
                 if current {
                     app.extend_page(page, route, generation);
@@ -366,15 +372,6 @@ impl App {
                 self.rows
                     .insert(row_index, track_row(track, index, *numbered, 0, downloaded));
             }
-            if let Some(header) = &page.header
-                && let Some(i) = self.find_row(RowKind::Header)
-                && let Some(mut row) = self.rows.row_data(i)
-            {
-                row.meta = s(&header.meta);
-                let downloads = &self.state.borrow().downloads;
-                row.downloaded = tracks.iter().all(|t| downloads.contains(&t.id));
-                self.rows.set_row_data(i, row);
-            }
         }
 
         if page.sections.len() > shown_sections {
@@ -391,8 +388,28 @@ impl App {
 
         let more = page.more.is_some();
         self.state.borrow_mut().page = page;
+        self.header_changed();
         if more {
             self.complete_page(route, generation);
+        }
+    }
+
+    /// Shows the page's header as it now is, its song count for one.
+    pub(super) fn refresh_header(&self) {
+        let state = self.state.borrow();
+        let Some(header) = &state.page.header else {
+            return;
+        };
+        self.ui().set_page_title(s(&header.title));
+        if let Some(i) = self.find_row(RowKind::Header)
+            && let Some(mut row) = self.rows.row_data(i)
+        {
+            let tracks = state.page.header_tracks();
+            row.title = s(&header.title);
+            row.meta = s(&header.meta);
+            row.downloaded =
+                !tracks.is_empty() && tracks.iter().all(|t| state.downloads.contains(&t.id));
+            self.rows.set_row_data(i, row);
         }
     }
 }

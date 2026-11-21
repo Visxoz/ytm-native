@@ -112,6 +112,8 @@ export global Api {
     /// 0 removes either.
     callback rate(id: string, rating: int);
     callback save-to-playlist(id: string);
+    /// Moves song `from` of the page's own playlist, the song `id`, to `to`.
+    callback move-track(from: int, to: int, id: string);
     in property <bool> signed-in;
     /// How the account rated the playing song: 0 none, 1 like, 2 dislike.
     in property <int> playing-rating;
@@ -124,6 +126,12 @@ export global Api {
     in property <int> eq-phase;
     /// Minimised or in the tray: stills the placeholders' pulse.
     in property <bool> minimised;
+    /// The page is one of the account's own playlists, loaded whole, which
+    /// its menus and dragging edit; how many songs it has, and who can see
+    /// it: 0 public, 1 unlisted, 2 private.
+    in property <bool> own-playlist;
+    in property <int> own-songs;
+    in property <int> own-privacy;
 
     /// The rating known for `id`: only the playing song's is.
     public pure function rating-of(id: string) -> int {

@@ -146,6 +146,9 @@ impl App {
         if action == "save" || action == "subscribe" {
             return self.toggle_in_library(action == "subscribe");
         }
+        if let "rename" | "delete" | "public" | "unlisted" | "private" = action {
+            return self.edit_playlist(action);
+        }
         let (tracks, shuffle_playlist, unloaded, radio_id) = {
             let state = self.state.borrow();
             let Some(header) = &state.page.header else {
@@ -447,6 +450,7 @@ impl App {
                 }
             }
             "copy-link" if !track.is_local() => self.copy_link(api::link("song", &track.id)),
+            "remove-from-playlist" => self.remove_from_playlist(section, track),
             _ => {}
         }
     }

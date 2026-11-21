@@ -18,7 +18,7 @@ use tokio::sync::OnceCell;
 
 pub use convert::resize_thumb;
 use convert::tracks;
-pub use format::{format_duration, songs};
+pub use format::{format_duration, playlist_meta, songs};
 pub use history::{Watched, Watchtime};
 pub use home_feed::{add_recent, arrange as arrange_home};
 pub use library::{PlaylistOption, Rating};

@@ -307,5 +307,14 @@ impl App {
             .open_playlist_picker(id.to_string()));
         on!(on_pick_playlist, |app, index| app
             .pick_playlist(index as usize));
+        on!(on_rename_playlist, |app, id, name| app
+            .rename_playlist(id.to_string(), &name));
+        on!(on_delete_playlist, |app, id| app
+            .delete_playlist(id.to_string()));
+        on!(api.on_move_track, |app, from, to, id| app.move_in_playlist(
+            from as usize,
+            to as usize,
+            &id
+        ));
     }
 }

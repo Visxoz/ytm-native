@@ -4,6 +4,9 @@ use serde_json::{Value, json, value::RawValue};
 
 use super::{Api, PlaylistPrivacy, Result, Track, err};
 
+/// Why a playlist couldn't be made public or unlisted.
+const NEEDS_CHANNEL: &str = "the account needs a YouTube channel to share playlists";
+
 /// Songs or actions YouTube takes in one playlist call.
 const PER_REQUEST: usize = 100;
 
@@ -109,7 +112,12 @@ impl Api {
                 .await?;
             // A refused edit, such as a full playlist, still answers 200.
             if !succeeded(&reply) {
-                return Err("YouTube didn't change the playlist".into());
+                // An account without a channel is asked to make one first.
+                return Err(if reply.contains("channelCreationFormEndpoint") {
+                    NEEDS_CHANNEL.into()
+                } else {
+                    "YouTube didn't change the playlist".into()
+                });
             }
         }
         Ok(())
@@ -152,7 +160,6 @@ impl Api {
 impl Api {
     /// Removes `tracks`, as its page has them, from one of the account's
     /// playlists.
-    #[expect(dead_code, reason = "the playlist editing UI is to come")]
     pub async fn remove_from_playlist(&self, playlist_id: &str, tracks: &[Track]) -> Result<()> {
         let actions = tracks
             .iter()
@@ -170,7 +177,6 @@ impl Api {
 
     /// Moves the entry `set_video_id` of one of the account's playlists to
     /// before the entry `before`, or to the end.
-    #[expect(dead_code, reason = "the playlist editing UI is to come")]
     pub async fn move_in_playlist(
         &self,
         playlist_id: &str,
@@ -188,7 +194,6 @@ impl Api {
         self.edit_playlist(playlist_id, &[action]).await
     }
 
-    #[expect(dead_code, reason = "the playlist editing UI is to come")]
     pub async fn rename_playlist(&self, playlist_id: &str, title: &str) -> Result<()> {
         let title = title.trim();
         if title.is_empty() {
@@ -198,7 +203,6 @@ impl Api {
         self.edit_playlist(playlist_id, &[action]).await
     }
 
-    #[expect(dead_code, reason = "the playlist editing UI is to come")]
     pub async fn set_playlist_privacy(
         &self,
         playlist_id: &str,
@@ -213,7 +217,6 @@ impl Api {
         self.edit_playlist(playlist_id, &[action]).await
     }
 
-    #[expect(dead_code, reason = "the playlist editing UI is to come")]
     pub async fn delete_playlist(&self, playlist_id: &str) -> Result<()> {
         let body = json!({ "playlistId": youtube_id(playlist_id)? });
         performed(&self.edit("playlist/delete", &body).await?)
@@ -459,14 +462,7 @@ mod tests {
         let source = crate::settings::data_dir().join("rustypipe_cache.bin");
         let dir = std::env::temp_dir().join(format!("lily-live-library-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
-        // Removed however the test ends, as it holds the cookie.
-        struct Remove(std::path::PathBuf);
-        impl Drop for Remove {
-            fn drop(&mut self) {
-                let _ = std::fs::remove_dir_all(&self.0);
-            }
-        }
-        let _remove = Remove(dir.clone());
+        let _remove = Scratch(dir.clone());
         if std::fs::copy(&source, dir.join("rustypipe_cache.bin")).is_err() {
             eprintln!("skipped: no sign-in at {}", source.display());
             return;
@@ -536,5 +532,136 @@ mod tests {
             failures
         });
         assert!(failures.is_empty(), "\n{}", failures.join("\n"));
+    }
+
+    /// Removes the folder, which holds a copy of the sign-in, however the
+    /// test ends.
+    struct Scratch(std::path::PathBuf);
+
+    impl Drop for Scratch {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Public videos that are never going away.
+    const VIDEOS: [&str; 3] = ["dQw4w9WgXcQ", "kJQP7kiw5Fk", "9bZkp7q19f0"];
+
+    /// The scratch playlist as its page has it, after a pause, as YouTube
+    /// takes a moment to show an edit.
+    async fn load(api: &Api, id: &str) -> Result<crate::api::Page> {
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        api.page(&crate::api::Route::Playlist(id.to_owned()), true)
+            .await
+    }
+
+    fn ids(page: &crate::api::Page) -> Vec<&str> {
+        page.header_tracks().iter().map(|t| t.id.as_str()).collect()
+    }
+
+    async fn edit_scratch(api: Api, id: String, title: String) {
+        let page = load(&api, &id).await.expect("the new playlist opens");
+        let header = page.header.as_ref().expect("a header");
+        assert!(header.editable, "it is the account's own");
+        assert_eq!(header.privacy, Some(PlaylistPrivacy::Private));
+        // YouTube Music swaps music videos for their song versions, so the
+        // order is checked by what the page holds rather than what was sent.
+        let first = ids(&page);
+        assert_eq!(first.len(), VIDEOS.len(), "every song was added");
+        let tracks = page.header_tracks();
+        assert!(
+            tracks.iter().all(|t| t.set_video_id.is_some()),
+            "every entry has its ID"
+        );
+        let entry = |i: usize| tracks[i].set_video_id.as_deref();
+
+        api.move_in_playlist(&id, entry(2).unwrap(), entry(0))
+            .await
+            .expect("moved");
+        eprintln!("moved the last song first");
+        api.remove_from_playlist(&id, &tracks[1..2])
+            .await
+            .expect("removed");
+        eprintln!("removed {}", first[1]);
+        let renamed = format!("{title} renamed");
+        api.rename_playlist(&id, &renamed).await.expect("renamed");
+        eprintln!("renamed it {renamed:?}");
+        let privacy = match api
+            .set_playlist_privacy(&id, PlaylistPrivacy::Unlisted)
+            .await
+        {
+            Err(e) if e == NEEDS_CHANNEL => {
+                eprintln!("not made unlisted: {NEEDS_CHANNEL}");
+                PlaylistPrivacy::Private
+            }
+            done => {
+                done.expect("made unlisted");
+                eprintln!("made it unlisted");
+                PlaylistPrivacy::Unlisted
+            }
+        };
+
+        let page = load(&api, &id).await.expect("the playlist opens again");
+        let header = page.header.as_ref().expect("a header");
+        assert_eq!(ids(&page), [first[2], first[0]]);
+        assert_eq!(header.title, renamed);
+        assert_eq!(header.privacy, Some(privacy));
+        eprintln!("the reloaded page has the edits");
+    }
+
+    /// Makes a private playlist on the signed-in account, edits it every way
+    /// the app does, and deletes it however that went. Signed in through a
+    /// copy of the app's sign-in, so the app's own files are never written.
+    #[test]
+    #[ignore = "edits the signed-in account; run by hand"]
+    fn live_edits_a_scratch_playlist() {
+        let signed_in = crate::settings::data_dir().join("rustypipe_cache.bin");
+        if !signed_in.exists() {
+            eprintln!("skipped: no sign-in at {}", signed_in.display());
+            return;
+        }
+        let dir = Scratch(std::env::temp_dir().join(format!("lily-live-{}", std::process::id())));
+        std::fs::create_dir_all(&dir.0).expect("temporary folder made");
+        std::fs::copy(&signed_in, dir.0.join("rustypipe_cache.bin")).expect("sign-in copied");
+        let api = Api::in_dir(dir.0.clone(), None).expect("client starts");
+        if !api.has_cookie() {
+            eprintln!("skipped: the sign-in has no cookie");
+            return;
+        }
+        let rt = tokio::runtime::Runtime::new().expect("runtime starts");
+        let stamp = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs());
+        let title = format!("Lily live test {stamp}");
+        let videos = VIDEOS.map(String::from);
+        // Named first, so one made by a call that then failed can be found.
+        eprintln!("making the private playlist {title:?}");
+        let id = rt
+            .block_on(api.create_playlist(&title, &videos))
+            .expect("scratch playlist made");
+        eprintln!("made it: {id}");
+
+        // Spawned, so a failed assertion comes back here to clean up after.
+        let edited = rt.block_on(rt.spawn(edit_scratch(api.clone(), id.clone(), title)));
+        let deleted = rt.block_on(api.delete_playlist(&id));
+        eprintln!("deleted it: {deleted:?}");
+        let gone = rt.block_on(async {
+            for _ in 0..3 {
+                if load(&api, &id).await.is_err() {
+                    return true;
+                }
+            }
+            false
+        });
+        eprintln!("gone: {gone}");
+
+        if let Err(e) = edited {
+            match e.try_into_panic() {
+                Ok(panic) => std::panic::resume_unwind(panic),
+                Err(e) => panic!("{e}"),
+            }
+        }
+        deleted.expect("scratch playlist deleted");
+        assert!(gone, "the deleted playlist {id} still opens");
     }
 }

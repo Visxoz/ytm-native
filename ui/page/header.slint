@@ -2,7 +2,7 @@ import { Icons, Theme } from "../theme.slint";
 import { Api, CardItem, RowItem } from "../types.slint";
 import { Art } from "../widgets/art.slint";
 import { IconButton, PillButton, PlayButton } from "../widgets/buttons.slint";
-import { MenuEntry, PopupMenu } from "../widgets/menu.slint";
+import { MenuDivider, MenuEntry, PopupMenu } from "../widgets/menu.slint";
 import { Layout } from "layout.slint";
 
 export component TopResult inherits Rectangle {
@@ -88,6 +88,37 @@ export component PageHeader {
             text: "Copy link";
             icon: Icons.link;
             activated => { Api.header-action("copy-link"); }
+        }
+
+        if Api.own-playlist: MenuEntry {
+            text: "Rename";
+            icon: Icons.edit;
+            activated => { Api.header-action("rename"); }
+        }
+        if Api.own-playlist: MenuDivider { }
+        if Api.own-playlist: MenuEntry {
+            text: "Public";
+            icon: Api.own-privacy == 0 ? Icons.check : "";
+            active: Api.own-privacy == 0;
+            activated => { Api.header-action("public"); }
+        }
+        if Api.own-playlist: MenuEntry {
+            text: "Unlisted";
+            icon: Api.own-privacy == 1 ? Icons.check : "";
+            active: Api.own-privacy == 1;
+            activated => { Api.header-action("unlisted"); }
+        }
+        if Api.own-playlist: MenuEntry {
+            text: "Private";
+            icon: Api.own-privacy == 2 ? Icons.check : "";
+            active: Api.own-privacy == 2;
+            activated => { Api.header-action("private"); }
+        }
+        if Api.own-playlist: MenuDivider { }
+        if Api.own-playlist: MenuEntry {
+            text: "Delete playlist";
+            icon: Icons.delete;
+            activated => { Api.header-action("delete"); }
         }
     }
 

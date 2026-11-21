@@ -432,6 +432,7 @@ impl Api {
             banner: false,
             shuffle_playlist: None,
             radio_id: Some(format!("RDAMPL{}", playlist.id)),
+            count: playlist.track_count,
             editable: own,
             privacy: playlist.privacy.filter(|_| own),
             saved: playlist.saved,
