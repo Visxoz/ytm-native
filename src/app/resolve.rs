@@ -221,6 +221,8 @@ async fn recheck_player(shared: &PremiumShared, held: &premium::Player) -> Resul
         let player = premium::load_player(id).await?;
         premium::diag(format!("player {} replaces {}", player.id, held.id));
         *shared.player.lock().await = Some(Arc::new(player));
+    } else {
+        log::debug!("the Premium player {id} is still current");
     }
     Ok(())
 }

@@ -229,6 +229,16 @@ impl App {
                     };
                     watch.sent += 1;
                     watch.next_at = ping.due(watch.sent, elapsed);
+                    // What it reports, without the URL's tokens.
+                    log::debug!(
+                        "watch time {} at {:.0} s: heard {:?}, at {:.1} s{}{}",
+                        watch.sent,
+                        elapsed.as_secs_f64(),
+                        watched.segments,
+                        watched.position,
+                        if paused { ", paused" } else { "" },
+                        if last { ", final" } else { "" }
+                    );
                     Some(ping.url(&watched))
                 }
                 _ => None,

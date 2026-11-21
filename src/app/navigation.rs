@@ -231,6 +231,16 @@ impl App {
                 if ours && home {
                     app.save_home(page.sections.clone());
                 }
+                log::debug!(
+                    "refreshed an expired page: {}",
+                    if swap {
+                        "swapped in"
+                    } else if ours {
+                        "cached for the next visit"
+                    } else {
+                        "dropped"
+                    }
+                );
                 if !swap {
                     if ours {
                         app.cache_page(route, page);
