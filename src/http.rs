@@ -171,6 +171,15 @@ pub fn proxy_in_use() -> Option<String> {
     PROXY.get().map(|(url, _)| proxy_address(url))
 }
 
+/// Whether Lily's requests go through a proxy Windows' own fetches don't
+/// follow: the user's own, or the variables reqwest reads.
+pub fn proxy_unknown_to_windows() -> bool {
+    PROXY.get().is_some()
+        || ["HTTPS_PROXY", "https_proxy", "ALL_PROXY", "all_proxy"]
+            .iter()
+            .any(|name| std::env::var_os(name).is_some_and(|v| !v.is_empty()))
+}
+
 /// WebView2's flag for the proxy in use.
 pub fn proxy_server_arg() -> Option<String> {
     PROXY.get().map(|(url, _)| proxy_server_flag(url))
