@@ -61,6 +61,12 @@ export component LibraryRow inherits Rectangle {
             active: root.item.pinned;
             activated => { Api.card-action(root.item.pinned ? "unpin" : "pin", root.item.kind, root.item.id); }
         }
+
+        MenuEntry {
+            text: "Copy link";
+            icon: Icons.link;
+            activated => { Api.card-action("copy-link", root.item.kind, root.item.id); }
+        }
     }
 
     Art {

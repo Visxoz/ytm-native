@@ -119,6 +119,12 @@ export component QueueRow inherits Rectangle {
             activated => { Api.download(root.item.id, root.item.downloaded); }
         }
 
+        if !root.many && !root.item.local: MenuEntry {
+            text: "Copy link";
+            icon: Icons.link;
+            activated => { Api.card-action("copy-link", "song", root.item.id); }
+        }
+
         if root.youtube: MenuDivider { }
 
         if root.youtube: MenuEntry {
