@@ -187,12 +187,18 @@ fn proxy_server_flag(url: &Url) -> String {
 /// Without a scheme, HTTP.
 fn parse_proxy(text: &str) -> Result<(Url, reqwest::Proxy), &'static str> {
     let text = text.trim();
+    // A sign-in's @, # or / otherwise end the user name or password early.
+    let bad = if text.contains('@') {
+        "That isn't a proxy address. Write @, # or / in a user name or password as %40, %23 or %2F."
+    } else {
+        "That isn't a proxy address, like http://127.0.0.1:8080."
+    };
     let url = if text.contains("://") {
         Url::parse(text)
     } else {
         Url::parse(&format!("http://{text}"))
     }
-    .map_err(|_| "That isn't a proxy address, like http://127.0.0.1:8080.")?;
+    .map_err(|_| bad)?;
     if !matches!(url.scheme(), "http" | "https" | "socks5" | "socks5h") {
         return Err("Use an http:// or socks5:// address.");
     }
@@ -205,10 +211,9 @@ fn parse_proxy(text: &str) -> Result<(Url, reqwest::Proxy), &'static str> {
     // hyper-util parses it again as an `http::Uri`, and goes direct should
     // that fail.
     if url.as_str().parse::<::http::Uri>().is_err() {
-        return Err("That isn't a proxy address, like http://127.0.0.1:8080.");
+        return Err(bad);
     }
-    let proxy = reqwest::Proxy::all(url.as_str())
-        .map_err(|_| "That isn't a proxy address, like http://127.0.0.1:8080.")?;
+    let proxy = reqwest::Proxy::all(url.as_str()).map_err(|_| bad)?;
     Ok((url, proxy))
 }
 
@@ -315,6 +320,13 @@ mod tests {
         assert!(address("http://:8080").is_err());
         assert!(address("not a proxy").is_err());
         assert!(address("socks5://prøxy.lan:1080").is_err(), "not a URI");
+        assert!(
+            address("http://user:pa#ss@proxy:8080")
+                .unwrap_err()
+                .contains("%23"),
+            "says how to write a password's #"
+        );
+        assert!(address("http://user:pa%23ss@proxy:8080").is_ok());
     }
 
     #[test]
