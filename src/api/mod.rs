@@ -35,6 +35,18 @@ fn err(e: impl std::fmt::Display) -> String {
     e.to_string()
 }
 
+/// Drops playlist entries already listed: YouTube sometimes answers a long
+/// curated playlist's next page from its start again. By entry rather than
+/// song, so a song the playlist holds twice keeps both.
+fn drop_repeats(items: &mut Vec<TrackItem>) {
+    keep_first_entries(items, |t| t.set_video_id.as_deref());
+}
+
+fn keep_first_entries<T>(items: &mut Vec<T>, entry: impl Fn(&T) -> Option<&str>) {
+    let mut seen = std::collections::HashSet::new();
+    items.retain(|item| entry(item).is_none_or(|id| seen.insert(id.to_owned())));
+}
+
 /// Whether `id` is a YouTube video's, as a local file's path never is.
 pub fn is_video_id(id: &str) -> bool {
     id.len() == VIDEO_ID_LEN
@@ -143,6 +155,7 @@ impl Api {
             let mut playlist = q.music_playlist(id).await?;
             if full {
                 let _ = playlist.tracks.extend_limit(&q, PLAYLIST_LIMIT).await;
+                drop_repeats(&mut playlist.tracks.items);
             }
             Ok(playlist)
         })
@@ -256,6 +269,24 @@ mod tests {
                 .collect(),
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn drops_a_page_repeated_from_the_start_but_not_songs_listed_twice() {
+        // Entries a, b, c, then a next page starting over at b with one new.
+        let mut entries = vec![
+            ("a", Some("1")),
+            ("b", Some("2")),
+            ("c", Some("3")),
+            ("b", Some("2")),
+            ("c", Some("3")),
+            ("a", Some("4")),
+            ("d", None),
+            ("d", None),
+        ];
+        keep_first_entries(&mut entries, |(_, entry)| *entry);
+        let songs: Vec<_> = entries.iter().map(|(song, _)| *song).collect();
+        assert_eq!(songs, ["a", "b", "c", "a", "d", "d"]);
     }
 
     #[test]

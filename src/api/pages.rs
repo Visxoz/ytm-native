@@ -469,7 +469,11 @@ impl Api {
             Some(More::Tracks(MoreTracks { mut tracks, count })) => {
                 let shown = tracks.items.len();
                 whole = tracks.extend_limit(self.q(), PLAYLIST_LIMIT).await.is_ok();
+                // The first page has no repeats, so `shown` still marks its end;
+                // capped all the same, as `split_off` past the end panics.
+                super::drop_repeats(&mut tracks.items);
                 let own = page.header.as_ref().is_some_and(|h| h.editable);
+                let shown = shown.min(tracks.items.len());
                 let extra = playlist_tracks(tracks.items.split_off(shown), own);
                 if let Some(Section::Tracks { tracks, .. }) = page.sections.first_mut() {
                     tracks.extend(extra);
