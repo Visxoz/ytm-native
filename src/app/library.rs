@@ -58,7 +58,7 @@ impl App {
             self.state.borrow_mut().rating_generation += 1;
             global.set_playing_rating(rating.index());
             if rating == Rating::Dislike {
-                self.next(true);
+                self.skip();
                 // Nothing to skip to: the queue's end, or a repeat of it.
                 if self.playing_id().as_deref() == Some(id.as_str()) {
                     self.stop();

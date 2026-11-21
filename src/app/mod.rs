@@ -235,6 +235,7 @@ struct State {
 impl State {
     /// Replaces the queue, dropping Smart Shuffle's batch for the old one.
     fn set_queue(&mut self, tracks: Vec<Track>, start: usize, shuffle: bool) {
+        self.playback.failures = 0;
         // Chosen afresh, a song that dropped starts over.
         if self.playback.reopen.take().is_some() {
             self.playback.resume = None;

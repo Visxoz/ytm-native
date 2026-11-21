@@ -20,6 +20,7 @@ impl App {
         if !(control || shift) {
             self.clear_selection();
             if self.state.borrow_mut().queue.jump(index).is_some() {
+                self.state.borrow_mut().playback.failures = 0;
                 self.start_current();
             }
             return;

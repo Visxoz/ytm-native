@@ -211,7 +211,10 @@ impl App {
             state.playback.failures += 1;
             state.playback.failures
         };
-        self.toast(format!("Couldn't play \u{201c}{title}\u{201d}: {error}"));
+        self.toast(format!(
+            "Couldn't play \u{201c}{title}\u{201d}: {}",
+            toast_reason(error)
+        ));
         let has_next = self.state.borrow().queue.peek_next().is_some();
         if failures < MAX_CONSECUTIVE_FAILURES && has_next {
             self.next(true);
@@ -228,7 +231,10 @@ impl App {
                     let mut state = self.state.borrow_mut();
                     let playback = &mut state.playback;
                     playback.started = true;
-                    playback.failures = 0;
+                    // Not `failures`: a song that sounds and then fails, as every one
+                    // does once googlevideo cuts all clients off, counts towards
+                    // the run that stops. Played through, chosen (`skip`, `previous`,
+                    // a queue row) or replayed resets it.
                     playback.reopen = None;
                     playback.resume = None;
                     let waited = playback.requested_at.take().map(|t| t.elapsed());
@@ -263,7 +269,10 @@ impl App {
             "next-failed" if message != "dropped" => {
                 self.state.borrow_mut().playback.queued_failed = true;
             }
-            "ended" => self.next(false),
+            "ended" => {
+                self.state.borrow_mut().playback.failures = 0;
+                self.next(false);
+            }
             "dropped" => self.connection_lost(message),
             // The player paused itself; the rest follows as for the user's pause.
             "unplugged" => {
@@ -399,6 +408,13 @@ impl App {
         );
     }
 
+    /// The user's Next: the song is chosen, so earlier failures no longer
+    /// count towards the run that stops playback.
+    pub(super) fn skip(self: &Rc<Self>) {
+        self.state.borrow_mut().playback.failures = 0;
+        self.next(true);
+    }
+
     pub(super) fn next(self: &Rc<Self>, user: bool) {
         let moved = self.state.borrow_mut().queue.advance(user).is_some();
         if moved {
@@ -459,6 +475,7 @@ impl App {
             return;
         }
         if self.state.borrow_mut().queue.back().is_some() {
+            self.state.borrow_mut().playback.failures = 0;
             self.start_current();
         }
     }
@@ -486,6 +503,7 @@ impl App {
         }
         if self.stopped() {
             // Replay the current track after it stopped at the queue's end.
+            self.state.borrow_mut().playback.failures = 0;
             self.start_current();
             return;
         }
@@ -644,5 +662,15 @@ impl App {
             self.update_gapless(position);
         }
         self.sync_mini();
+    }
+}
+
+/// The toast's words for a failure: googlevideo refusing every URL it was
+/// asked for reads better than the decoder's wrapping of the 403.
+fn toast_reason(error: &str) -> &str {
+    if error.contains("403 Forbidden") {
+        "YouTube refused the stream"
+    } else {
+        error
     }
 }

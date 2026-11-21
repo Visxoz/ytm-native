@@ -71,7 +71,7 @@ impl App {
             }
         };
         mini.on_toggle_play(action(|app| app.toggle_play()));
-        mini.on_next(action(|app| app.next(true)));
+        mini.on_next(action(|app| app.skip()));
         mini.on_previous(action(|app| app.previous()));
         mini.on_dismiss(action(|app| app.toggle_mini_player()));
         mini.on_expand(action(|app| {

@@ -76,7 +76,7 @@ impl App {
             Action::Toggle | Action::Show => self.show_window(),
             Action::MiniPlayer => self.toggle_mini_player(),
             Action::PlayPause => self.toggle_play(),
-            Action::Next => self.next(true),
+            Action::Next => self.skip(),
             Action::Previous => self.previous(),
             Action::Quit => self.quit(),
         }

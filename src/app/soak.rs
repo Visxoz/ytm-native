@@ -43,7 +43,7 @@ impl App {
                 private as f64 / 1048576.0,
                 working as f64 / 1048576.0
             );
-            app.next(true);
+            app.skip();
         });
         log::warn!("soak: skipping every {secs} s while playing");
         Some(timer)

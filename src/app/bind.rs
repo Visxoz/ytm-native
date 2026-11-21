@@ -45,7 +45,7 @@ impl App {
             .suggest(query.to_string()));
         on!(on_forget_search, |app, query| app.forget_search(&query));
         on!(on_toggle_play, |app| app.toggle_play());
-        on!(on_next, |app| app.next(true));
+        on!(on_next, |app| app.skip());
         on!(on_previous, |app| app.previous());
         on!(on_seek, |app, fraction| {
             let duration = app.state.borrow().playback.duration;
@@ -250,7 +250,7 @@ impl App {
                 "toggle" => app.toggle_play(),
                 "play" => app.set_paused(false),
                 "pause" => app.set_paused(true),
-                "next" => app.next(true),
+                "next" => app.skip(),
                 "previous" => app.previous(),
                 // The overlay works in clock time.
                 "seek-by" => app.seek_to(app.player.position() + value as f64 * app.speed()),
