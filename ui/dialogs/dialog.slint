@@ -9,11 +9,18 @@ export component Dialog inherits Rectangle {
     in property <length> dialog-width: 520px;
     in property <bool> open: true;
     callback close();
+    /// Shown, so visible: focus set before then, as in `init`, doesn't take.
+    callback opened();
     // The first frame draws the closed look, so the opening animates
     // from it; a value set before any frame has nothing to animate from.
     property <bool> started;
     property <bool> shown: root.open && root.started;
     visible: root.shown || card.opacity > 0;
+    changed shown => {
+        if root.shown {
+            root.opened();
+        }
+    }
     Timer {
         interval: 16ms;
         running: !root.started;

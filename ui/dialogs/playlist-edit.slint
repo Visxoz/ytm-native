@@ -18,17 +18,12 @@ export component RenameDialog inherits Dialog {
     dialog-width: 420px;
     open: root.rename-open;
     close => { root.rename-open = false; }
-    init => {
+    // Opened again while still fading out, the dialog is kept, not made
+    // afresh, so the text is put back here too.
+    opened => {
+        field.text = root.name;
         field.focus();
         field.select-all();
-    }
-    // Opened again while still fading out, the dialog is kept, not made afresh.
-    changed rename-open => {
-        if root.rename-open {
-            field.text = root.name;
-            field.focus();
-            field.select-all();
-        }
     }
     field := LineEdit {
         text: root.name;
