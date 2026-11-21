@@ -69,7 +69,7 @@ impl Saved {
         if !crate::api::is_video_id(&track.id) {
             return Err("not a YouTube song".into());
         }
-        let bytes = audio::fetch(source, refresh)?;
+        let blocks = audio::fetch(source, refresh)?;
         std::fs::create_dir_all(dir()).map_err(|e| format!("couldn't save it: {e}"))?;
         // Without its cover it still plays, with the cover online.
         let cover = track
@@ -82,8 +82,11 @@ impl Saved {
             });
         // Written last, so a failed download never leaves a song indexed
         // without its audio.
-        settings::write_atomic(&audio_path(&track.id, &stream.mime), &bytes)
-            .map_err(|e| format!("couldn't save it: {e}"))?;
+        settings::write_atomic_parts(
+            &audio_path(&track.id, &stream.mime),
+            blocks.iter().map(Vec::as_slice),
+        )
+        .map_err(|e| format!("couldn't save it: {e}"))?;
         Ok(Self {
             track,
             stream,

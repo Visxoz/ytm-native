@@ -51,9 +51,26 @@ pub fn move_data_dir() {
 /// whole. Not flushed, as most saves run on the UI thread. Each write has its
 /// own temporary file, as rustypipe saves its cache from any worker.
 pub fn write_atomic(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    write_atomic_parts(path, [bytes])
+}
+
+/// `write_atomic` for bytes in parts, as a stream's blocks, which are then
+/// never joined in memory.
+pub fn write_atomic_parts<'a>(
+    path: &Path,
+    parts: impl IntoIterator<Item = &'a [u8]>,
+) -> io::Result<()> {
     static NEXT: AtomicU64 = AtomicU64::new(0);
     let partial = path.with_extension(format!("{}.tmp", NEXT.fetch_add(1, Ordering::Relaxed)));
-    let result = std::fs::write(&partial, bytes).and_then(|()| std::fs::rename(&partial, path));
+    let write = || {
+        let mut file = std::fs::File::create(&partial)?;
+        for part in parts {
+            io::Write::write_all(&mut file, part)?;
+        }
+        Ok(())
+    };
+    // The file is closed by then, as Windows renames no open file.
+    let result = write().and_then(|()| std::fs::rename(&partial, path));
     if result.is_err() {
         let _ = std::fs::remove_file(&partial);
     }

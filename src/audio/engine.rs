@@ -123,6 +123,16 @@ fn samples_in(secs: f64, rate: u32, channels: usize) -> usize {
     (secs * f64::from(rate)) as usize * channels
 }
 
+/// How many of `held` samples move on to a device queue of `queued`: those
+/// past the `hold`, and enough to bring the queue up to `low`, but never
+/// past `ahead`. A whole crossfade hold let go at once, as when its queued
+/// track is dropped, would otherwise grow the queue for the rest of the run.
+fn to_spill(held: usize, hold: usize, queued: usize, low: usize, ahead: usize) -> usize {
+    let short = low.saturating_sub(queued);
+    let room = ahead.saturating_sub(queued).max(short);
+    held.saturating_sub(hold.saturating_sub(short)).min(room)
+}
+
 fn same_format(decoder: &Decoder, output: &Output) -> bool {
     decoder.rate == output.rate && decoder.channels == output.channels
 }
@@ -551,12 +561,15 @@ impl Engine {
             return;
         }
         let mut output = self.shared.output.lock().unwrap();
-        let low = samples_in(LOW_WATER_SECS, output.rate, output.channels);
-        let short = low.saturating_sub(output.samples.len());
-        let keep = self.hold().saturating_sub(short);
-        if let Some(excess) = self.held.len().checked_sub(keep) {
-            output.samples.extend(self.held.drain(..excess));
-        }
+        let (rate, channels) = (output.rate, output.channels);
+        let n = to_spill(
+            self.held.len(),
+            self.hold(),
+            output.samples.len(),
+            samples_in(LOW_WATER_SECS, rate, channels),
+            samples_in(BUFFER_AHEAD_SECS, rate, channels),
+        );
+        output.samples.extend(self.held.drain(..n));
     }
 
     /// The current track's download becomes the audible one, for progress.
@@ -1074,6 +1087,25 @@ mod tests {
         let mut out = VecDeque::new();
         assert_eq!(take_tail(&mut held, &mut out, 2, 200, 20).len(), 6);
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn spills_no_further_than_the_device_needs() {
+        let (low, ahead) = (100, 200);
+        assert_eq!(to_spill(1_000, 0, 0, low, ahead), ahead, "a dropped hold");
+        assert_eq!(to_spill(1_000, 0, 150, low, ahead), 50, "tops up to ahead");
+        assert_eq!(to_spill(50, 0, 0, low, ahead), 50, "all there is");
+        assert_eq!(to_spill(900, 800, 150, low, ahead), 50, "past the hold");
+        assert_eq!(
+            to_spill(800, 800, 40, low, ahead),
+            60,
+            "up to low, from the hold"
+        );
+        assert_eq!(
+            to_spill(300, 800, 0, low, ahead),
+            0,
+            "still filling the hold"
+        );
     }
 
     #[test]

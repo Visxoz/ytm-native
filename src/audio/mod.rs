@@ -71,8 +71,9 @@ pub fn output_devices() -> Vec<(String, String)> {
         .collect()
 }
 
-/// The whole stream, fetched on this thread, which may block, for keeping.
-pub fn fetch(source: Source, refresh: Refresh) -> Result<Vec<u8>, String> {
+/// The whole stream, fetched on this thread, which may block, for keeping:
+/// its blocks in order, which together are the file.
+pub fn fetch(source: Source, refresh: Refresh) -> Result<Vec<Vec<u8>>, String> {
     Download::fetch_all(source, refresh)
 }
 

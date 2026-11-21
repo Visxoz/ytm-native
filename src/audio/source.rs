@@ -22,9 +22,10 @@ const READ_BUF: usize = 64 * 1024;
 /// Streams longer than this, which only long mixes and uploads reach, keep
 /// only the blocks around the read position; songs are held whole, for replays.
 const WINDOW_FROM: u64 = 64 * CHUNK;
-/// Blocks a window keeps behind the read position, and fetches ahead of it.
-const KEEP_BEHIND: usize = 8;
-const KEEP_AHEAD: usize = 24;
+/// Blocks a window keeps behind the read position, and fetches ahead of it:
+/// minutes of sound either way, far longer than `RIDE_OUT` waits on a drop.
+const KEEP_BEHIND: usize = 4;
+const KEEP_AHEAD: usize = 8;
 const MAX_RETRIES: u32 = 4;
 /// How long a connection that stops answering is retried, so one that
 /// comes back within it plays on.
@@ -205,19 +206,16 @@ impl Download {
     }
 
     /// The whole stream, fetched on this thread as the player would, for keeping.
-    pub fn fetch_all(source: Source, refresh: Refresh) -> Result<Vec<u8>, String> {
+    /// Its blocks, which are written out in turn rather than joined, as
+    /// joining would hold the stream twice.
+    pub fn fetch_all(source: Source, refresh: Refresh) -> Result<Vec<Vec<u8>>, String> {
         let download = Self::sized(source.size);
         download.run(source, refresh);
         let state = download.state.into_inner().unwrap();
         if let Some(e) = state.error {
             return Err(e);
         }
-        let mut data = Vec::with_capacity(state.blocks.iter().map(Vec::len).sum());
-        // Each block freed as it is copied, so the stream is not held twice.
-        for block in state.blocks {
-            data.extend_from_slice(&block);
-        }
-        Ok(data)
+        Ok(state.blocks)
     }
 
     /// Stops the download and fails any blocked read.
@@ -783,26 +781,27 @@ mod tests {
             window: true,
             ..sized(100 * MB)
         };
-        for block in 0..40 {
+        let (at, half) = (30, KEEP_AHEAD / 2);
+        for block in 0..(at + half) as u64 {
             fill(&mut state, block);
         }
-        state.pos = 30 * MB;
+        state.pos = at as u64 * MB;
         state.evict();
         let held: Vec<_> = (0..100).filter(|&b| state.held(b) > 0).collect();
-        assert_eq!(held, (22..40).collect::<Vec<_>>());
+        assert_eq!(held, (at - KEEP_BEHIND..at + half).collect::<Vec<_>>());
         assert_eq!(
             state.next_range(),
-            Some(40 * MB),
+            Some((at + half) as u64 * MB),
             "ahead, not the gap behind"
         );
-        for block in 40..54 {
+        for block in (at + half) as u64..(at + KEEP_AHEAD) as u64 {
             fill(&mut state, block);
         }
         assert_eq!(state.next_range(), None, "far enough ahead");
         state.pos = 5 * MB;
         state.evict();
         assert!(
-            state.blocks.iter().skip(29).all(Vec::is_empty),
+            state.blocks.iter().skip(5 + KEEP_AHEAD).all(Vec::is_empty),
             "dropped ahead too"
         );
         assert_eq!(
