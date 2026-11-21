@@ -194,7 +194,9 @@ Right-click a song to play it next, add it to the queue, start a radio, like it,
 
 ## Your account
 
-Choose **Sign in** in the sidebar (or in **Settings ▸ Account**), then **Sign in with Google**, and sign in on Google's own page. The window closes by itself once you're in. Your playlists and Liked music appear in the sidebar, your albums and artists in Library, Home becomes your own feed, and what you play here counts towards your YouTube Music history and recommendations.
+Choose **Sign in** in the sidebar (or in **Settings ▸ Account**), then **Sign in with Google**, and sign in on Google's own page. The window closes by itself once you're in. Your playlists and Liked music appear in the sidebar, where a right-click pins one to the top, your albums and artists in Library, Home becomes your own feed, and what you play here counts towards your YouTube Music history and recommendations.
+
+Your own playlists can be edited from their page: drag songs into a new order, remove them, or rename, share or delete the playlist from the header's menu (making one public or unlisted needs a YouTube channel on the account). Any other album or playlist can be saved to your library from its header, and artists subscribed to. Every song, album, playlist and artist has **Copy link** in its menu.
 
 The sign-in is stored encrypted for your Windows account only, with DPAPI. Signing in uses Microsoft Edge WebView2, which comes with Windows 11 and most Windows 10 PCs.
 
