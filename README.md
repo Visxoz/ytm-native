@@ -25,7 +25,7 @@
 
 <br><br>
 
-<img src="docs/stats.svg" width="100%" alt="33 MB, one exe. 0.1% CPU while a song plays. 0 MB of GPU memory once minimised. 256 kbps Opus with YouTube Premium.">
+<img src="docs/stats.svg" width="100%" alt="34 MB, one exe. 0.1% CPU while a song plays. 0 MB of GPU memory once minimised. 256 kbps Opus with YouTube Premium.">
 
 </div>
 
@@ -42,7 +42,7 @@
 <td width="33%" valign="top">
 
 ### Weighs nothing
-One 33 MB exe, drawn by the GPU, using 0.1% of the CPU while it plays. Minimised, it hands back its GPU memory and drops to about 41 MB of RAM.
+One 34 MB exe, drawn by the GPU, using 0.1% of the CPU while it plays. Minimised, it hands back its GPU memory and drops to about 34 MB of RAM.
 
 </td>
 <td width="33%" valign="top">
@@ -129,7 +129,7 @@ Lily starts in pure black with its own orchid. Pick another look and accent in *
 
 ## Light enough to forget about
 
-<img src="docs/minimised.svg" width="100%" alt="Window open vs minimised, while a song plays: RAM 108 to 41 MB, committed memory 353 to 48 MB, GPU memory 225 to 0 MB, CPU 0.13 to 0.03 percent">
+<img src="docs/minimised.svg" width="100%" alt="Window open vs minimised, while a song plays: RAM 91 to 34 MB, committed memory 239 to 40 MB, GPU memory 125 to 0 MB, CPU 0.13 to 0.03 percent">
 
 When you minimise it, the app throws away its GPU surface and drawing caches, and builds them again the moment you bring it back. Pause the music and the audio device stops too, so the app sleeps and Windows can as well.
 
@@ -137,14 +137,14 @@ When you minimise it, the app throws away its GPU surface and drawing caches, an
 <summary><b>How these were measured</b></summary>
 <br>
 
-The installed 0.1.14 release on Windows 11 (16 logical processors), signed in with Premium, sampled with Windows' own performance counters after each state had settled.
+The 0.1.19 release on Windows 11 (16 logical processors), signed in with Premium, sampled with Windows' own performance counters after each state had settled. The minimised figures were taken five minutes in, as memory keeps falling for the first few minutes.
 
 | State | RAM (Task Manager) | Committed | GPU memory | CPU | CPU, one core |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| Home open, nothing playing | 95 MB | 274 MB | 161 MB | 0% | 0% |
-| Playing, window open | 108 MB | 353 MB | 225 MB | 0.13% | 2.0% |
-| Playing, minimised | 41 MB | 48 MB | 0 MB | 0.03% | 0.5% |
-| Paused, minimised | 41 MB | 49 MB | 0 MB | 0% | 0.1% |
+| Home open, nothing playing | 75 MB | 222 MB | 125 MB | 0% | 0.05% |
+| Playing, window open | 91 MB | 239 MB | 125 MB | 0.13% | 2.0% |
+| Playing, minimised | 34 MB | 40 MB | 0 MB | 0.03% | 0.5% |
+| Paused, minimised | 33 MB | 39 MB | 0 MB | 0.01% | 0.2% |
 
 RAM is the private working set, the figure Task Manager's Memory column shows. Committed is private bytes. GPU memory is dedicated video memory.
 

@@ -43,7 +43,7 @@
     <rect class="pill" x="550" y="282" width="164" height="40" rx="20"/>
     <text class="pt" x="632" y="308" text-anchor="middle">Synced lyrics</text>
     <rect class="pill" x="726" y="282" width="166" height="40" rx="20"/>
-    <text class="pt" x="809" y="308" text-anchor="middle">41 MB minimised</text>
+    <text class="pt" x="809" y="308" text-anchor="middle">34 MB minimised</text>
   </g>
 
   <!-- The lily from the app's icon. -->

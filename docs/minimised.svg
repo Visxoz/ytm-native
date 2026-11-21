@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="430" viewBox="0 0 1280 430">
-  <title>Window open vs minimised, while a song plays: RAM 108 to 41 MB, committed memory 353 to 48 MB, GPU memory 225 to 0 MB, CPU 0.13 to 0.03 percent.</title>
+  <title>Window open vs minimised, while a song plays: RAM 91 to 34 MB, committed memory 239 to 40 MB, GPU memory 125 to 0 MB, CPU 0.13 to 0.03 percent.</title>
   <style>
     text { font-family: 'Segoe UI Variable Display', 'Segoe UI', system-ui, -apple-system, Inter, 'Helvetica Neue', Arial, sans-serif; }
     .h1 { font-size: 30px; font-weight: 700; fill: #f4f4f5; }
@@ -18,7 +18,7 @@
   <rect x="0.5" y="0.5" width="1279" height="429" rx="27.5" fill="none" stroke="#ffffff" stroke-opacity="0.08"/>
 
   <text class="h1" x="48" y="66">Minimise it, and it lets go</text>
-  <text class="sub" x="48" y="96">The installed 0.1.14 release playing a song, with the window open and then minimised. Lower is better.</text>
+  <text class="sub" x="48" y="96">The 0.1.19 release playing a song, signed in, with the window open and then minimised. Lower is better.</text>
   <g>
     <rect class="open" x="1004" y="46" width="14" height="14" rx="3"/>
     <text class="lab" x="1026" y="58">Window open</text>
@@ -31,33 +31,33 @@
   <g transform="translate(48 0)">
     <text class="name" x="0" y="164">RAM</text>
     <text class="note" x="0" y="186">as Task Manager shows it</text>
-    <text class="lab" x="0" y="222">Window open</text><text class="val" x="272" y="222" text-anchor="end">108 MB</text>
+    <text class="lab" x="0" y="222">Window open</text><text class="val" x="272" y="222" text-anchor="end">91 MB</text>
     <rect class="track" x="0" y="230" width="272" height="14" rx="4"/>
     <rect class="open" x="0" y="230" width="272" height="14" rx="4"/>
-    <text class="lab" x="0" y="276">Minimised</text><text class="val" x="272" y="276" text-anchor="end">41 MB</text>
+    <text class="lab" x="0" y="276">Minimised</text><text class="val" x="272" y="276" text-anchor="end">34 MB</text>
     <rect class="track" x="0" y="284" width="272" height="14" rx="4"/>
-    <rect class="min" x="0" y="284" width="103" height="14" rx="4"/>
-    <text class="pct" x="0" y="362">−62%</text>
+    <rect class="min" x="0" y="284" width="102" height="14" rx="4"/>
+    <text class="pct" x="0" y="362">−63%</text>
   </g>
 
   <!-- Committed memory -->
   <g transform="translate(352 0)">
     <text class="name" x="0" y="164">Committed memory</text>
     <text class="note" x="0" y="186">memory Windows has set aside for it</text>
-    <text class="lab" x="0" y="222">Window open</text><text class="val" x="272" y="222" text-anchor="end">353 MB</text>
+    <text class="lab" x="0" y="222">Window open</text><text class="val" x="272" y="222" text-anchor="end">239 MB</text>
     <rect class="track" x="0" y="230" width="272" height="14" rx="4"/>
     <rect class="open" x="0" y="230" width="272" height="14" rx="4"/>
-    <text class="lab" x="0" y="276">Minimised</text><text class="val" x="272" y="276" text-anchor="end">48 MB</text>
+    <text class="lab" x="0" y="276">Minimised</text><text class="val" x="272" y="276" text-anchor="end">40 MB</text>
     <rect class="track" x="0" y="284" width="272" height="14" rx="4"/>
-    <rect class="min" x="0" y="284" width="37" height="14" rx="4"/>
-    <text class="pct" x="0" y="362">−86%</text>
+    <rect class="min" x="0" y="284" width="46" height="14" rx="4"/>
+    <text class="pct" x="0" y="362">−83%</text>
   </g>
 
   <!-- GPU memory -->
   <g transform="translate(656 0)">
     <text class="name" x="0" y="164">GPU memory</text>
     <text class="note" x="0" y="186">dedicated video memory</text>
-    <text class="lab" x="0" y="222">Window open</text><text class="val" x="272" y="222" text-anchor="end">225 MB</text>
+    <text class="lab" x="0" y="222">Window open</text><text class="val" x="272" y="222" text-anchor="end">125 MB</text>
     <rect class="track" x="0" y="230" width="272" height="14" rx="4"/>
     <rect class="open" x="0" y="230" width="272" height="14" rx="4"/>
     <text class="lab" x="0" y="276">Minimised</text><text class="val" x="272" y="276" text-anchor="end">0 MB</text>
@@ -74,8 +74,8 @@
     <rect class="open" x="0" y="230" width="272" height="14" rx="4"/>
     <text class="lab" x="0" y="276">Minimised</text><text class="val" x="272" y="276" text-anchor="end">0.03%</text>
     <rect class="track" x="0" y="284" width="272" height="14" rx="4"/>
-    <rect class="min" x="0" y="284" width="63" height="14" rx="4"/>
-    <text class="pct" x="0" y="362">−77%</text>
+    <rect class="min" x="0" y="284" width="71" height="14" rx="4"/>
+    <text class="pct" x="0" y="362">−74%</text>
   </g>
 
   <text class="note" x="48" y="402">Paused and minimised, it uses next to no CPU: the audio device stops and the engine sleeps.</text>
