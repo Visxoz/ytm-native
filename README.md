@@ -122,10 +122,10 @@ Lily starts in pure black with its own orchid. Pick another look and accent in *
 | --- | --- |
 | **Premium streams** | Signed in with Premium on High, songs play in YouTube's 256 kbps formats, and the player bar says so. Music videos swap to their song versions to get them. |
 | **Gapless** | The next song is lined up 15 seconds early and follows without a gap, and the screen changes the moment the sound does. |
-| **Crossfade** | Fades each song into the next over 6 seconds, cutting the silence at the joins. An album played in order still runs straight on, and skipping never fades. |
-| **Equaliser** | Six bands from 60 Hz to 15 kHz, ±12 dB each, with presets: Flat, Bass boost, Treble boost, Vocal, Rock, Electronic and Acoustic. Boosting turns the rest down to leave headroom. |
+| **Crossfade** | Fades each song into the next over 1 to 12 seconds (6 by default), cutting the silence at the joins. An album played in order still runs straight on, and skipping never fades. |
+| **Equaliser** | Ten bands from 31 Hz to 16 kHz, ±12 dB each, with presets: Flat, Bass boost, Treble boost, Vocal, Rock, Electronic and Acoustic. Boosting turns the rest down to leave headroom. |
 | **Normalise volume** | Plays every track at a similar loudness, from YouTube's own measurement: loud ones turned down and quiet ones up, at Normal or a Quiet level 6 dB lower, with a limiter so nothing clips. |
-| **No clicks, no drop-outs** | Pausing ramps the sound down, and seeks and skips fade in. Unplug your headphones and the music carries on through the next device. |
+| **No clicks, no drop-outs** | Pausing ramps the sound down, and seeks and skips fade in. Unplug your headphones and the music pauses, or with **Pause when unplugged** off, carries on through the next device. |
 
 ## Light enough to forget about
 
@@ -196,7 +196,7 @@ Right-click a song to play it next, add it to the queue, start a radio, like it,
 
 Choose **Sign in** in the sidebar (or in **Settings ▸ Account**), then **Sign in with Google**, and sign in on Google's own page. The window closes by itself once you're in. Your playlists and Liked music appear in the sidebar, where a right-click pins one to the top, your albums and artists in Library, Home becomes your own feed, and what you play here counts towards your YouTube Music history and recommendations.
 
-Your own playlists can be edited from their page: drag songs into a new order, remove them, or rename, share or delete the playlist from the header's menu (making one public or unlisted needs a YouTube channel on the account). Any other album or playlist can be saved to your library from its header, and artists subscribed to. Every song, album, playlist and artist has **Copy link** in its menu.
+Your own playlists can be edited from their page: drag songs into a new order, remove them, or rename, share or delete the playlist from the header's menu (making one public or unlisted needs a YouTube channel on the account). Any other album or playlist can be saved to your library from its header, and artists subscribed to. **Copy link** is in the menus of songs, the queue, cards, page headers, the player bar and the sidebar's playlists.
 
 The sign-in is stored encrypted for your Windows account only, with DPAPI. Signing in uses Microsoft Edge WebView2, which comes with Windows 11 and most Windows 10 PCs.
 
