@@ -14,6 +14,16 @@ use crate::{
     images,
 };
 
+/// Carries `live`'s saved and subscribed flags onto `page`, fetched from an
+/// older copy and so maybe stale.
+pub(super) fn keep_library_state(page: &mut Page, live: Option<&Page>) {
+    if let (Some(header), Some(live)) = (page.header.as_mut(), live.and_then(|p| p.header.as_ref()))
+    {
+        header.saved = live.saved;
+        header.subscribed = live.subscribed;
+    }
+}
+
 /// A page of `tracks` built on this PC, or `None` without any.
 pub(super) fn track_list_page(label: &str, title: &str, tracks: Vec<Track>) -> Option<Page> {
     (!tracks.is_empty()).then(|| Page {
@@ -155,6 +165,10 @@ impl App {
                 can_download: has_tracks && matches!(route, Route::Album(_) | Route::Playlist(_)),
                 can_share: route.link().is_some(),
                 downloaded: has_tracks && tracks.iter().all(|t| downloads.contains(&t.id)),
+                can_save: header.saved.is_some() && header.save_id.is_some() && !header.editable,
+                saved: header.saved == Some(true),
+                can_subscribe: header.subscribed.is_some() && header.channel_id.is_some(),
+                subscribed: header.subscribed == Some(true),
                 ..Default::default()
             });
         }
@@ -204,7 +218,7 @@ impl App {
         }
     }
 
-    fn find_row(&self, kind: RowKind) -> Option<usize> {
+    pub(super) fn find_row(&self, kind: RowKind) -> Option<usize> {
         (0..self.rows.row_count()).find(|&i| self.rows.row_data(i).is_some_and(|r| r.kind == kind))
     }
 
@@ -267,12 +281,21 @@ impl App {
         let api = self.api.clone();
         self.spawn(
             async move { api.complete(page).await },
-            move |app, (page, whole)| {
+            move |app, (mut page, whole)| {
                 // Signed in or out meanwhile: the page belongs to the last account.
                 if app.state.borrow().account != account {
                     return;
                 }
                 let current = app.state.borrow().page_generation == generation;
+                {
+                    let state = app.state.borrow();
+                    let live = if current {
+                        Some(&state.page)
+                    } else {
+                        state.page_cache.get(&route).map(|(cached, _)| cached)
+                    };
+                    keep_library_state(&mut page, live);
+                }
                 if route == Route::Home {
                     if current {
                         app.complete_home(&page, shown, whole);

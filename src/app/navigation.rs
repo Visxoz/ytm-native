@@ -168,6 +168,7 @@ impl App {
             // As with each fresh feed, so a changed picture shows.
             self.load_account_photo();
         }
+        let revision = self.state.borrow().library_revision;
         let api = self.api.clone();
         let asked = route.clone();
         self.spawn(
@@ -183,7 +184,7 @@ impl App {
                 Ok(page)
             },
             move |app, result: api::Result<Page>| {
-                let page = match result {
+                let mut page = match result {
                     Ok(page) => page,
                     Err(e) => {
                         log::warn!("could not refresh the page: {e}");
@@ -196,9 +197,13 @@ impl App {
                     // afresh. Still ours, it is cached even once the user has
                     // moved on. Replaced while still on screen, it was by an
                     // earlier refresh from a visit left and come back to.
-                    let Some((_, at)) = state.page_cache.get(&route) else {
+                    let Some((cached, at)) = state.page_cache.get(&route) else {
                         return;
                     };
+                    // Saved or subscribed to since it was asked, it may predate that.
+                    if state.library_revision != revision {
+                        super::page::keep_library_state(&mut page, Some(cached));
+                    }
                     let ours = *at == cached_at;
                     let current = state.page_generation == generation;
                     if !ours && !current {

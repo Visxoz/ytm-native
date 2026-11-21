@@ -162,10 +162,18 @@ impl App {
         let api = self.api.clone();
         // Signing in or out meanwhile makes the playlists another account's.
         let account = self.state.borrow().account;
+        let generation = {
+            let mut state = self.state.borrow_mut();
+            state.library_generation += 1;
+            state.library_generation
+        };
         self.spawn(
             async move { api.library_playlists().await },
             move |app, result| match result {
-                Ok(cards) if app.state.borrow().account == account => {
+                Ok(cards)
+                    if app.state.borrow().account == account
+                        && app.state.borrow().library_generation == generation =>
+                {
                     app.show_library(cards.clone());
                     app.spawn(async move { settings::save_library(&cards) }, |_, ()| {});
                 }

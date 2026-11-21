@@ -1,11 +1,11 @@
 use std::rc::Rc;
 
-use slint::{ComponentHandle, ModelRc, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, VecModel};
 
 use super::App;
 use crate::{
-    Api as ApiGlobal, PlaylistChoice,
-    api::{Rating, Route},
+    Api as ApiGlobal, PlaylistChoice, RowKind,
+    api::{Header, Rating, Route},
 };
 
 impl App {
@@ -97,6 +97,114 @@ impl App {
                 }
             },
         );
+    }
+
+    /// Saves the page's album or playlist to the library, or subscribes to
+    /// its artist, or undoes that: shown at once, and put back should YouTube
+    /// refuse.
+    pub(super) fn toggle_in_library(self: &Rc<Self>, subscribe: bool) {
+        let ui = self.ui();
+        // The last page's header stays on screen while the next loads or fails.
+        if ui.get_page_loading() || !ui.get_page_error().is_empty() {
+            return;
+        }
+        let (route, id, on, done, what, account) = {
+            let mut state = self.state.borrow_mut();
+            let Some(header) = &state.page.header else {
+                return;
+            };
+            let (now, id) = if subscribe {
+                (header.subscribed, &header.channel_id)
+            } else {
+                (header.saved, &header.save_id)
+            };
+            let (Some(now), Some(id)) = (now, id.clone()) else {
+                return;
+            };
+            let (done, what) = match (subscribe, !now) {
+                (false, true) => (
+                    "Saved to your library".to_owned(),
+                    "save it to your library",
+                ),
+                (false, false) => (
+                    "Removed from your library".to_owned(),
+                    "remove it from your library",
+                ),
+                (true, true) => (format!("Subscribed to {}", header.title), "subscribe"),
+                (true, false) => (format!("Unsubscribed from {}", header.title), "unsubscribe"),
+            };
+            if !state.library_edits.insert(id.clone()) {
+                return;
+            }
+            (state.route.clone(), id, !now, done, what, state.account)
+        };
+        self.show_in_library(&route, subscribe, &id, on);
+        let api = self.api.clone();
+        let target = id.clone();
+        self.spawn(
+            async move { api.set_in_library(subscribe, &target, on).await },
+            move |app, result| {
+                app.state.borrow_mut().library_edits.remove(&id);
+                // Signed in or out meanwhile: the pages shown are another account's.
+                if app.state.borrow().account != account {
+                    return;
+                }
+                app.show_in_library(
+                    &route,
+                    subscribe,
+                    &id,
+                    if result.is_ok() { on } else { !on },
+                );
+                match result {
+                    Ok(()) => {
+                        // The Library page lists what was saved, so it loads afresh.
+                        app.state.borrow_mut().page_cache.remove(&Route::Library);
+                        if matches!(route, Route::Playlist(_)) {
+                            app.load_library();
+                        }
+                        app.toast(done);
+                    }
+                    Err(e) => app.toast(format!("Couldn't {what}: {e}")),
+                }
+            },
+        );
+    }
+
+    /// Shows whether the page of `route` that saves or subscribes by `id` is
+    /// in the library, on screen and in its cached copy.
+    fn show_in_library(&self, route: &Route, subscribe: bool, id: &str, on: bool) {
+        let set = |header: Option<&mut Header>| {
+            let Some(h) = header else { return false };
+            let (flag, target) = if subscribe {
+                (&mut h.subscribed, &h.channel_id)
+            } else {
+                (&mut h.saved, &h.save_id)
+            };
+            let ours = flag.is_some() && target.as_deref() == Some(id);
+            if ours {
+                *flag = Some(on);
+            }
+            ours
+        };
+        let mut state = self.state.borrow_mut();
+        state.library_revision += 1;
+        if let Some((cached, _)) = state.page_cache.get_mut(route) {
+            set(cached.header.as_mut());
+        }
+        // `set` matches the ID too, as the last page stays while one loads.
+        let shown = state.route == *route && set(state.page.header.as_mut());
+        drop(state);
+        if shown
+            && let Some(i) = self.find_row(RowKind::Header)
+            && let Some(mut row) = self.rows.row_data(i)
+        {
+            if subscribe {
+                row.subscribed = on;
+            } else {
+                row.saved = on;
+            }
+            self.rows.set_row_data(i, row);
+        }
     }
 
     pub(super) fn open_playlist_picker(self: &Rc<Self>, id: String) {

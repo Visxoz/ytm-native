@@ -149,13 +149,10 @@ impl Api {
     }
 }
 
-#[expect(
-    dead_code,
-    reason = "the playlist and library UI built on them is to come"
-)]
 impl Api {
     /// Removes `tracks`, as its page has them, from one of the account's
     /// playlists.
+    #[expect(dead_code, reason = "the playlist editing UI is to come")]
     pub async fn remove_from_playlist(&self, playlist_id: &str, tracks: &[Track]) -> Result<()> {
         let actions = tracks
             .iter()
@@ -173,6 +170,7 @@ impl Api {
 
     /// Moves the entry `set_video_id` of one of the account's playlists to
     /// before the entry `before`, or to the end.
+    #[expect(dead_code, reason = "the playlist editing UI is to come")]
     pub async fn move_in_playlist(
         &self,
         playlist_id: &str,
@@ -190,6 +188,7 @@ impl Api {
         self.edit_playlist(playlist_id, &[action]).await
     }
 
+    #[expect(dead_code, reason = "the playlist editing UI is to come")]
     pub async fn rename_playlist(&self, playlist_id: &str, title: &str) -> Result<()> {
         let title = title.trim();
         if title.is_empty() {
@@ -199,6 +198,7 @@ impl Api {
         self.edit_playlist(playlist_id, &[action]).await
     }
 
+    #[expect(dead_code, reason = "the playlist editing UI is to come")]
     pub async fn set_playlist_privacy(
         &self,
         playlist_id: &str,
@@ -213,6 +213,7 @@ impl Api {
         self.edit_playlist(playlist_id, &[action]).await
     }
 
+    #[expect(dead_code, reason = "the playlist editing UI is to come")]
     pub async fn delete_playlist(&self, playlist_id: &str) -> Result<()> {
         let body = json!({ "playlistId": youtube_id(playlist_id)? });
         performed(&self.edit("playlist/delete", &body).await?)
@@ -241,6 +242,14 @@ impl Api {
         let body = json!({ "channelIds": [youtube_id(channel_id)?] });
         performed(&self.edit(endpoint, &body).await?)
     }
+
+    pub async fn set_in_library(&self, subscribe: bool, id: &str, on: bool) -> Result<()> {
+        if subscribe {
+            self.subscribe(id, on).await
+        } else {
+            self.save_to_library(id, on).await
+        }
+    }
 }
 
 fn succeeded(reply: &str) -> bool {
@@ -249,13 +258,6 @@ fn succeeded(reply: &str) -> bool {
 
 /// For answers without a status: a change YouTube held back comes with a
 /// dialog instead (ytmusicapi's validate_write_response).
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "the playlist and library UI built on them is to come"
-    )
-)]
 fn performed(reply: &str) -> Result<()> {
     let v: Value = serde_json::from_str(reply).map_err(err)?;
     match v.pointer("/actions/0/showEngagementPanelEndpoint") {
@@ -387,5 +389,152 @@ mod tests {
             ])
         );
         assert_eq!(parse_playlists("{}"), None);
+    }
+
+    // Taken from rustypipe's own tests: public, and long-lived.
+    const ALBUMS: &[&str] = &[
+        "MPREb_nlBWQROfvjo",
+        "MPREb_8QkDeEIawvX",
+        "MPREb_bHfHGoy7vuv",
+        "MPREb_PiyfuVl6aYd",
+        "MPREb_u1I69lSAe5v",
+    ];
+    const PLAYLISTS: &[&str] = &[
+        "RDCLAK5uy_kFQXdnqMaQCVx2wpUM4ZfbsGCDibZtkJk",
+        "RDCLAK5uy_kb7EBi6y3GrtJri4_ZH56Ms786DFEimbM",
+        "PL5dDx681T4bR7ZF1IuWzOv1omlRbE7PiJ",
+        "PLT2w2oBf1TZKyvY_M6JsASs73m-wjLzH5",
+    ];
+    const ARTISTS: &[&str] = &[
+        "UClmXPfaYhXOYsNn_QUyheWQ",
+        "UCfwCE5VhPMGxNPFxtVv7lRw",
+        "UC0aXrjVxG5pZr99v77wZdPQ",
+        "UCOR4_bSVIXPsGa4BbCSt60Q",
+        "UC0C-w0YjGpqDXGB8IHb662A",
+    ];
+
+    /// Whether `route`'s page reads as saved or subscribed, and the ID that
+    /// changing it takes.
+    async fn library_state(
+        api: &Api,
+        route: &crate::api::Route,
+        subscribe: bool,
+    ) -> Result<(Option<bool>, Option<String>)> {
+        let header = api.page(route, true).await?.header.ok_or("no header")?;
+        Ok(if subscribe {
+            (header.subscribed, header.channel_id)
+        } else {
+            (header.saved, header.save_id)
+        })
+    }
+
+    /// The state read once it is `want`, asking a few times, as a change can
+    /// take a moment to show.
+    async fn read_until(
+        api: Api,
+        route: crate::api::Route,
+        subscribe: bool,
+        want: bool,
+    ) -> Result<Option<bool>> {
+        let mut last = Err("not read".to_owned());
+        for attempt in 0..5 {
+            if attempt > 0 {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+            }
+            last = library_state(&api, &route, subscribe).await.map(|(s, _)| s);
+            if last == Ok(Some(want)) {
+                break;
+            }
+        }
+        last
+    }
+
+    /// On a copy of the app's sign-in, saves an album and a playlist and
+    /// subscribes to an artist, each found neither saved nor subscribed to,
+    /// checks each reads back, and undoes it whatever happened.
+    #[test]
+    #[ignore = "changes the signed-in account, then puts it back"]
+    fn live_saves_and_subscribes() {
+        use crate::api::Route;
+        let source = crate::settings::data_dir().join("rustypipe_cache.bin");
+        let dir = std::env::temp_dir().join(format!("lily-live-library-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        // Removed however the test ends, as it holds the cookie.
+        struct Remove(std::path::PathBuf);
+        impl Drop for Remove {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let _remove = Remove(dir.clone());
+        if std::fs::copy(&source, dir.join("rustypipe_cache.bin")).is_err() {
+            eprintln!("skipped: no sign-in at {}", source.display());
+            return;
+        }
+        let rt = tokio::runtime::Runtime::new().expect("runtime starts");
+        let failures = rt.block_on(async {
+            let api = match Api::in_dir(dir.clone(), None) {
+                Ok(api) if api.has_cookie() => api,
+                Ok(_) => return vec!["the copied sign-in holds no cookie".to_owned()],
+                Err(e) => return vec![format!("client: {e}")],
+            };
+            if api.cookie_valid().await == Some(false) {
+                return vec!["the sign-in looks stale: YouTube refused the cookie".to_owned()];
+            }
+            let kinds = [
+                ("album", ALBUMS, false, Route::Album as fn(String) -> Route),
+                ("playlist", PLAYLISTS, false, Route::Playlist),
+                ("artist", ARTISTS, true, Route::Artist),
+            ];
+            let mut failures = Vec::new();
+            for (kind, candidates, subscribe, make) in kinds {
+                let mut found = None;
+                for id in candidates {
+                    let route = make((*id).to_owned());
+                    match library_state(&api, &route, subscribe).await {
+                        Ok((Some(false), Some(target))) => {
+                            found = Some((*id, route, target));
+                            break;
+                        }
+                        other => eprintln!("{kind} {id}: passed over, reads {other:?}"),
+                    }
+                }
+                let Some((id, route, target)) = found else {
+                    failures.push(format!("{kind}: no candidate read as not in the library"));
+                    continue;
+                };
+                // Nothing between here and the undo may return or panic.
+                let done = api.set_in_library(subscribe, &target, true).await;
+                let after = tokio::spawn(read_until(api.clone(), route.clone(), subscribe, true));
+                let after = after.await.map_err(|e| e.to_string()).and_then(|r| r);
+                let mut undone = Err(String::new());
+                for _ in 0..3 {
+                    undone = api.set_in_library(subscribe, &target, false).await;
+                    if undone.is_ok() {
+                        break;
+                    }
+                }
+                let restored = tokio::spawn(read_until(api.clone(), route, subscribe, false));
+                let restored = restored.await.map_err(|e| e.to_string()).and_then(|r| r);
+                eprintln!(
+                    "{kind} {id} (by {target}): set {done:?}, then read {after:?}; \
+                     undone {undone:?}, then read {restored:?}"
+                );
+                if done.is_err() || after != Ok(Some(true)) {
+                    failures.push(format!(
+                        "{kind} {id}: didn't read as set: {done:?}, {after:?}"
+                    ));
+                }
+                if undone.is_err() || restored != Ok(Some(false)) {
+                    let message = format!(
+                        "{kind} {id} MAY BE LEFT CHANGED, undo by hand: {undone:?}, {restored:?}"
+                    );
+                    eprintln!("{message}");
+                    failures.push(message);
+                }
+            }
+            failures
+        });
+        assert!(failures.is_empty(), "\n{}", failures.join("\n"));
     }
 }

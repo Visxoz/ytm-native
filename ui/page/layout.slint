@@ -41,7 +41,7 @@ export global Layout {
 
     // Whether a page header has its row of buttons beneath it.
     public pure function header-actions(row: RowItem) -> bool {
-        return row.can-play || row.can-radio || row.can-share;
+        return row.can-play || row.can-radio || row.can-share || row.can-save || row.can-subscribe;
     }
 }
 

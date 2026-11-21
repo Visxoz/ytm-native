@@ -143,6 +143,9 @@ impl App {
             let link = self.state.borrow().route.link();
             return self.copy_link(link);
         }
+        if action == "save" || action == "subscribe" {
+            return self.toggle_in_library(action == "subscribe");
+        }
         let (tracks, shuffle_playlist, unloaded, radio_id) = {
             let state = self.state.borrow();
             let Some(header) = &state.page.header else {
@@ -348,6 +351,7 @@ impl App {
                 let keep = whole && app.state.borrow().account == account;
                 if keep && let Some((cached, _)) = app.state.borrow_mut().page_cache.get_mut(&route)
                 {
+                    super::page::keep_library_state(&mut page, Some(cached));
                     *cached = page.clone();
                 }
                 if app.state.borrow().queue_generation != queue_generation {

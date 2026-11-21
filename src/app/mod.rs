@@ -218,6 +218,14 @@ struct State {
     downloading: bool,
     /// The sidebar's playlists in YouTube's order; `list_library` puts the pinned first.
     library: Vec<Card>,
+    /// IDs whose save or subscribe is still being answered, so a second click
+    /// is ignored.
+    library_edits: HashSet<String>,
+    /// Bumped by each save or subscribe shown, so a page fetched before one
+    /// keeps what it set.
+    library_revision: u64,
+    /// Bumped by each `load_library`, so only the latest answer is shown.
+    library_generation: u64,
 }
 
 impl State {
@@ -378,6 +386,9 @@ impl App {
                 download_queue: VecDeque::new(),
                 downloading: false,
                 library: Vec::new(),
+                library_edits: HashSet::new(),
+                library_revision: 0,
+                library_generation: 0,
             }),
             rows: Rc::new(VecModel::default()),
             library: Rc::new(VecModel::default()),

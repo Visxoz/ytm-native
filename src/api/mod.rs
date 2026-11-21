@@ -81,7 +81,11 @@ pub struct Api {
 
 impl Api {
     pub fn new() -> Result<Self> {
-        let dir = crate::settings::data_dir();
+        Self::in_dir(crate::settings::data_dir(), crate::settings::load_visitor())
+    }
+
+    /// A client keeping its sign-in in `dir`.
+    fn in_dir(dir: std::path::PathBuf, visitor: Option<String>) -> Result<Self> {
         let rp = RustyPipe::builder()
             .storage(Box::new(crate::secret::EncryptedStorage::new(&dir)))
             .storage_dir(dir)
@@ -98,7 +102,7 @@ impl Api {
         Ok(Self {
             rp,
             genres: Default::default(),
-            saved_visitor: Arc::new(std::sync::Mutex::new(crate::settings::load_visitor())),
+            saved_visitor: Arc::new(std::sync::Mutex::new(visitor)),
         })
     }
 

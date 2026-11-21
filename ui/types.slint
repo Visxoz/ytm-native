@@ -46,6 +46,12 @@ export struct RowItem {
     can-share: bool,
     /// Every one of the page's tracks is downloaded.
     downloaded: bool,
+    /// The album or playlist can be saved to the library, and whether it is.
+    can-save: bool,
+    saved: bool,
+    /// The artist can be subscribed to, and whether they are.
+    can-subscribe: bool,
+    subscribed: bool,
     // track rows and their column header
     track: TrackItem,
     numbered: bool,

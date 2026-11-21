@@ -1,7 +1,7 @@
 import { Icons, Theme } from "../theme.slint";
 import { Api, CardItem, RowItem } from "../types.slint";
 import { Art } from "../widgets/art.slint";
-import { IconButton, PlayButton } from "../widgets/buttons.slint";
+import { IconButton, PillButton, PlayButton } from "../widgets/buttons.slint";
 import { MenuEntry, PopupMenu } from "../widgets/menu.slint";
 import { Layout } from "layout.slint";
 
@@ -201,6 +201,21 @@ export component PageHeader {
             size: 48px;
             icon-size: 28px;
             clicked => { Api.header-action("download"); }
+        }
+        if root.data.can-save: IconButton {
+            icon: root.data.saved ? Icons.in-library : Icons.save-to-playlist;
+            active: root.data.saved;
+            size: 48px;
+            icon-size: 28px;
+            accessible-role: button;
+            accessible-label: root.data.saved ? "Remove from library" : "Save to library";
+            accessible-action-default => { Api.header-action("save"); }
+            clicked => { Api.header-action("save"); }
+        }
+        if root.data.can-subscribe: PillButton {
+            text: root.data.subscribed ? "Subscribed" : "Subscribe";
+            primary: !root.data.subscribed;
+            clicked => { Api.header-action("subscribe"); }
         }
         if root.data.can-share: IconButton {
             icon: Icons.more;
