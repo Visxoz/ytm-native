@@ -281,7 +281,8 @@ export component SettingsDialog inherits Dialog {
                 text: "Change";
                 choices: root.output-devices;
                 current: root.output-device;
-                menu-width: 320px;
+                // Wide enough for a device's name with its driver's after it.
+                menu-width: 440px;
                 // Listed again, as a device may have been plugged in since.
                 opening => { root.list-output-devices(); }
                 picked(i) => { root.set-output-device(i); }
@@ -290,7 +291,8 @@ export component SettingsDialog inherits Dialog {
 
         SettingRow {
             label: "Normalise volume";
-            detail: root.normalise == 0 ? "Plays every track as it was mastered."
+            // All three two lines long, so the rows below don't move on a pick.
+            detail: root.normalise == 0 ? "Plays every track as it was mastered, leaving loud ones loud and quiet ones quiet."
                 : root.normalise == 1 ? "Plays every track at a similar loudness, a little quieter than Normal."
                 : "Plays every track at a similar loudness, turning quiet ones up and loud ones down.";
             PillGroup {
@@ -486,6 +488,7 @@ export component SettingsDialog inherits Dialog {
         SettingRow {
             label: "Proxy";
             detail: root.proxy-error != "" ? root.proxy-error : root.proxy-detail;
+            detail-room: root.proxy-detail;
             AddressField {
                 y: (parent.height - self.height) / 2;
                 placeholder: root.proxy-address != "" ? root.proxy-address : "http://host:port";

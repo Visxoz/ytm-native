@@ -80,6 +80,9 @@ export component Dialog inherits Rectangle {
 export component SettingRow inherits HorizontalLayout {
     in property <string> label;
     in property <string> detail;
+    /// A detail whose height this one keeps, so a shorter one put in its
+    /// place, as an error, doesn't move the rows below.
+    in property <string> detail-room;
     spacing: 24px;
     VerticalLayout {
         alignment: center;
@@ -92,11 +95,25 @@ export component SettingRow inherits HorizontalLayout {
             color: Theme.text;
         }
 
-        if root.detail != "": Text {
-            text: root.detail;
-            font-size: 13px;
-            color: Theme.text-secondary;
-            wrap: word-wrap;
+        // One cell for both, so it is as tall as the taller.
+        if root.detail != "": GridLayout {
+            Text {
+                row: 0;
+                col: 0;
+                visible: false;
+                text: root.detail-room;
+                font-size: 13px;
+                wrap: word-wrap;
+            }
+
+            Text {
+                row: 0;
+                col: 0;
+                text: root.detail;
+                font-size: 13px;
+                color: Theme.text-secondary;
+                wrap: word-wrap;
+            }
         }
     }
 

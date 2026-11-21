@@ -28,6 +28,8 @@ export component EqualiserDialog inherits Dialog {
         Rectangle {
             width: preset-button.preferred-width;
             preset-menu := PopupMenu {
+                // Under the button's right edge, so it stays inside the dialog.
+                x: preset-button.width - self.width;
                 y: preset-button.y + preset-button.height + 4px;
                 for name[i] in root.eq-presets: MenuEntry {
                     text: name;

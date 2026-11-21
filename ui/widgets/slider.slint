@@ -19,6 +19,9 @@ export component Slider {
         border-radius: 2px;
         background: Theme.ink.with-alpha(0.19);
         clip: true;
+        // So a slider that does nothing doesn't look as if it would.
+        opacity: root.enabled ? 1 : 0.4;
+        animate opacity { duration: Theme.fast; }
         Rectangle {
             x: 0;
             width: parent.width * clamp(root.buffered, 0, 1);
