@@ -210,8 +210,9 @@ fn main() {
         unsafe { std::env::set_var("WGPU_DX12_PRESENTATION_SYSTEM", "Hwnd") };
     }
     if cfg!(debug_assertions) && std::env::var_os("WGPU_VALIDATION").is_none() {
-        // wgpu turns on D3D12's debug layer in debug builds, which shadows its
-        // million-entry descriptor heap in about 150 MB of RAM.
+        // wgpu turns on D3D12's debug layer in debug builds, which costs RAM
+        // and time that release builds don't spend, so debug ones would
+        // mislead about both.
         // SAFETY: as above.
         unsafe { std::env::set_var("WGPU_VALIDATION", "0") };
     }
