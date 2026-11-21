@@ -59,10 +59,11 @@ async fn text(url: &str) -> Result<String, String> {
         .send()
         .await
         .and_then(|r| r.error_for_status())
-        .map_err(|e| format!("could not fetch {url}: {e}"))?
+        // Without the URL, as premium.log keeps none.
+        .map_err(|e| format!("could not fetch the player: {}", e.without_url()))?
         .text()
         .await
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.without_url().to_string())
 }
 
 /// YouTube's current player version.
