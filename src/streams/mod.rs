@@ -631,19 +631,37 @@ mod tests {
                 Ok(visitor) => visitor,
                 Err(e) => return vec![format!("visitor data: {e}")],
             };
+            let mut whole = 0;
             for client in CLIENTS {
                 match resolve_with(client, VIDEO, &visitor, None, None).await {
                     Ok(stream) => match probe(&stream).await {
-                        Ok(()) => eprintln!(
-                            "{}: {} {} kbps, serves bytes",
-                            client.name,
-                            stream.codec,
-                            stream.bitrate_kbps.round()
-                        ),
+                        Ok(()) => {
+                            eprint!(
+                                "{}: {} {} kbps, serves bytes",
+                                client.name,
+                                stream.codec,
+                                stream.bitrate_kbps.round()
+                            );
+                            // Where YouTube wants a PO token, a client's URLs serve
+                            // about a megabyte, then 403; another client carries on.
+                            match probe_past_head(&stream).await {
+                                Ok(()) => {
+                                    whole += 1;
+                                    eprintln!(" past the first megabyte too");
+                                }
+                                Err(e) => eprintln!(", but {e} (cut off here)"),
+                            }
+                        }
                         Err(e) => failures.push(format!("{}: resolved but {e}", client.name)),
                     },
                     Err(e) => failures.push(format!("{}: {e}", client.name)),
                 }
+            }
+            // Only said, not failed: where YouTube wants PO tokens, as it may of
+            // a datacentre's addresses, every client is cut off whatever works
+            // for listeners elsewhere.
+            if whole == 0 {
+                eprintln!("every client is cut off past the first megabyte here");
             }
             match premium::load_current().await {
                 Ok(player) => eprintln!("player {}: trims and solves", player.id),
@@ -664,5 +682,29 @@ mod tests {
         (!bytes.is_empty())
             .then_some(())
             .ok_or_else(|| "the CDN sent no bytes".to_owned())
+    }
+
+    /// Fetches a range past the first megabyte, which a cut-off URL refuses.
+    async fn probe_past_head(stream: &ResolvedStream) -> Result<(), String> {
+        let (url, headers) = (stream.url.clone(), stream.headers.clone());
+        tokio::task::spawn_blocking(move || {
+            let mut request = crate::http::blocking_client()
+                .get(&url)
+                .header(reqwest::header::RANGE, "bytes=1048576-1114111");
+            for (name, value) in &headers {
+                request = request.header(name, value);
+            }
+            let response = request
+                .send()
+                .and_then(|r| r.error_for_status())
+                .map_err(|e| format!("refused past the first megabyte ({})", e.without_url()))?;
+            let partial = response.status() == reqwest::StatusCode::PARTIAL_CONTENT;
+            let bytes = response.bytes().map_err(|e| e.without_url().to_string())?;
+            (partial && !bytes.is_empty())
+                .then_some(())
+                .ok_or_else(|| "sent nothing past the first megabyte".to_owned())
+        })
+        .await
+        .map_err(|e| e.to_string())?
     }
 }
